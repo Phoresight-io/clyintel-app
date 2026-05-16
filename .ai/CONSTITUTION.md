@@ -14,10 +14,11 @@ _Generated: 2026-05-16_
 ## Code Rules
 
 1. **No IIFE structures inside JSX.** Move all calculations and logic to the component top level before the return statement.
-2. **`typecast: true` required for all Airtable Single Select API calls.**
-3. **Rollup fields cannot be created via the Airtable API.** Use Omni or Airtable UI.
-4. **Never commit `.env` to version control.** Secrets live in `.env` only.
-5. **Stripe write operations use Claude Code on local machine.** Escalate if MCP fails.
+2. **Never commit `.env` to version control.** Secrets live in `.env` only.
+3. **Stripe write operations use Claude Code on local machine.** Escalate if MCP fails.
+4. **Supabase migrations must use the `apply_migration` tool.** Never run raw DDL directly in production.
+5. **Edge Functions are written in TypeScript and deployed via Supabase MCP.**
+6. **All AI calls go through Anthropic API.** Default model: `claude-sonnet-4-6`. Escalate to Opus for complex reasoning.
 
 ---
 

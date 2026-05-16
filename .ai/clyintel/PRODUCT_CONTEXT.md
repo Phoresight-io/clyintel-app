@@ -33,15 +33,15 @@ AI-powered accounts receivable and collections intelligence platform for solopre
 2. Free users are capped at 1 recovery per month.
 3. AI SMS Agent is Pro/Enterprise only.
 4. AI Voice Agent is Pro/Enterprise only (stretch goal — not Phase 1).
-5. Usage counters reset on the 1st of each month via Airtable automation.
+5. Usage counters reset on the 1st of each month via Supabase scheduled function.
 6. Invoice statuses shown to subscribers: Current · Due Soon · Past Due · Recovered
-7. Promise to Pay and Written Off are Airtable-only — never shown in subscriber UI.
+7. Promise to Pay and Written Off are internal-only — never shown in subscriber UI.
 8. Exchange Drawer channels at launch: Email + SMS. Voice = stretch goal.
 9. Add Client sources at launch: Manual Entry + QuickBooks Online. All others = Coming Soon.
 10. Score delta and Next Action column are stretch goals — not Phase 1.
-11. Subscription Plan on Subscribers must be a linkedRecord → Plans. Never revert to singleSelect.
-12. typecast: true required for all Single Select Airtable API writes.
-13. Rollup fields cannot be created via Airtable API — use Omni or Airtable UI.
+11. `subscriber.plan_id` is a foreign key → `plans.id`. Enforced at DB level via Supabase schema.
+12. Postgres enum types enforce valid values at schema level — no typecast workarounds needed.
+13. Aggregates handled via SQL queries and materialized views in Supabase.
 
 ---
 
@@ -51,7 +51,9 @@ AI-powered accounts receivable and collections intelligence platform for solopre
 
 ---
 
-## Airtable Base
+## Airtable — Migration Reference Only
+
+> These IDs are preserved for data migration mapping. Airtable is no longer the operational database. Supabase is.
 
 **Base ID:** `appB9RBtlceibhEqn`
 
@@ -93,3 +95,20 @@ AI-powered accounts receivable and collections intelligence platform for solopre
 | Recovery Limit Reached | fldrt3xzyby6gcGVj | checkbox |
 | AI SMS Agent Enabled | fldasNacBzZq6m1PZ | checkbox |
 | AI Voice Agent Enabled | fld2c0U247Met8xBs | checkbox |
+
+---
+
+## Open Items
+
+| Priority | Item |
+|---|---|
+| P1 | Supabase project: apply initial schema migration |
+| P1 | Anthropic API key: obtain from console.anthropic.com |
+| P1 | Twilio: account setup + phone number purchase |
+| P1 | MailerSend: configure inbound routing for reply handling |
+| P1 | Vercel: connect clyintel-app GitHub repo |
+| P1 | QBO OAuth: register app in QuickBooks Developer portal |
+| P1 | ST-01: Archive legacy AR Hunter Stripe products |
+| P1 | GH-01: Fix GitHub MCP connector scope |
+| P2 | Softr: reconnect to Supabase via REST API |
+| P2 | Test framework: configure Vitest + Playwright |

@@ -17,11 +17,12 @@ Product folder: `clyintel`
 | App framework | Next.js |
 | Language | TypeScript |
 | Database | Supabase (Postgres) |
-| Operational DB | Airtable (`appB9RBtlceibhEqn`) |
-| Automation | Make (team `1596669`) |
 | Billing | Stripe (live mode, `acct_1RfpP0P2aVnfVhOw`) |
 | Email | MailerSend |
+| SMS | Twilio |
+| AI agents | Anthropic API (Claude) |
 | Subscriber portal | Softr |
+| Demo deployment | Vercel |
 
 ---
 
