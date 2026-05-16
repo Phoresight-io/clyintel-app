@@ -67,3 +67,12 @@ All agents must follow these rules unless the product CLAUDE.md explicitly overr
 5. Never hardcode secrets. Use `.env.local` for development.
 6. Do not invent schema. Check `clyintel/schema/` or confirm with the user.
 7. For any billing or payment logic, confirm with the user before implementing.
+
+---
+
+## Open D3 Pipeline Entry Points
+
+- **Start a feature:** "Run the Open D3 pipeline for: [feature]. Product: clyintel"
+- **Discovery only:** "Start discovery for: [idea]. Product: clyintel"
+- **Verify a spec:** "Generate test skeletons from the approved spec. Product: clyintel"
+- **Sync after shipping:** "Tests are passing — run the sync phase. Product: clyintel"
