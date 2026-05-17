@@ -1,13 +1,15 @@
 # CLAUDE.md
 _Open D3 product configuration — clyintel_
-_Generated: 2026-05-16_
+_Generated: 2026-05-16 · Updated: 2026-05-17_
 
 ---
 
 ## Product Overview
 
-**Product**: ClyIntel  
-**Description**: An intelligence briefing tool for sales teams. Pulls data from multiple sources and surfaces key insights in a clean UI.
+**Product**: ClyIntel
+**Slug**: `clyintel`
+**Description**: AI-powered accounts receivable and collections intelligence platform for solopreneurs and small businesses. Recovers overdue receivables through automated outreach and predictive insights — no manual follow-up required.
+**Positioning**: Payment Intelligence Built for Small Businesses — sell outcomes, not AI.
 
 ---
 
@@ -17,23 +19,9 @@ _Inherits from root CLAUDE.md. No overrides at this time._
 
 ---
 
-## Airtable Schema (source of truth for CRM/ops data)
-
-**Base**: `appB9RBtlceibhEqn`
-
-| Table | Table ID | Key Fields |
-|---|---|---|
-| Companies | _(confirm before use)_ | name, domain, industry, tier |
-| Contacts | _(confirm before use)_ | name, email, company_id, role |
-| Briefings | _(confirm before use)_ | company_id, date, status, content |
-
-> **Rule**: Do not make assumptions about Airtable table or field IDs. Confirm by reading schema or calling the Airtable MCP tool before any Airtable-related code.
-
----
-
 ## Supabase Schema (source of truth for app data)
 
-_No tables confirmed yet. Update this file when schema is established._
+_No tables confirmed yet. Update this file when initial migration is applied._
 
 ---
 
@@ -43,7 +31,7 @@ _No tables confirmed yet. Update this file when schema is established._
 |---|---|
 | Auth | To be confirmed |
 | Data sync strategy | To be confirmed |
-| AI provider | To be confirmed |
+| AI provider | Anthropic API — `claude-sonnet-4-6` default |
 
 ---
 
@@ -52,11 +40,13 @@ _No tables confirmed yet. Update this file when schema is established._
 - Stripe account is in **live mode**. Do not run test transactions against the live account without explicit approval.
 - MailerSend is the email provider. Do not add SendGrid, Resend, or other email providers without approval.
 - Softr handles the subscriber portal. Do not duplicate this in the Next.js app without approval.
+- Airtable is **retired as operational DB**. Table/field IDs in `PRODUCT_CONTEXT.md` are migration reference only — do not write new Airtable integration code.
 
 ---
 
 ## Agent Rules (product-level)
 
-1. Always check Airtable schema before writing any Airtable integration code.
+1. Read `.ai/clyintel/PRODUCT_CONTEXT.md` for full tier definitions, business rules, and Stripe IDs.
 2. Do not add new npm packages without confirming with the user.
 3. Keep AI-generated code clearly separated from manually written code where possible.
+4. Do not write Airtable integration code. Supabase is the operational database.

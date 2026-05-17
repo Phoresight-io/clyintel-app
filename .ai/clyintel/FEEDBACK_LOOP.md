@@ -39,3 +39,27 @@ See `PRODUCT_CONTEXT.md` → Open Items for the full P1/P2 list. Top priorities:
 - Vercel: connect repo
 
 <!-- Append new entries below this line. Never edit entries above. -->
+
+---
+
+## Entry 002 — 2026-05-17
+**Phase:** Sync — Open D3 alignment check
+**Scope:** Cross-file consistency pass across all repo docs
+
+### What was found
+`clyintel/CLAUDE.md` was not updated during the Entry 001 gap analysis pass. It contained three alignment failures:
+
+| Field | Stale value | Correct value |
+|---|---|---|
+| Product description | "intelligence briefing tool for sales teams" | AR/collections intelligence platform |
+| Airtable Schema section | Listed as "source of truth for CRM/ops data" with Companies/Contacts/Briefings tables | Retired. Supabase is the operational DB. |
+| AI provider | "To be confirmed" | Anthropic API — `claude-sonnet-4-6` |
+| Agent Rule 1 | "Always check Airtable schema before writing Airtable integration code" | Replaced — no new Airtable code; Supabase is the DB |
+
+All other files (root `CLAUDE.md`, `CONSTITUTION.md`, `SOURCES.md`, `PRODUCT_CONTEXT.md`, `CODE_CONTEXT.md`) were confirmed aligned.
+
+### What was fixed
+- `clyintel/CLAUDE.md` rewritten to reflect correct product description, stack, key decisions, and agent rules.
+
+### Lesson
+The gap analysis pass (Entry 001) targeted `.ai/` files only. `clyintel/CLAUDE.md` was in a different folder and was missed. Future sync passes must include all `CLAUDE.md` files in the repo, not just `.ai/`.
