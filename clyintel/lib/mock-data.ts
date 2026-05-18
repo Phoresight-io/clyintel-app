@@ -5,12 +5,16 @@ export interface Client {
   name: string;
   industry: string;
   score: number;
+  prevScore: number;
   status: ClientStatus;
   balance: number;
   daysOverdue: number;
   invoices: number;
   lastActivity: string;
   nextAction: string;
+  scoreSummary: string[];
+  scoreFactors: string[];
+  riskDrivers: string[];
 }
 
 export interface Invoice {
@@ -80,13 +84,62 @@ export interface ManualField {
 }
 
 export const clients: Client[] = [
-  { id: 1, name: "Harlow & Co.", industry: "Retail", score: 82, status: "current", balance: 3200, daysOverdue: 0, invoices: 6, lastActivity: "3/15/26", nextAction: "Reminder scheduled 4/10" },
-  { id: 2, name: "Meridian Group", industry: "Consulting", score: 85, status: "due", balance: 8750, daysOverdue: 3, invoices: 4, lastActivity: "3/26/26 - Email", nextAction: "Place call to AP" },
-  { id: 3, name: "Vance Studio", industry: "Creative", score: 44, status: "past_due", balance: 20600, daysOverdue: 31, invoices: 8, lastActivity: "3/22/26 - Phone", nextAction: "Verify payment received" },
-  { id: 4, name: "Oaks Financial", industry: "Finance", score: 91, status: "recovered", balance: 0, daysOverdue: 0, invoices: 12, lastActivity: "3/28/26 - Payment", nextAction: "None" },
-  { id: 5, name: "Drift Collective", industry: "Marketing", score: 38, status: "past_due", balance: 5600, daysOverdue: 18, invoices: 3, lastActivity: "3/20/26 - Phone", nextAction: "Check for wire transfer" },
-  { id: 6, name: "Kellner & Associates", industry: "Legal", score: 22, status: "past_due", balance: 18500, daysOverdue: 134, invoices: 3, lastActivity: "1/9/26 - Email", nextAction: "Negotiate recovery amount" },
-  { id: 7, name: "Apex Dynamics", industry: "Manufacturing", score: 31, status: "past_due", balance: 3300, daysOverdue: 121, invoices: 5, lastActivity: "2/3/26 - Phone", nextAction: "Negotiate recovery amount" },
+  {
+    id: 1, name: "Harlow & Co.", industry: "Retail", score: 82, prevScore: 79,
+    status: "current", balance: 3200, daysOverdue: 0, invoices: 6,
+    lastActivity: "3/15/26", nextAction: "Reminder scheduled 4/10",
+    scoreSummary: ["Consistent, reliable payer", "Strong payment history"],
+    scoreFactors: ["5 of 6 invoices paid on time", "Average delay under 1 day"],
+    riskDrivers: ["Single-invoice billing cycle", "Minor client concentration risk"],
+  },
+  {
+    id: 2, name: "Meridian Group", industry: "Consulting", score: 85, prevScore: 83,
+    status: "due", balance: 8750, daysOverdue: 3, invoices: 4,
+    lastActivity: "3/26/26 - Email", nextAction: "Place call to AP",
+    scoreSummary: ["Reliable payer with minor exception", "Administrative delays only"],
+    scoreFactors: ["2 of 2 recent invoices paid on time", "Current delay is administrative, not behavioural"],
+    riskDrivers: ["AP system gaps caused current delay", "Low risk of recurrence given history"],
+  },
+  {
+    id: 3, name: "Vance Studio", industry: "Creative", score: 44, prevScore: 46,
+    status: "past_due", balance: 20600, daysOverdue: 31, invoices: 8,
+    lastActivity: "3/22/26 - Phone", nextAction: "Verify payment received",
+    scoreSummary: ["Frequent delays", "Below average payer"],
+    scoreFactors: ["6 of 8 invoices paid late", "Average delay: 26 days"],
+    riskDrivers: ["Lump-sum billing is the primary risk driver", "No late fee penalties applied to past due payments"],
+  },
+  {
+    id: 4, name: "Oaks Financial", industry: "Finance", score: 91, prevScore: 89,
+    status: "recovered", balance: 0, daysOverdue: 0, invoices: 12,
+    lastActivity: "3/28/26 - Payment", nextAction: "None",
+    scoreSummary: ["Exemplary payment record", "Consistently pays 1–2 days early"],
+    scoreFactors: ["12 of 12 invoices paid on time or early", "No disputes or extensions ever requested"],
+    riskDrivers: ["No material risk drivers identified", "Lowest risk profile in portfolio"],
+  },
+  {
+    id: 5, name: "Drift Collective", industry: "Marketing", score: 38, prevScore: 41,
+    status: "past_due", balance: 5600, daysOverdue: 18, invoices: 3,
+    lastActivity: "3/20/26 - Phone", nextAction: "Check for wire transfer",
+    scoreSummary: ["Persistent cash flow issues", "High collection risk"],
+    scoreFactors: ["2 of 3 invoices paid late", "Confirmed cash flow constraints"],
+    riskDrivers: ["Payment plan requested — structural issue", "No late fee enforcement in place"],
+  },
+  {
+    id: 6, name: "Kellner & Associates", industry: "Legal", score: 22, prevScore: 28,
+    status: "past_due", balance: 18500, daysOverdue: 134, invoices: 3,
+    lastActivity: "1/9/26 - Email", nextAction: "Negotiate recovery amount",
+    scoreSummary: ["Critical collection risk", "No payment activity in 90+ days"],
+    scoreFactors: ["134 days past due on INV-0891", "Two invoice disputes filed"],
+    riskDrivers: ["Dispute history suggests intent issues", "No deposit requirement on new work"],
+  },
+  {
+    id: 7, name: "Apex Dynamics", industry: "Manufacturing", score: 31, prevScore: 35,
+    status: "past_due", balance: 3300, daysOverdue: 121, invoices: 5,
+    lastActivity: "2/3/26 - Phone", nextAction: "Negotiate recovery amount",
+    scoreSummary: ["High-risk, broken commitments", "Possible financial distress"],
+    scoreFactors: ["121 days past due on INV-0904", "4 of 5 invoices paid late"],
+    riskDrivers: ["Two broken promise-to-pay commitments", "Financial distress signals per public filings"],
+  },
 ];
 
 export const clientInvoices: Record<number, ClientInvoiceSet> = {

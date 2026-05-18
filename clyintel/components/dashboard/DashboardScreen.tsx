@@ -186,6 +186,11 @@ export default function DashboardScreen() {
           <div />
         </div>
 
+        {allInvoices.length === 0 && (
+          <div style={{ textAlign: "center", padding: "40px 20px", color: C.textMid, fontSize: 14 }}>
+            No invoices match your filters.
+          </div>
+        )}
         {allInvoices.map((inv, idx) => {
           const statusStyle = statusMap[inv.status] || { label: inv.status, color: C.text };
           const prevSameClient = idx > 0 && allInvoices[idx - 1].clientId === inv.clientId;

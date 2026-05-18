@@ -73,8 +73,7 @@ export default function ClientListScreen() {
         {clients.map((client, i) => {
           const scoreColor = client.score >= 80 ? C.green : client.score >= 60 ? C.amber : C.red;
           const recoveryYTD = getRecoveryYTD(client.id);
-          const prevScore = client.score >= 80 ? client.score - 3 : client.score + 2;
-          const scoreDelta = client.score - prevScore;
+          const scoreDelta = client.score - client.prevScore;
           let statusColor = C.red, statusLabel = "Past Due";
           if (client.status === "recovered") { statusColor = C.green; statusLabel = "Paid"; }
           else if (client.status === "current") { statusColor = C.green; statusLabel = "Current"; }

@@ -31,12 +31,12 @@ export default function DetailScreen({ client }: Props) {
   const totalOutstandingAmt = allActive.reduce((s, i) => s + i.amount, 0);
 
   const invoiceSummaryStats = [
-    { label: "Total Outstanding", value: `$${totalOutstandingAmt.toLocaleString()}`, color: C.text },
+    { label: "Total Outstanding", value: totalOutstandingAmt > 0 ? `$${totalOutstandingAmt.toLocaleString()}` : "—", color: totalOutstandingAmt > 0 ? C.text : C.textDim },
     { label: "Total Past Due", value: totalPastDue > 0 ? `$${totalPastDue.toLocaleString()}` : "—", color: totalPastDue > 0 ? C.red : C.textDim },
     { label: "Total Recovered", value: totalRecovered > 0 ? `$${totalRecovered.toLocaleString()}` : "—", color: totalRecovered > 0 ? C.green : C.textDim },
   ];
 
-  const prevScore = client.score >= 80 ? 82 : 52;
+  const prevScore = client.prevScore;
   const scoreDelta = client.score - prevScore;
 
   return (
@@ -129,23 +129,26 @@ export default function DetailScreen({ client }: Props) {
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 10 }}>Score Summary</div>
               <div style={{ paddingLeft: 8 }}>
-                <div style={{ fontSize: 14, fontWeight: 500, color: C.textMid, marginBottom: 6 }}>• Frequent delays</div>
-                <div style={{ fontSize: 14, fontWeight: 500, color: C.textMid }}>• Below average payer</div>
+                {client.scoreSummary.map((line, i) => (
+                  <div key={i} style={{ fontSize: 14, fontWeight: 500, color: C.textMid, marginBottom: i < client.scoreSummary.length - 1 ? 6 : 0 }}>• {line}</div>
+                ))}
               </div>
             </div>
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 10 }}>Score Factors</div>
               <div style={{ paddingLeft: 8 }}>
-                <div style={{ fontSize: 14, fontWeight: 500, color: C.textMid, marginBottom: 6 }}>• 6 of 8 invoices paid late</div>
-                <div style={{ fontSize: 14, fontWeight: 500, color: C.textMid }}>• Avg delay: 26 days</div>
+                {client.scoreFactors.map((line, i) => (
+                  <div key={i} style={{ fontSize: 14, fontWeight: 500, color: C.textMid, marginBottom: i < client.scoreFactors.length - 1 ? 6 : 0 }}>• {line}</div>
+                ))}
               </div>
             </div>
             <div style={{ borderTop: `1px solid ${C.border}`, margin: "16px 0" }} />
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 10 }}>Risk Drivers</div>
               <div style={{ paddingLeft: 8 }}>
-                <div style={{ fontSize: 14, fontWeight: 500, color: C.textMid, marginBottom: 6 }}>• Lump-sum billing is the primary risk driver</div>
-                <div style={{ fontSize: 14, fontWeight: 500, color: C.textMid }}>• No late fee penalties applied to past due payments</div>
+                {client.riskDrivers.map((line, i) => (
+                  <div key={i} style={{ fontSize: 14, fontWeight: 500, color: C.textMid, marginBottom: i < client.riskDrivers.length - 1 ? 6 : 0 }}>• {line}</div>
+                ))}
               </div>
             </div>
           </div>
