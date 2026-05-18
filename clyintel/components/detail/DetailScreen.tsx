@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { C } from "@/lib/theme";
 import { clientInvoices, Client } from "@/lib/mock-data";
 import ExchangeDrawer from "@/components/shared/ExchangeDrawer";
+import PTRWidget from "./PTRWidget";
 
 interface Props {
   client: Client;
@@ -28,18 +29,6 @@ export default function DetailScreen({ client }: Props) {
   const totalPastDue = allActive.filter(i => i.status === "past_due").reduce((s, i) => s + i.amount, 0);
   const totalRecovered = invoices ? (invoices.paid || []).reduce((s, i) => s + i.amount, 0) : 0;
   const totalOutstandingAmt = allActive.reduce((s, i) => s + i.amount, 0);
-
-  const isLowRisk = client.score >= 80;
-  const accentColor = isLowRisk ? C.green : C.amber;
-  const accentBg = isLowRisk ? C.greenBg : C.amberBg;
-  const terms = isLowRisk ? "Net 30 with standard terms" : "Net 15 with 2% early payment discount";
-  const reminder = isLowRisk ? "-7, -3, 0 days" : "-14, -7, -3, 0 days";
-  const reminderLabel = isLowRisk ? "3-touch sequence" : "4-touch escalation";
-  const whyText = isLowRisk
-    ? "Strong payment history supports standard terms. Low risk profile enables a flexible payment schedule without increasing exposure. The 3-touch reminder sequence maintains top-of-mind awareness without being intrusive."
-    : "Shorter terms reduce your exposure window. The 2% early payment incentive directly addresses cash flow constraints that drive late payments. The 4-touch escalation sequence increases urgency progressively to maximize on-time collection.";
-  const lossReduction = isLowRisk ? "12%" : "38%";
-  const revenueImpact = isLowRisk ? "$525" : "$3,224";
 
   const invoiceSummaryStats = [
     { label: "Total Outstanding", value: `$${totalOutstandingAmt.toLocaleString()}`, color: C.text },
@@ -67,46 +56,7 @@ export default function DetailScreen({ client }: Props) {
             <div style={{ fontSize: 22, fontWeight: 600, color: C.text }}>{client.name}</div>
           </div>
 
-          {/* PTR Widget */}
-          <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", marginBottom: 16 }}>
-            <div style={{ padding: "14px 20px" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 10 }}>Payment Terms Recommendation</div>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 24 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Terms</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>{terms}</div>
-                </div>
-                <div style={{ width: 1, background: C.border, alignSelf: "stretch" }} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Reminder Strategy</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: C.blue }}>{reminder}</div>
-                  <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>{reminderLabel}</div>
-                </div>
-              </div>
-            </div>
-            <div style={{ padding: "0 20px 14px" }}>
-              <div style={{ background: accentBg, border: `1px solid ${accentColor}22`, borderRadius: 8, padding: "12px 14px" }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: accentColor, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Why this matters</div>
-                <div style={{ fontSize: 14, fontWeight: 500, color: C.text, lineHeight: 1.7 }}>{whyText}</div>
-              </div>
-            </div>
-            <div style={{ padding: "0 20px 20px" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>Projections</div>
-              <div style={{ display: "flex", gap: 0 }}>
-                <div style={{ flex: 1, textAlign: "center" }}>
-                  <div style={{ fontSize: 11, color: C.textMid, fontWeight: 600, marginBottom: 8 }}>Decrease Loss By</div>
-                  <div style={{ fontSize: 32, fontWeight: 700, color: C.green, fontFamily: C.mono, lineHeight: 1 }}>{lossReduction}</div>
-                  <div style={{ fontSize: 11, color: C.textDim, marginTop: 6 }}>vs. current terms</div>
-                </div>
-                <div style={{ width: 1, background: C.border, margin: "0 4px" }} />
-                <div style={{ flex: 1, textAlign: "center" }}>
-                  <div style={{ fontSize: 11, color: C.textMid, fontWeight: 600, marginBottom: 8 }}>Revenue Impact</div>
-                  <div style={{ fontSize: 32, fontWeight: 700, color: isLowRisk ? C.green : C.red, fontFamily: C.mono, lineHeight: 1 }}>{revenueImpact}</div>
-                  <div style={{ fontSize: 11, color: C.textDim, marginTop: 6 }}>est. annual delay cost</div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <PTRWidget client={client} />
 
           <div style={{ borderTop: `1px solid ${C.border}`, margin: "4px 0 16px" }} />
 

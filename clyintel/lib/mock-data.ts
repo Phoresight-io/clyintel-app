@@ -248,6 +248,112 @@ export const importedClients: ImportedClient[] = [
   { name: "Apex Dynamics", invoices: 5, balance: 3300 },
 ];
 
+export interface PTRRecommendation {
+  terms: string;
+  discount?: string;
+  reminderDays: number[];
+  reminderLabel: string;
+  rationale: string;
+  keyFactors: string[];
+  lossReduction: string;
+  revImpact: string;
+  revImpactSign: "positive" | "negative" | "neutral";
+  confidence: "High" | "Medium" | "Low";
+  altTerms?: string;
+  altNote?: string;
+}
+
+export const ptrRecommendations: Record<number, PTRRecommendation> = {
+  1: {
+    terms: "Net 30",
+    reminderDays: [-7, -3, 0],
+    reminderLabel: "3-touch light sequence",
+    rationale: "Harlow & Co. has a strong payment track record with 5 of 6 invoices paid on or before the due date. Standard Net 30 terms are appropriate and maintain a positive client relationship without adding friction.",
+    keyFactors: ["5 of 6 invoices paid on time", "Average delay under 1 day", "No disputes on record", "Consistent billing cycle"],
+    lossReduction: "8%",
+    revImpact: "$420",
+    revImpactSign: "positive",
+    confidence: "High",
+  },
+  2: {
+    terms: "Net 30",
+    reminderDays: [-7, -3, 0],
+    reminderLabel: "3-touch sequence",
+    rationale: "Meridian Group has a strong recent payment history. The current 3-day delay on INV-1038 appears administrative rather than a cash-flow concern — their AP system noted a missing record. Net 30 with a standard reminder cadence remains appropriate.",
+    keyFactors: ["2 of 2 recent invoices paid on time", "Current delay is administrative, not behavioural", "Strong consulting-sector payer profile", "High client score: 85/100"],
+    lossReduction: "11%",
+    revImpact: "$680",
+    revImpactSign: "positive",
+    confidence: "High",
+  },
+  3: {
+    terms: "Net 15",
+    discount: "2% discount if paid within 5 days",
+    reminderDays: [-14, -7, -3, 0, 7],
+    reminderLabel: "5-touch escalation",
+    rationale: "Vance Studio has paid late on 6 of 8 invoices with an average delay of 26 days. Shorter payment windows reduce your exposure window and the 2% early payment incentive directly addresses the cash flow constraints that appear to drive delays. A CFO approval bottleneck has been identified — triggering the reminder sequence 14 days out gives them runway to clear internal approvals before the due date.",
+    keyFactors: ["6 of 8 invoices paid late", "Average payment delay: 26 days", "Two extension requests in 90 days", "CFO approval bottleneck identified", "Score: 44/100 (High risk)"],
+    lossReduction: "38%",
+    revImpact: "$3,224",
+    revImpactSign: "negative",
+    confidence: "Medium",
+    altTerms: "Net 30 + 1.5%/mo late fee",
+    altNote: "Use if client resists shorter terms. Late fee creates financial urgency without shortening the window.",
+  },
+  4: {
+    terms: "Net 45",
+    reminderDays: [-5, 0],
+    reminderLabel: "2-touch light touch",
+    rationale: "Oaks Financial has a near-perfect payment record across 12 invoices, consistently paying 1–2 days early. Extending to Net 45 rewards their reliability, may strengthen the relationship, and carries negligible collection risk given their 91/100 score.",
+    keyFactors: ["12 of 12 invoices paid on time or early", "Average: 1.2 days early", "Highest score in portfolio: 91/100", "No disputes or extensions ever requested"],
+    lossReduction: "2%",
+    revImpact: "$0",
+    revImpactSign: "neutral",
+    confidence: "High",
+  },
+  5: {
+    terms: "Net 15",
+    discount: "3% discount if paid within 3 days",
+    reminderDays: [-14, -7, -3, 0, 7, 14],
+    reminderLabel: "6-touch escalation",
+    rationale: "Drift Collective has confirmed cash flow issues and requested a payment plan on INV-1045. Net 15 terms with a compelling early payment incentive can accelerate collection. The 6-touch escalation sequence matches the urgency of the situation, and the structured cadence keeps pressure on without damaging the relationship.",
+    keyFactors: ["Confirmed cash flow constraints", "Payment plan requested (INV-1045)", "2 of 3 invoices paid late", "Average delay: 12 days", "Score: 38/100 (High risk)"],
+    lossReduction: "44%",
+    revImpact: "$2,180",
+    revImpactSign: "negative",
+    confidence: "Medium",
+    altTerms: "Formalise the payment plan",
+    altNote: "Net 30 with a documented 2×$1,400 bi-weekly payment plan. Reduces risk of full write-off if cash flow doesn't recover.",
+  },
+  6: {
+    terms: "50% deposit + Net 15 on balance",
+    reminderDays: [-21, -14, -7, 0, 7, 14],
+    reminderLabel: "Deposit-required escalation",
+    rationale: "At 134 days overdue with no payment in 90+ days and two invoice disputes, Kellner & Associates represents the highest collection risk in your portfolio. Requiring a 50% deposit on any new work protects against further exposure. The outstanding INV-0891 should be addressed through the separate negotiation recommendation.",
+    keyFactors: ["134 days past due on INV-0891", "Two invoice disputes filed", "No payment activity in 90+ days", "Risk of full loss: 68%", "Score: 22/100 (Critical risk)"],
+    lossReduction: "62%",
+    revImpact: "$18,500",
+    revImpactSign: "negative",
+    confidence: "Low",
+    altTerms: "Pause new work",
+    altNote: "Pause new engagements until INV-0891 is resolved. Reduces risk of adding to the exposure before recovery is confirmed.",
+  },
+  7: {
+    terms: "Net 15",
+    discount: "2% discount if paid within 5 days",
+    reminderDays: [-14, -7, -3, 0, 7, 14],
+    reminderLabel: "6-touch escalation",
+    rationale: "Apex Dynamics has broken two promise-to-pay commitments and is showing signs of financial distress per public filings. Net 15 terms with an early payment incentive create urgency while giving a clear path to resolution. Whether to continue the relationship should be revisited once INV-0904 is settled.",
+    keyFactors: ["121 days past due on INV-0904", "2 broken payment commitments", "Financial distress per public filings", "4 of 8 invoices paid late historically", "Score: 31/100 (High risk)"],
+    lossReduction: "51%",
+    revImpact: "$3,300",
+    revImpactSign: "negative",
+    confidence: "Low",
+    altTerms: "Pause new work",
+    altNote: "Prioritise recovery of INV-0904 before issuing new invoices. Reduces total exposure.",
+  },
+};
+
 export const MANUAL_FIELDS: ManualField[] = [
   { id: "client", label: "Client Name", type: "text", placeholder: "e.g. Acme Corp" },
   { id: "invoice", label: "Invoice #", type: "text", placeholder: "e.g. INV-1060" },
