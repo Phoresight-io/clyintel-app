@@ -42,6 +42,34 @@ See `PRODUCT_CONTEXT.md` → Open Items for the full P1/P2 list. Top priorities:
 
 ---
 
+## Entry 004 — 2026-05-18
+**Phase:** Sync — Vercel root directory fix
+**Scope:** 404 resolution, demo app live
+
+### What was completed
+- Root Directory set to `clyintel` in Vercel project settings → deployment rebuilt green
+- Demo app confirmed live at https://clyintel-app.vercel.app
+
+### Root cause of 404
+Vercel was deploying from repo root, not the `clyintel/` subdirectory. Next.js app lives in `clyintel/`, so Vercel found no `package.json` at root and served a 404.
+
+### Lesson
+For monorepo layouts, Vercel Root Directory must be set before or immediately after the first deployment — not after the first 404. Add this step to the Vercel connection checklist.
+
+### Current state
+Demo is fully live. All three routes functional: `/` (Dashboard), `/portfolio` (Client List), `/client/[id]` (Detail).
+
+### Open items carried forward
+- Supabase: apply initial schema migration
+- Anthropic API key
+- Twilio: account setup + phone number
+- MailerSend: inbound routing
+- QBO OAuth: register app
+- ST-01: Archive legacy AR Hunter Stripe products
+- GH-01: Fix GitHub MCP connector scope
+
+---
+
 ## Entry 002 — 2026-05-17
 **Phase:** Sync — Open D3 alignment check
 **Scope:** Cross-file consistency pass across all repo docs
