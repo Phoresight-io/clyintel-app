@@ -106,7 +106,7 @@ AI-powered accounts receivable and collections intelligence platform for solopre
 | P1 | Anthropic API key: obtain from console.anthropic.com |
 | P1 | Twilio: account setup + phone number purchase |
 | P1 | MailerSend: configure inbound routing for reply handling |
-| P1 | Vercel: connect clyintel-app GitHub repo |
+| ✅ | Vercel: connected and deployed — https://clyintel-app.vercel.app |
 | P1 | QBO OAuth: register app in QuickBooks Developer portal |
 | P1 | ST-01: Archive legacy AR Hunter Stripe products |
 | P1 | GH-01: Fix GitHub MCP connector scope |

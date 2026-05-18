@@ -1,6 +1,6 @@
 # CODE_CONTEXT.md — clyintel
 _Live architectural map. Update after each Claude Code session._
-_Last updated: 2026-05-16_
+_Last updated: 2026-05-18_
 
 ---
 
@@ -8,7 +8,7 @@ _Last updated: 2026-05-16_
 
 | Layer | Tool | Notes |
 |---|---|---|
-| App framework | Next.js (App Router) | TypeScript only. All files `.ts` / `.tsx`. |
+| App framework | Next.js 16 (App Router) | TypeScript only. All files `.ts` / `.tsx`. |
 | Database | Supabase (Postgres) | Migrations via `apply_migration` MCP tool. Types generated via `supabase gen types`. |
 | Edge Functions | Supabase Edge Functions | TypeScript. Deployed via Supabase MCP. Replaces all retired Make scenarios. |
 | Billing | Stripe | Live mode — `acct_1RfpP0P2aVnfVhOw`. Write ops via Claude Code on local machine. |
@@ -16,7 +16,7 @@ _Last updated: 2026-05-16_
 | SMS | Twilio | Account setup pending. |
 | AI agents | Anthropic API | Default: `claude-sonnet-4-6`. Escalate to Opus for complex reasoning. |
 | Subscriber portal | Softr | Reconnection to Supabase via REST API pending. |
-| Demo deployment | Vercel | Repo connection to `clyintel-app` pending. |
+| Demo deployment | Vercel | Live — https://clyintel-app.vercel.app |
 
 ---
 
@@ -25,20 +25,50 @@ _Last updated: 2026-05-16_
 ```
 clyintel-app/
 ├── CLAUDE.md                        # Root Open D3 config — stack, commands, agent rules
+├── clyintel_after.jsx               # Original prototype (source of truth for demo)
 ├── clyintel/
 │   ├── CLAUDE.md                    # Product-level config — overrides root
-│   ├── app/                         # Next.js App Router entry (not yet scaffolded)
+│   ├── .gitignore                   # Excludes .next/ and node_modules/
+│   ├── package.json                 # Next.js 16, React, TypeScript
+│   ├── tsconfig.json
+│   ├── next.config.ts
+│   ├── app/
+│   │   ├── layout.tsx               # Root layout — Inter + JetBrains Mono, AppShell wrapper
+│   │   ├── globals.css              # Reset + keyframes
+│   │   ├── page.tsx                 # / → DashboardScreen
+│   │   ├── portfolio/
+│   │   │   └── page.tsx             # /portfolio → ClientListScreen
+│   │   └── client/[id]/
+│   │       └── page.tsx             # /client/[id] → DetailScreen
+│   ├── components/
+│   │   ├── shell/
+│   │   │   └── AppShell.tsx         # Nav (active via usePathname) + footer
+│   │   ├── dashboard/
+│   │   │   ├── DashboardScreen.tsx  # KPI cards, rec panel, sortable invoice table
+│   │   │   ├── NegotiationActions.tsx
+│   │   │   └── RecoveryRecModal.tsx
+│   │   ├── portfolio/
+│   │   │   └── ClientListScreen.tsx # Summary cards + client table
+│   │   ├── detail/
+│   │   │   └── DetailScreen.tsx     # PTR widget, invoice summary, history table
+│   │   └── shared/
+│   │       └── ExchangeDrawer.tsx   # Slide-in exchange history drawer
+│   ├── lib/
+│   │   ├── theme.ts                 # C token object (colors, fonts as CSS vars)
+│   │   └── mock-data.ts             # All mock arrays with TypeScript types
 │   ├── types/
 │   │   └── README.md                # supabase.ts goes here when generated
 │   └── schema/
-│       └── README.md                # Migration history and Airtable field mapping docs
+│       └── README.md                # Migration history docs
 └── .ai/
     ├── CONSTITUTION.md              # Engineering standards and code rules
     ├── SOURCES.md                   # Registered integrations and archived sources
     └── clyintel/
         ├── PRODUCT_CONTEXT.md       # Full product spec — tiers, rules, IDs
         ├── CODE_CONTEXT.md          # This file — live architectural map
-        └── FEEDBACK_LOOP.md         # Append-only delivery log
+        ├── FEEDBACK_LOOP.md         # Append-only delivery log
+        └── specs/
+            └── demo-build-spec.md   # Approved spec for demo build
 ```
 
 ---
@@ -62,14 +92,17 @@ Sourced from `.ai/CONSTITUTION.md`. Authoritative copy lives there.
 
 ### What exists
 - Open D3 framework files (`.ai/` scaffolding, root and product `CLAUDE.md`)
+- Next.js 16 demo app — 3 routes, mock data, no auth, no DB
+- Live on Vercel: https://clyintel-app.vercel.app
 - Airtable table and field IDs preserved in `PRODUCT_CONTEXT.md` for migration mapping
 
 ### What does not exist yet
-- Next.js app scaffold (`clyintel/app/`)
 - Supabase project and initial schema migration
 - Supabase types (`clyintel/types/supabase.ts`)
 - Any Edge Functions
-- Twilio, Anthropic API, or Vercel connections
+- Twilio account and phone number
+- Anthropic API key
+- MailerSend inbound routing
 
 ### Retired (do not reference in new code)
 - Airtable as operational database — replaced by Supabase

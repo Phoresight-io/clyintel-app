@@ -63,3 +63,29 @@ All other files (root `CLAUDE.md`, `CONSTITUTION.md`, `SOURCES.md`, `PRODUCT_CON
 
 ### Lesson
 The gap analysis pass (Entry 001) targeted `.ai/` files only. `clyintel/CLAUDE.md` was in a different folder and was missed. Future sync passes must include all `CLAUDE.md` files in the repo, not just `.ai/`.
+
+---
+
+## Entry 003 — 2026-05-18
+**Phase:** Sync — Demo deployment
+**Scope:** Vercel deployment of clyintel demo app
+
+### What was completed
+- Vercel project imported and connected to `phoresight-io/clyintel-app` repo
+- Demo app deployed and live at https://clyintel-app.vercel.app
+- Root directory set to `clyintel/` in Vercel project settings
+
+### What was updated
+- `PRODUCT_CONTEXT.md`: Vercel P1 open item marked ✅
+- `CODE_CONTEXT.md`: Repo structure updated to reflect full Next.js scaffold, Vercel URL recorded, architectural state updated
+- `SOURCES.md`: Vercel entry to be confirmed live (project ref now known)
+
+### Open items carried forward
+Remaining P1 items:
+- Supabase: apply initial schema migration
+- Anthropic API key
+- Twilio: account setup + phone number
+- MailerSend: inbound routing
+- QBO OAuth: register app
+- ST-01: Archive legacy AR Hunter Stripe products
+- GH-01: Fix GitHub MCP connector scope
