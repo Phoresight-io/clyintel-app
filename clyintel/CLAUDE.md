@@ -1,6 +1,6 @@
 # CLAUDE.md
 _Open D3 product configuration — clyintel_
-_Generated: 2026-05-16 · Updated: 2026-05-17_
+_Generated: 2026-05-16 · Updated: 2026-05-18_
 
 ---
 
@@ -21,7 +21,12 @@ _Inherits from root CLAUDE.md. No overrides at this time._
 
 ## Supabase Schema (source of truth for app data)
 
-_No tables confirmed yet. Update this file when initial migration is applied._
+Project: `clyintel-dev` (`mhvuqjryesjsrictesuk`) — us-east-1, Postgres 17  
+Types: `clyintel/types/supabase.ts` (generated 2026-05-18)
+
+Core tables: `plans` · `subscribers` · `clients` · `invoices` · `payments` · `invoice_payments` · `templates` · `communications` · `ptr_scores` · `recovery_attempts` · `connected_accounts` · `demo_sessions`
+
+All tables have RLS enabled. `plans` is seeded (5 rows). See `.ai/clyintel/CODE_CONTEXT.md` for full schema detail.
 
 ---
 
