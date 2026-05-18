@@ -16,7 +16,7 @@ _Last updated: 2026-05-18_
 | SMS | Twilio | Account setup pending. |
 | AI agents | Anthropic API | Default: `claude-sonnet-4-6`. Escalate to Opus for complex reasoning. |
 | Subscriber portal | Softr | Reconnection to Supabase via REST API pending. |
-| Demo deployment | Vercel | Live — https://clyintel-app.vercel.app |
+| Demo deployment | Vercel | Live — https://clyintel-app-git-main-phoresight-ios-projects.vercel.app |
 
 ---
 
@@ -93,7 +93,7 @@ Sourced from `.ai/CONSTITUTION.md`. Authoritative copy lives there.
 ### What exists
 - Open D3 framework files (`.ai/` scaffolding, root and product `CLAUDE.md`)
 - Next.js 16 demo app — 3 routes, mock data, no auth, no DB
-- Live on Vercel: https://clyintel-app.vercel.app
+- Live on Vercel: https://clyintel-app-git-main-phoresight-ios-projects.vercel.app
 - Airtable table and field IDs preserved in `PRODUCT_CONTEXT.md` for migration mapping
 
 ### What does not exist yet
