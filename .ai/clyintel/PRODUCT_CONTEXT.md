@@ -109,6 +109,6 @@ AI-powered accounts receivable and collections intelligence platform for solopre
 | ✅ | Vercel: connected and deployed — https://clyintel-app-git-main-phoresight-ios-projects.vercel.app |
 | P1 | QBO OAuth: register app in QuickBooks Developer portal |
 | ✅ | ST-01: Legacy AR Hunter Stripe products archived (prod_TQM8ODk7fiW82r, prod_TPCn2lRuTLTMF4) |
-| P1 | GH-01: Fix GitHub MCP connector scope |
+| P1 | GH-01: Add clyintel-ops + phoresight-clyintel-ai-ops to GitHub MCP scope via code.claude.com env settings |
 | P2 | Softr: reconnect to Supabase via REST API |
 | P2 | Test framework: configure Vitest + Playwright |

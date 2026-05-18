@@ -7,10 +7,11 @@ _Generated: 2026-05-16_
 ## Registered Sources
 
 ### GitHub
-- Repos: `Phoresight-io/clyintel-ops` (PRD, backlog, progress) · `phoresight-clyintel-ai-ops` (AI ops)
-- App repo: `clyintel-app`
+- App repo: `Phoresight-io/clyintel-app` — accessible via GitHub MCP ✅
+- Ops repo: `Phoresight-io/clyintel-ops` (PRD, backlog, progress) — not yet in MCP scope ⚠️
+- AI ops repo: `Phoresight-io/phoresight-clyintel-ai-ops` — not yet in MCP scope ⚠️
 - Role: Cross-session source of truth
-- Note: GitHub MCP connector currently scoped to `claude-remote-control` — fix pending (GH-01)
+- GH-01 status: Partially resolved. Connector now reaches `clyintel-app`. Add `clyintel-ops` and `phoresight-clyintel-ai-ops` via environment settings at code.claude.com to complete.
 
 ### Supabase
 - Role: Operational database + Edge Functions
