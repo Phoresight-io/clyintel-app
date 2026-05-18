@@ -14,7 +14,7 @@ _Last updated: 2026-05-18_
 | Billing | Stripe | Live mode — `acct_1RfpP0P2aVnfVhOw`. Write ops via Claude Code on local machine. |
 | Email | MailerSend | Templates not yet validated. |
 | SMS | Twilio | Account setup pending. |
-| AI agents | Anthropic API | Default: `claude-sonnet-4-6`. Escalate to Opus for complex reasoning. |
+| AI agents | Anthropic API | Default: `claude-sonnet-4-6`. Escalate to Opus for complex reasoning. Env var: `Anthrop_API_Key`. |
 | Subscriber portal | Softr | Reconnection to Supabase via REST API pending. |
 | Demo deployment | Vercel | Live — https://clyintel-app-git-main-phoresight-ios-projects.vercel.app |
 
