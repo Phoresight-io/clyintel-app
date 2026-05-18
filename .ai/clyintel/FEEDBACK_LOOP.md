@@ -42,6 +42,30 @@ See `PRODUCT_CONTEXT.md` → Open Items for the full P1/P2 list. Top priorities:
 
 ---
 
+## Entry 005 — 2026-05-18
+**Phase:** Sync — P1 item sweep
+**Scope:** Supabase types, Stripe archive, env vars, domain investigation
+
+### What was completed
+- Supabase: confirmed schema already fully built (16 migrations, 12 tables, plans seeded)
+- Generated `clyintel/types/supabase.ts` from live `clyintel-dev` project
+- Wired up `@supabase/supabase-js` client (`lib/supabase.ts`) — typed, mock data untouched
+- Anthropic API key: set in Vercel as `Anthrop_API_Key`
+- ST-01: Archived both legacy AR Hunter Stripe products (`prod_TQM8ODk7fiW82r`, `prod_TPCn2lRuTLTMF4`) — confirmed `active: false`
+- GH-01: Diagnosed — GitHub App has All Repositories access. Session scope is a Claude Code platform limitation (one repo per session). No fix available.
+- Vercel `clyintel-app.vercel.app` 404: Root cause identified — production branch still set to `claude/setup-open-d3-framework-fAvPt`. Vercel API PATCH attempts failed (endpoint rejected both `link` and `productionBranch` properties). Dashboard setting location not found. Carrying forward.
+
+### Working URL
+https://clyintel-app-git-main-phoresight-ios-projects.vercel.app
+
+### Open items carried forward
+- Vercel: find and update Production Branch setting to `main` so `clyintel-app.vercel.app` resolves
+- Twilio: account setup + phone number
+- MailerSend: inbound routing
+- QBO OAuth: register app
+
+---
+
 ## Entry 004 — 2026-05-18
 **Phase:** Sync — Vercel root directory fix
 **Scope:** 404 resolution, demo app live

@@ -106,7 +106,7 @@ AI-powered accounts receivable and collections intelligence platform for solopre
 | ✅ | Anthropic API key: set in Vercel as `Anthrop_API_Key` |
 | P1 | Twilio: account setup + phone number purchase |
 | P1 | MailerSend: configure inbound routing for reply handling |
-| ✅ | Vercel: connected and deployed — https://clyintel-app-git-main-phoresight-ios-projects.vercel.app |
+| ⚠️ | Vercel: deployed at git-main URL. Production branch still set to old feature branch — `clyintel-app.vercel.app` not live. Fix: Settings → Git → Production Branch → `main`. |
 | P1 | QBO OAuth: register app in QuickBooks Developer portal |
 | ✅ | ST-01: Legacy AR Hunter Stripe products archived (prod_TQM8ODk7fiW82r, prod_TPCn2lRuTLTMF4) |
 | P1 | GH-01: Add clyintel-ops + phoresight-clyintel-ai-ops to GitHub MCP scope via code.claude.com env settings |
