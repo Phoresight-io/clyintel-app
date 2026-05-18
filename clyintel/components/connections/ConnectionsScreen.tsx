@@ -10,7 +10,13 @@ type ManualForm = Record<string, string>;
 
 export default function ConnectionsScreen() {
   const router = useRouter();
-  const [stage, setStage] = useState<Stage>("connect");
+  const [stage, setStage] = useState<Stage>(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("mode") === "manual") return "manual";
+    }
+    return "connect";
+  });
   const [selectedService, setSelectedService] = useState<InvoiceService | null>(null);
   const [pickedClient, setPickedClient] = useState<ImportedClient | null>(null);
   const [manualForm, setManualForm] = useState<ManualForm>({ client: "", invoice: "", amount: "", dueDate: "", terms: "Net 30", notes: "" });

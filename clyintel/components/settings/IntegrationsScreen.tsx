@@ -273,7 +273,7 @@ export default function IntegrationsScreen() {
             <div style={{ fontSize: 12, color: C.textDim }}>Add a single client or invoice without connecting an integration.</div>
           </div>
           <button
-            onClick={handleConnect}
+            onClick={() => router.push("/connections?mode=manual")}
             style={{ padding: "8px 16px", fontSize: 13, fontWeight: 600, color: C.textMid, background: "#FFFFFF", border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.color = C.blue; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.textMid; }}
