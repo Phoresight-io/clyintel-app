@@ -5,7 +5,7 @@ import { C } from "@/lib/theme";
 import { clients, clientInvoices, invoiceExchanges, negotiationRecs, Invoice } from "@/lib/mock-data";
 import ExchangeDrawer from "@/components/shared/ExchangeDrawer";
 import NegotiationActions from "./NegotiationActions";
-import RecoveryRecModal, { RecCard } from "./RecoveryRecModal";
+import { RecCard } from "./RecoveryRecModal";
 
 type SortCol = "clientName" | "id" | "amount" | "dueDate" | "daysOverdue" | "status" | "lastActivity";
 type SortDir = "asc" | "desc";
@@ -26,7 +26,6 @@ export default function DashboardScreen() {
   const router = useRouter();
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({ status: [], dueDate: [], customer: [], invoiceNumber: [] });
   const [searchText, setSearchText] = useState("");
-  const [selectedInvoiceForExchanges, setSelectedInvoiceForExchanges] = useState<string | null>(null);
   const [selectedInvoiceForHistory, setSelectedInvoiceForHistory] = useState<string | null>(null);
   const [recCards, setRecCards] = useState<RecCard[]>(
     negotiationRecs.map(r => ({ ...r, editAmount: r.suggestedAmount, status: "pending" as const }))
@@ -43,8 +42,6 @@ export default function DashboardScreen() {
   const updateRec = (id: string, patch: Partial<RecCard>) =>
     setRecCards(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c));
 
-  const activeRecCard = recCards.find(c => c.id === activeRecModal);
-
   const pastDueClients = clients.filter(c => c.status === "past_due" || c.status === "due");
   const totalOutstanding = pastDueClients.reduce((sum, c) => sum + c.balance, 0);
   const totalPastDue = pastDueClients.reduce((sum, c) => {
@@ -59,10 +56,6 @@ export default function DashboardScreen() {
   const filterInvoices = (invoices: { outstanding: Invoice[]; upcoming: Invoice[] } | undefined): Invoice[] => {
     if (!invoices) return [];
     let all = [...(invoices.outstanding || []), ...(invoices.upcoming || [])];
-    if (searchText.length >= 3) {
-      const s = searchText.toLowerCase();
-      all = all.filter(inv => inv.id.toLowerCase().includes(s));
-    }
     if (activeFilters.status.length > 0) all = all.filter(inv => activeFilters.status.includes(inv.status));
     if (activeFilters.dueDate.length > 0) all = all.filter(inv => activeFilters.dueDate.some(f => {
       if (f === "overdue") return inv.status === "past_due";
@@ -90,6 +83,10 @@ export default function DashboardScreen() {
   const allInvoices: FlatInvoice[] = pastDueClients.flatMap(client => {
     const invoices = clientInvoices[client.id];
     return filterInvoices(invoices).map(inv => ({ ...inv, clientName: client.name, clientId: client.id }));
+  }).filter(inv => {
+    if (searchText.length < 3) return true;
+    const s = searchText.toLowerCase();
+    return inv.id.toLowerCase().includes(s) || inv.clientName.toLowerCase().includes(s);
   }).sort(sortFn);
 
   const totalFilterCount = Object.values(activeFilters).reduce((s, a) => s + a.length, 0);
@@ -125,7 +122,7 @@ export default function DashboardScreen() {
           <div style={{ fontSize: 12, fontWeight: 700, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 4 }}>Clyintel</div>
           <div style={{ fontSize: 28, lineHeight: 1.15, fontWeight: 600, color: C.navy }}>Recovery Dashboard</div>
           <div style={{ display: "flex", gap: 12 }}>
-            <button style={{ padding: "8px 4px", fontSize: 14, fontWeight: 500, color: C.textDim, background: "transparent", border: "none", cursor: "not-allowed", textDecoration: "underline", textUnderlineOffset: 3 }}>+ Add Client</button>
+            <button onClick={() => router.push("/connections")} style={{ padding: "8px 4px", fontSize: 14, fontWeight: 500, color: C.blue, background: "transparent", border: "none", cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 3 }} onMouseEnter={(e) => (e.currentTarget.style.color = C.amber)} onMouseLeave={(e) => (e.currentTarget.style.color = C.blue)}>+ Add Client</button>
           </div>
         </div>
       </div>
@@ -237,9 +234,6 @@ export default function DashboardScreen() {
 
       {selectedInvoiceForHistory && (
         <ExchangeDrawer invoiceId={selectedInvoiceForHistory} onClose={() => setSelectedInvoiceForHistory(null)} />
-      )}
-      {activeRecCard && (
-        <RecoveryRecModal card={activeRecCard} onUpdate={updateRec} onClose={() => setActiveRecModal(null)} />
       )}
     </div>
   );

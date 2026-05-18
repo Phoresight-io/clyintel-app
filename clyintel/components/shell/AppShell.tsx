@@ -6,7 +6,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
-  const isRecoveryActive = pathname === "/" || pathname.startsWith("/client");
+  const isRecoveryActive = pathname === "/" || pathname.startsWith("/client") || pathname === "/connections";
   const isPortfolioActive = pathname === "/portfolio";
 
   const navItems = [
