@@ -102,13 +102,13 @@ AI-powered accounts receivable and collections intelligence platform for solopre
 
 | Priority | Item |
 |---|---|
-| P1 | Supabase project: apply initial schema migration |
-| P1 | Anthropic API key: obtain from console.anthropic.com |
+| ✅ | Supabase project: schema applied (16 migrations), types generated |
+| ✅ | Anthropic API key: set in Vercel as `Anthrop_API_Key` |
 | P1 | Twilio: account setup + phone number purchase |
 | P1 | MailerSend: configure inbound routing for reply handling |
-| ✅ | Vercel: connected and deployed — https://clyintel-app.vercel.app |
+| ✅ | Vercel: connected and deployed — https://clyintel-app-git-main-phoresight-ios-projects.vercel.app |
 | P1 | QBO OAuth: register app in QuickBooks Developer portal |
-| P1 | ST-01: Archive legacy AR Hunter Stripe products |
+| ✅ | ST-01: Legacy AR Hunter Stripe products archived (prod_TQM8ODk7fiW82r, prod_TPCn2lRuTLTMF4) |
 | P1 | GH-01: Fix GitHub MCP connector scope |
 | P2 | Softr: reconnect to Supabase via REST API |
 | P2 | Test framework: configure Vitest + Playwright |
