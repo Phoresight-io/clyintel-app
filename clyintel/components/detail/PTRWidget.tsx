@@ -23,7 +23,7 @@ interface Props {
 }
 
 export default function PTRWidget({ client }: Props) {
-  const [ptrState, setPtrState] = useState<PTRState>("idle");
+  const [ptrState, setPtrState] = useState<PTRState>("result");
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
   const [applied, setApplied] = useState(false);
 
