@@ -11,7 +11,8 @@ _Generated: 2026-05-16_
 - Ops repo: `Phoresight-io/clyintel-ops` (PRD, backlog, progress) — not yet in MCP scope ⚠️
 - AI ops repo: `Phoresight-io/phoresight-clyintel-ai-ops` — not yet in MCP scope ⚠️
 - Role: Cross-session source of truth
-- GH-01 status: Partially resolved. Connector now reaches `clyintel-app`. Add `clyintel-ops` and `phoresight-clyintel-ai-ops` via environment settings at code.claude.com to complete.
+- GitHub App permissions: All repositories ✅ (GitHub side is correct)
+- GH-01 status: GitHub App is fine. Session restriction is in Claude Code environment config at code.claude.com → environment → edit → GitHub repository scope.
 
 ### Supabase
 - Role: Operational database + Edge Functions
