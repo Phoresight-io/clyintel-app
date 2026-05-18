@@ -8,11 +8,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const isRecoveryActive = pathname === "/" || pathname.startsWith("/client") || pathname === "/connections";
   const isPortfolioActive = pathname === "/portfolio";
+  const isSettingsActive = pathname.startsWith("/settings");
 
   const navItems = [
     { label: "Recovery", href: "/", active: isRecoveryActive, disabled: false },
     { label: "Portfolio", href: "/portfolio", active: isPortfolioActive, disabled: false },
-    { label: "Settings", href: "#", active: false, disabled: true },
+    { label: "Settings", href: "/settings", active: isSettingsActive, disabled: false },
   ];
 
   return (
