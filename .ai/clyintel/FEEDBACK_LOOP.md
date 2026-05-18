@@ -42,6 +42,32 @@ See `PRODUCT_CONTEXT.md` → Open Items for the full P1/P2 list. Top priorities:
 
 ---
 
+## Entry 004 — 2026-05-18
+**Phase:** Build — UI continuation from prototype
+**Scope:** ConnectionsScreen port + 3 bug fixes in DashboardScreen
+
+### What was completed
+- Ported `ConnectionsScreen` from `clyintel_after.jsx` into Next.js App Router
+  - New route: `/connections` (`app/connections/page.tsx`)
+  - New component: `components/connections/ConnectionsScreen.tsx`
+  - Stages: connect → connecting (progress bar) → select client → analyzing (progress bar) → back to `/`
+  - Manual Entry sub-flow: form → saved confirmation → back to `/`
+  - All inline styles kept verbatim; `C` tokens imported from `lib/theme.ts`
+  - Mock data (`invoiceServices`, `importedClients`, `MANUAL_FIELDS`) was already in `lib/mock-data.ts`
+- Fixed: duplicate `RecoveryRecModal` render — DashboardScreen was rendering it redundantly; NegotiationActions owns the modal
+- Fixed: dead state `selectedInvoiceForExchanges` removed from DashboardScreen (never wired up)
+- Fixed: search filter now matches by client name — moved from inside `filterInvoices` (pre-flatMap) to post-flatMap where `clientName` is available
+- Wired: "+ Add Client" button on Recovery Dashboard now routes to `/connections`
+- AppShell: `/connections` included in `isRecoveryActive` so nav state reflects correctly
+
+### Build result
+`npm run build` — clean pass. 5 routes: `/`, `/client/[id]`, `/connections`, `/portfolio`, `/_not-found`
+
+### Open items carried forward
+- Remaining P1 items from Entry 003 unchanged (Supabase, Anthropic API key, Twilio, MailerSend, QBO OAuth)
+
+---
+
 ## Entry 002 — 2026-05-17
 **Phase:** Sync — Open D3 alignment check
 **Scope:** Cross-file consistency pass across all repo docs
