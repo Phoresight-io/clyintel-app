@@ -6,13 +6,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
-  const isRecoveryActive = pathname === "/" || pathname.startsWith("/client");
+  const isRecoveryActive = pathname === "/" || pathname.startsWith("/client") || pathname === "/connections";
   const isPortfolioActive = pathname === "/portfolio";
+  const isSettingsActive = pathname.startsWith("/settings");
 
   const navItems = [
     { label: "Recovery", href: "/", active: isRecoveryActive, disabled: false },
     { label: "Portfolio", href: "/portfolio", active: isPortfolioActive, disabled: false },
-    { label: "Settings", href: "#", active: false, disabled: true },
+    { label: "Settings", href: "/settings", active: isSettingsActive, disabled: false },
   ];
 
   return (
@@ -62,7 +63,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Footer */}
       <footer style={{ height: 44, borderTop: `1px solid ${C.border}`, background: C.surface, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 36px" }}>
         <span style={{ fontSize: 12, color: C.textDim, fontFamily: C.mono }}>Clyintel · Payment Intelligence</span>
-        <span style={{ fontSize: 12, color: C.textDim, fontFamily: C.mono }}>Updated May 17, 2026</span>
+        <span style={{ fontSize: 12, color: C.textDim, fontFamily: C.mono }}>Updated {new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</span>
       </footer>
     </div>
   );

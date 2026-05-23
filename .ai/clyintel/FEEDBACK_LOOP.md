@@ -42,6 +42,32 @@ See `PRODUCT_CONTEXT.md` → Open Items for the full P1/P2 list. Top priorities:
 
 ---
 
+## Entry 006 — 2026-05-18
+**Phase:** Build — UI prototype complete + polish
+**Scope:** ConnectionsScreen, Settings/Integrations, polish pass, branch merged to main
+
+### What was completed
+- Ported `ConnectionsScreen` from `clyintel_after.jsx` into Next.js App Router
+  - New route: `/connections` (`app/connections/page.tsx`)
+  - Stages: connect → connecting → select client → analyzing → back to `/`
+  - Manual Entry sub-flow: form → saved confirmation → back to `/`
+  - Deep-link: `/connections?mode=manual` jumps directly to manual form
+- Added Settings / Integrations screen (`/settings`)
+  - Connected integration cards with Sync Now / Disconnect actions
+  - Available integrations grid
+  - Manual entry banner → routes to `/connections?mode=manual`
+- PTRWidget: per-client recommendations wired to `ptrRecommendations` in mock-data
+- Polish pass: per-client score rail copy, real `prevScore` deltas, dynamic footer date, dashboard empty-table state, Total Outstanding shows "—" at $0
+- Branch `claude/build-ui-prototype-tSQ7P` merged to `main` and promoted to production
+
+### Build result
+Clean TypeScript pass. 6 routes: `/`, `/client/[id]`, `/connections`, `/portfolio`, `/settings`, `/_not-found`
+
+### Open items carried forward
+- Remaining P1 items from Entry 005 unchanged (Twilio, MailerSend, QBO OAuth)
+
+---
+
 ## Entry 005 — 2026-05-18
 **Phase:** Sync — P1 item sweep
 **Scope:** Supabase types, Stripe archive, env vars, domain investigation
@@ -53,7 +79,7 @@ See `PRODUCT_CONTEXT.md` → Open Items for the full P1/P2 list. Top priorities:
 - Anthropic API key: set in Vercel as `Anthrop_API_Key`
 - ST-01: Archived both legacy AR Hunter Stripe products (`prod_TQM8ODk7fiW82r`, `prod_TPCn2lRuTLTMF4`) — confirmed `active: false`
 - GH-01: Diagnosed — GitHub App has All Repositories access. Session scope is a Claude Code platform limitation (one repo per session). No fix available.
-- Vercel `clyintel-app.vercel.app` 404: Root cause identified — production branch still set to `claude/setup-open-d3-framework-fAvPt`. Vercel API PATCH attempts failed (endpoint rejected both `link` and `productionBranch` properties). Dashboard setting location not found. Carrying forward.
+- Vercel `clyintel-app.vercel.app` 404: Root cause identified — production branch still set to `claude/setup-open-d3-framework-fAvPt`. Vercel API PATCH attempts failed. Carrying forward.
 
 ### Working URL
 https://clyintel-app-git-main-phoresight-ios-projects.vercel.app
