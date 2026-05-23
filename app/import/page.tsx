@@ -38,7 +38,7 @@ interface TokenResponse {
 }
 
 interface TokenClient {
-  requestAccessToken(): void;
+  requestAccessToken(overrides?: { prompt?: string }): void;
 }
 
 declare global {
@@ -82,16 +82,25 @@ export default function ImportPage() {
   const gisReadyRef = useRef(false);
 
   useEffect(() => {
-    function loadScript(src: string, onload: () => void) {
-      if (document.querySelector(`script[src="${src}"]`)) {
-        onload();
+    function loadScript(src: string, onReady: () => void) {
+      const existing = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
+      if (existing) {
+        // Tag exists: if already loaded fire immediately, otherwise wait for the load event.
+        if (existing.dataset.loaded === 'true') {
+          onReady();
+        } else {
+          existing.addEventListener('load', onReady, { once: true });
+        }
         return;
       }
       const s = document.createElement('script');
       s.src = src;
       s.async = true;
       s.defer = true;
-      s.onload = onload;
+      s.addEventListener('load', () => {
+        s.dataset.loaded = 'true';
+        onReady();
+      }, { once: true });
       document.head.appendChild(s);
     }
 
@@ -189,7 +198,7 @@ export default function ImportPage() {
       },
     });
 
-    tokenClient.requestAccessToken();
+    tokenClient.requestAccessToken({ prompt: 'select_account' });
   }
 
   async function handleConfirmImport() {
