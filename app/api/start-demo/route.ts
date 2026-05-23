@@ -3,7 +3,14 @@ import { getSupabase } from '@/lib/supabase';
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { firstName, lastName, companyName, phone, scenario } = body;
+  console.log('[start-demo] body:', JSON.stringify(body));
+
+  const { firstName, lastName, phone } = body;
+  const companyName = body.companyName ?? body.company ?? '';
+  let scenario = body.scenario;
+  if (scenario === '7d') scenario = 1;
+  else if (scenario === '45d') scenario = 2;
+  else if (scenario === '90d') scenario = 3;
 
   console.log('[start-demo] received request', { firstName, lastName, companyName, phone, scenario });
 
