@@ -9,7 +9,7 @@ const SURFACE = 'rgba(255,255,255,0.06)';
 const BORDER = 'rgba(255,255,255,0.12)';
 
 // ---------------------------------------------------------------------------
-// Google API type declarations (gapi + GIS)
+// Google API type declarations (gapi + Picker)
 // ---------------------------------------------------------------------------
 interface DocsViewInstance {
   setMimeTypes(types: string): DocsViewInstance;
@@ -32,30 +32,12 @@ interface PickerCallbackData {
   docs?: Array<{ id: string; name: string }>;
 }
 
-interface TokenResponse {
-  access_token?: string;
-  error?: string;
-}
-
-interface TokenClient {
-  requestAccessToken(overrides?: { prompt?: string }): void;
-}
-
 declare global {
   interface Window {
     gapi: {
       load(api: string, cb: () => void): void;
     };
     google: {
-      accounts: {
-        oauth2: {
-          initTokenClient(cfg: {
-            client_id: string;
-            scope: string;
-            callback(r: TokenResponse): void;
-          }): TokenClient;
-        };
-      };
       picker: {
         PickerBuilder: new () => PickerBuilderInstance;
         DocsView: new () => DocsViewInstance;
@@ -64,6 +46,9 @@ declare global {
     };
   }
 }
+
+// Must be registered as an authorised redirect URI in Google Cloud Console.
+const GOOGLE_REDIRECT_URI = 'https://clyintel-app.vercel.app/api/auth/google/callback';
 
 // ---------------------------------------------------------------------------
 
@@ -79,7 +64,6 @@ export default function ImportPage() {
   const [importedCount, setImportedCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const gapiReadyRef = useRef(false);
-  const gisReadyRef = useRef(false);
 
   useEffect(() => {
     function loadScript(src: string, onReady: () => void) {
@@ -106,9 +90,6 @@ export default function ImportPage() {
 
     loadScript('https://apis.google.com/js/api.js', () => {
       gapiReadyRef.current = true;
-    });
-    loadScript('https://accounts.google.com/gsi/client', () => {
-      gisReadyRef.current = true;
     });
   }, []);
 
@@ -147,14 +128,36 @@ export default function ImportPage() {
     }
   }
 
+  function showPicker(token: string) {
+    window.gapi.load('picker', () => {
+      const view = new window.google.picker.DocsView().setMimeTypes(
+        'text/csv,text/plain'
+      );
+
+      const pickerBuilder = new window.google.picker.PickerBuilder()
+        .addView(view)
+        .setOAuthToken(token)
+        .setCallback((data: PickerCallbackData) => {
+          if (
+            data.action === window.google.picker.Action.PICKED &&
+            data.docs?.[0]
+          ) {
+            const doc = data.docs[0];
+            downloadDriveFile(doc.id, token, doc.name);
+          }
+        });
+
+      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY;
+      if (apiKey) pickerBuilder.setDeveloperKey(apiKey);
+
+      pickerBuilder.build().setVisible(true);
+    });
+  }
+
   function openDrivePicker() {
     const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
     if (!clientId) {
       setError('NEXT_PUBLIC_GOOGLE_CLIENT_ID is not configured.');
-      return;
-    }
-    if (!gisReadyRef.current || !window.google?.accounts?.oauth2) {
-      setError('Google Identity Services is still loading — please try again.');
       return;
     }
     if (!gapiReadyRef.current || !window.gapi) {
@@ -162,43 +165,58 @@ export default function ImportPage() {
       return;
     }
 
-    const tokenClient = window.google.accounts.oauth2.initTokenClient({
+    // Build the OAuth 2.0 implicit grant URL and open it in a popup so the
+    // user always sees the account-selection / consent screen.
+    const params = new URLSearchParams({
       client_id: clientId,
+      redirect_uri: GOOGLE_REDIRECT_URI,
+      response_type: 'token',
       scope: 'https://www.googleapis.com/auth/drive.readonly',
-      callback(response) {
-        if (!response.access_token) {
-          setError('Google authorization was cancelled or failed.');
-          return;
-        }
-        const token = response.access_token;
-
-        window.gapi.load('picker', () => {
-          const view = new window.google.picker.DocsView().setMimeTypes(
-            'text/csv,text/plain'
-          );
-
-          const pickerBuilder = new window.google.picker.PickerBuilder()
-            .addView(view)
-            .setOAuthToken(token)
-            .setCallback((data: PickerCallbackData) => {
-              if (
-                data.action === window.google.picker.Action.PICKED &&
-                data.docs?.[0]
-              ) {
-                const doc = data.docs[0];
-                downloadDriveFile(doc.id, token, doc.name);
-              }
-            });
-
-          const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY;
-          if (apiKey) pickerBuilder.setDeveloperKey(apiKey);
-
-          pickerBuilder.build().setVisible(true);
-        });
-      },
+      prompt: 'consent select_account',
+      include_granted_scopes: 'true',
     });
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 
-    tokenClient.requestAccessToken({ prompt: 'select_account' });
+    const width = 500;
+    const height = 620;
+    const left = Math.round(window.screenX + (window.outerWidth - width) / 2);
+    const top = Math.round(window.screenY + (window.outerHeight - height) / 2);
+
+    const popup = window.open(
+      authUrl,
+      'google-oauth',
+      `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+    );
+
+    if (!popup) {
+      setError('Popup was blocked. Please allow popups for this site and try again.');
+      return;
+    }
+
+    function handleMessage(event: MessageEvent) {
+      // Only accept messages from our own origin (posted by the callback page).
+      if (event.origin !== window.location.origin) return;
+      const msg = event.data as { type?: string; access_token?: string; error?: string };
+      if (msg.type === 'GOOGLE_OAUTH_TOKEN' && msg.access_token) {
+        cleanup();
+        showPicker(msg.access_token);
+      } else if (msg.type === 'GOOGLE_OAUTH_ERROR') {
+        cleanup();
+        setError(`Google authorization failed: ${msg.error ?? 'unknown error'}`);
+      }
+    }
+
+    function cleanup() {
+      window.removeEventListener('message', handleMessage);
+      clearInterval(closedPoll);
+    }
+
+    // Detect if the user closes the popup without completing the OAuth flow.
+    const closedPoll = setInterval(() => {
+      if (popup.closed) cleanup();
+    }, 500);
+
+    window.addEventListener('message', handleMessage);
   }
 
   async function handleConfirmImport() {
