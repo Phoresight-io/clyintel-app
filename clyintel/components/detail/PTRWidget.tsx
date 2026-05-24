@@ -200,34 +200,38 @@ export default function PTRWidget({ client }: Props) {
 
       {/* Projections */}
       <div style={{ borderTop: `1px solid ${C.border}`, display: "grid", gridTemplateColumns: "1fr 1px 1fr" }}>
-        <div style={{ padding: "16px 20px", textAlign: "center", position: "relative" }}>
+        <div style={{ padding: "16px 20px", textAlign: "center" }}>
           <div style={{ fontSize: 11, color: C.textMid, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
             Late Payment Reduction
-            <span data-tooltip="" onClick={() => setActiveTooltip(activeTooltip === 'left' ? null : 'left')} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", marginLeft: 5, cursor: "pointer", verticalAlign: "middle", flexShrink: 0, color: C.textDim }}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.3"/><path d="M7 6v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="7" cy="4.5" r="0.6" fill="currentColor"/></svg>
+            <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+              <span data-tooltip="" onClick={() => setActiveTooltip(activeTooltip === 'left' ? null : 'left')} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", marginLeft: 5, cursor: "pointer", verticalAlign: "middle", flexShrink: 0, color: C.textDim }}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.3"/><path d="M7 6v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="7" cy="4.5" r="0.6" fill="currentColor"/></svg>
+              </span>
+              {activeTooltip === 'left' && (
+                <div style={{ position: "absolute", bottom: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)", width: 220, background: "#FFFFFF", color: C.text, border: `1px solid ${C.border}`, fontSize: 12, lineHeight: 1.6, borderRadius: 8, padding: "10px 14px", zIndex: 50, boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}>
+                  Estimated reduction in late payments based on the recommended terms and reminder strategy, compared to your current setup.
+                </div>
+              )}
             </span>
           </div>
-          {activeTooltip === 'left' && (
-            <div style={{ position: "absolute", bottom: "calc(100% + 8px)", left: 0, width: 220, background: C.navy, color: "#fff", fontSize: 12, lineHeight: 1.6, borderRadius: 8, padding: "10px 14px", zIndex: 50, boxShadow: "0 4px 12px rgba(0,0,0,0.15)" }}>
-              Estimated reduction in late payments based on the recommended terms and reminder strategy, compared to your current setup.
-            </div>
-          )}
           <div style={{ fontSize: 28, fontWeight: 700, color: C.green, fontFamily: C.mono, lineHeight: 1 }}>{rec.lossReduction}</div>
           <div style={{ fontSize: 11, color: C.textDim, marginTop: 5 }}>vs. current terms</div>
         </div>
         <div style={{ background: C.border }} />
-        <div style={{ padding: "16px 20px", textAlign: "center", position: "relative" }}>
+        <div style={{ padding: "16px 20px", textAlign: "center" }}>
           <div style={{ fontSize: 11, color: C.textMid, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
             {rec.revImpactSign === "positive" ? "Est. Revenue Gain" : rec.revImpactSign === "neutral" ? "Revenue Impact" : "Estimated Delay Cost"}
-            <span data-tooltip="" onClick={() => setActiveTooltip(activeTooltip === 'right' ? null : 'right')} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", marginLeft: 5, cursor: "pointer", verticalAlign: "middle", flexShrink: 0, color: C.textDim }}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.3"/><path d="M7 6v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="7" cy="4.5" r="0.6" fill="currentColor"/></svg>
+            <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+              <span data-tooltip="" onClick={() => setActiveTooltip(activeTooltip === 'right' ? null : 'right')} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", marginLeft: 5, cursor: "pointer", verticalAlign: "middle", flexShrink: 0, color: C.textDim }}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.3"/><path d="M7 6v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="7" cy="4.5" r="0.6" fill="currentColor"/></svg>
+              </span>
+              {activeTooltip === 'right' && (
+                <div style={{ position: "absolute", bottom: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)", width: 220, background: "#FFFFFF", color: C.text, border: `1px solid ${C.border}`, fontSize: 12, lineHeight: 1.6, borderRadius: 8, padding: "10px 14px", zIndex: 50, boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}>
+                  Estimated annual revenue impact. A delay cost reflects cash flow lost while payments sit overdue; a gain reflects improved collection timing.
+                </div>
+              )}
             </span>
           </div>
-          {activeTooltip === 'right' && (
-            <div style={{ position: "absolute", bottom: "calc(100% + 8px)", left: 0, width: 220, background: C.navy, color: "#fff", fontSize: 12, lineHeight: 1.6, borderRadius: 8, padding: "10px 14px", zIndex: 50, boxShadow: "0 4px 12px rgba(0,0,0,0.15)" }}>
-              Estimated annual revenue impact. A delay cost reflects cash flow lost while payments sit overdue; a gain reflects improved collection timing.
-            </div>
-          )}
           <div style={{ fontSize: 28, fontWeight: 700, color: revColor, fontFamily: C.mono, lineHeight: 1 }}>
             {rec.revImpactSign === "negative" ? "-" : rec.revImpactSign === "positive" ? "+" : ""}{rec.revImpact}
           </div>
