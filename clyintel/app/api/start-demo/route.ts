@@ -1,47 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabase } from '@/lib/supabase';
 
+const INVOICE_MAP: Record<number, { number: string; amount: string; amountCents: number }> = {
+  1: { number: 'INV-2024-0891', amount: '$2,400.00', amountCents: 240000 },
+  2: { number: 'INV-2024-0744', amount: '$8,750.00', amountCents: 875000 },
+  3: { number: 'INV-2024-0612', amount: '$15,200.00', amountCents: 1520000 },
+};
+
+const COMPANY_NAME = 'Meridian Supply Co.';
+
 export async function POST(req: NextRequest) {
   const body = await req.json();
   console.log('[start-demo] body:', JSON.stringify(body));
 
   const { firstName, lastName, phone } = body;
-  const companyName = body.companyName ?? body.company ?? '';
   let scenario = body.scenario;
   if (scenario === '7d') scenario = 1;
   else if (scenario === '45d') scenario = 2;
   else if (scenario === '90d') scenario = 3;
 
-  console.log('[start-demo] received request', { firstName, lastName, companyName, phone, scenario });
-
-  if (!firstName || !lastName || !companyName || !phone || scenario === undefined || scenario === null) {
-    console.log('[start-demo] validation failed: missing required fields');
+  if (!firstName || !lastName || !phone || scenario === undefined || scenario === null) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
   }
   if (![1, 2, 3].includes(Number(scenario))) {
-    console.log('[start-demo] validation failed: invalid scenario', scenario);
     return NextResponse.json({ error: 'Invalid scenario' }, { status: 400 });
   }
 
   const name = `${firstName} ${lastName}`;
+  const scenarioNum = Number(scenario);
+  const invoice = INVOICE_MAP[scenarioNum];
   const supabase = getSupabase();
 
-  console.log('[start-demo] inserting demo_session', { name, companyName, phone, scenario });
   const { error: insertError } = await supabase.from('demo_sessions').insert({
     name,
-    company_name: companyName,
+    company_name: COMPANY_NAME,
     phone,
-    scenario: Number(scenario),
+    scenario: scenarioNum,
     conversation_history: [],
+    invoice_number: invoice.number,
   });
 
   if (insertError) {
     console.log('[start-demo] supabase insert error:', insertError.message);
-    throw new Error(insertError.message);
+    return NextResponse.json({ error: insertError.message }, { status: 500 });
   }
-  console.log('[start-demo] demo_session inserted');
 
-  console.log('[start-demo] calling vapi');
   const vapiRes = await fetch('https://api.vapi.ai/call/phone', {
     method: 'POST',
     headers: {
@@ -53,17 +56,34 @@ export async function POST(req: NextRequest) {
       phoneNumberId: process.env.VAPI_PHONE_NUMBER_ID,
       customer: { number: phone },
       assistantOverrides: {
-        variableValues: { name, companyName, scenario: Number(scenario) },
+        variableValues: {
+          name,
+          companyName: COMPANY_NAME,
+          scenario: scenarioNum,
+          invoiceNumber: invoice.number,
+          invoiceAmount: invoice.amount,
+        },
       },
     }),
   });
-  console.log('[start-demo] vapi response status:', vapiRes.status);
 
   if (!vapiRes.ok) {
     const errBody = await vapiRes.text();
-    console.log('[start-demo] vapi error body:', errBody);
-    throw new Error(`Vapi error: ${vapiRes.status}`);
+    console.log('[start-demo] vapi error:', errBody);
+    return NextResponse.json({ error: `Vapi error: ${vapiRes.status}` }, { status: 500 });
   }
+
+  await (supabase as any).from('communications').insert({
+    channel: 'voice',
+    direction: 'outbound',
+    subject: `Recovery call — ${invoice.number}`,
+    body: `Outbound recovery call initiated for ${invoice.number} (${invoice.amount}) to ${name} at ${COMPANY_NAME}. Scenario: ${scenarioNum}.`,
+    sent_at: new Date().toISOString(),
+    status: 'sent',
+    to_address: phone,
+    from_address: 'vapi-agent',
+    airtable_subscriber_id: 'demo',
+  });
 
   console.log('[start-demo] success');
   return NextResponse.json({ success: true });

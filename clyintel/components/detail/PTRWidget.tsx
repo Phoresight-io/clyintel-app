@@ -185,11 +185,11 @@ export default function PTRWidget({ client }: Props) {
               return (
                 <span key={day} style={{
                   fontSize: 11, fontWeight: 600, fontFamily: C.mono,
-                  color: isOverdue ? "#fff" : isToday ? C.navy : C.blue,
+                  color: isOverdue ? "#fff" : isToday ? "#fff" : C.blue,
                   background: isOverdue ? C.red : isToday ? C.navy : C.blueBg,
                   borderRadius: 5, padding: "3px 7px",
                 }}>
-                  {isToday ? "Due" : day > 0 ? `+${day}d` : `${day}d`}
+                  {isToday ? "Due Date" : day > 0 ? `+${day}d` : `${day}d`}
                 </span>
               );
             })}
