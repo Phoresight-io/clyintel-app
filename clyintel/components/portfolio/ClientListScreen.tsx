@@ -6,21 +6,7 @@ import { clients, clientInvoices } from "@/lib/mock-data";
 export default function ClientListScreen() {
   const router = useRouter();
 
-  const totalOutstanding = clients.reduce((sum, c) => sum + c.balance, 0);
   const getRecoveryYTD = (id: number): number => ({ 4: 15800, 1: 3200, 2: 8400, 3: 12400, 5: 2800 } as Record<number, number>)[id] || 0;
-  const totalRecovery = clients.reduce((sum, c) => sum + getRecoveryYTD(c.id), 0);
-  const lowRisk = clients.filter(c => c.score >= 80).length;
-  const mediumRisk = clients.filter(c => c.score >= 60 && c.score < 80).length;
-  const highRisk = clients.filter(c => c.score < 60).length;
-  const scores = clients.map(c => c.score);
-  const maxScore = Math.max(...scores);
-  const minScore = Math.min(...scores);
-
-  const riskItems = [
-    { label: "Low Risk", count: lowRisk, color: C.green },
-    { label: "Medium Risk", count: mediumRisk, color: C.amber },
-    { label: "High Risk", count: highRisk, color: C.red },
-  ];
 
   return (
     <div style={{ padding: "28px 36px", minHeight: 520, fontFamily: C.sans }}>
@@ -28,42 +14,6 @@ export default function ClientListScreen() {
         <span style={{ fontSize: 16 }}>←</span> Back to Recovery
       </button>
       <div style={{ fontSize: 28, fontWeight: 600, color: C.navy, marginBottom: 24 }}>Portfolio Dashboard</div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: C.navy, marginBottom: 12, textTransform: "uppercase" }}>Risk Distribution</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {riskItems.map(item => (
-              <div key={item.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                <span style={{ color: item.color }}>{item.label}</span>
-                <span style={{ fontWeight: 600, color: item.color }}>{item.count}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: C.navy, marginBottom: 12, textTransform: "uppercase" }}>Financial Overview</div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-            <span style={{ fontSize: 11, color: C.textMid }}>Outstanding</span>
-            <span style={{ fontSize: 16, fontWeight: 600, color: C.red, fontFamily: C.mono }}>${(totalOutstanding / 1000).toFixed(0)}K</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 11, color: C.textMid }}>Recovery YTD</span>
-            <span style={{ fontSize: 16, fontWeight: 600, color: C.green, fontFamily: C.mono }}>${(totalRecovery / 1000).toFixed(0)}K</span>
-          </div>
-        </div>
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: C.navy, marginBottom: 12, textTransform: "uppercase" }}>Portfolio Stats</div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-            <span style={{ fontSize: 11, color: C.textMid }}>Total Clients</span>
-            <span style={{ fontSize: 16, fontWeight: 600, color: C.blue, fontFamily: C.mono }}>{clients.length}</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 11, color: C.textMid }}>Score Range</span>
-            <span style={{ fontSize: 16, fontWeight: 600, color: C.text, fontFamily: C.mono }}>{maxScore}–{minScore}</span>
-          </div>
-        </div>
-      </div>
 
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden" }}>
         <div style={{ display: "grid", gridTemplateColumns: "200px 140px 140px 120px 100px 140px 140px", gap: 16, padding: "12px 16px", background: C.surface, borderBottom: `1px solid ${C.border}`, fontSize: 11, fontWeight: 600, color: C.navy, textTransform: "uppercase" }}>
