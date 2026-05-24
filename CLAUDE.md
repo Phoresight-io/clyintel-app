@@ -70,6 +70,17 @@ All agents must follow these rules unless the product CLAUDE.md explicitly overr
 
 ---
 
+## Branching SOP
+
+- Always branch off `main`
+- Branch naming: `feature/<short-description>` or `fix/<short-description>`
+- Merge back to `main` within the same session via PR
+- Delete the feature branch immediately after merge
+- Never promote a non-main branch to Vercel production
+- Vercel auto-deploys `main` on every push — no manual promotion needed
+
+---
+
 ## Open D3 Pipeline Entry Points
 
 - **Start a feature:** "Run the Open D3 pipeline for: [feature]. Product: clyintel"
