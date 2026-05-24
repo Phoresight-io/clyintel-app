@@ -19,10 +19,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: C.sans }}>
       {/* Top Nav */}
-      <nav style={{ height: 52, borderBottom: `1px solid ${C.border}`, background: "#FFFFFF", display: "flex", alignItems: "center", padding: "0 36px", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 32 }}>
-          {/* Wordmark */}
-          <span style={{ fontSize: 17, fontWeight: 700, color: C.navy, letterSpacing: "-0.01em", cursor: "pointer" }} onClick={() => router.push("/")}>Clyintel</span>
+      <nav style={{ height: 64, borderBottom: `1px solid ${C.border}`, background: "#FFFFFF", display: "flex", alignItems: "center", padding: "0 36px", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Logo */}
+          <img
+            src="https://raw.githubusercontent.com/Phoresight-io/Brand-Kit/main/FullLogo_Transparent_NoBuffer.jpg"
+            alt="Phoresight"
+            onClick={() => router.push("/")}
+            style={{ height: 36, objectFit: "contain", cursor: "pointer", marginRight: 16 }}
+          />
           {/* Nav Items */}
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
             {navItems.map(item => (

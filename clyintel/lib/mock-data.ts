@@ -67,6 +67,27 @@ export interface InvoiceService {
   color: string;
   initial: string;
   subtitle: string;
+  logo?: string;
+}
+
+export interface DriveFolder {
+  name: string;
+  files: number;
+  modified: string;
+}
+
+export interface DriveFile {
+  name: string;
+  size: string;
+  modified: string;
+  rows: number;
+}
+
+export interface GoogleAccount {
+  email: string;
+  name: string;
+  initial: string;
+  color: string;
 }
 
 export interface ImportedClient {
@@ -284,12 +305,32 @@ export const negotiationRecs: NegotiationRec[] = [
 ];
 
 export const invoiceServices: InvoiceService[] = [
-  { id: "qb", name: "QuickBooks", color: "#2CA01C", initial: "QB", subtitle: "Sync invoices from QuickBooks" },
-  { id: "fb", name: "FreshBooks", color: "#1068e0", initial: "FB", subtitle: "Sync invoices from FreshBooks" },
-  { id: "stripe", name: "Stripe", color: "#635BFF", initial: "ST", subtitle: "Sync invoices from Stripe" },
-  { id: "xero", name: "Xero", color: "#13B5EA", initial: "XR", subtitle: "Sync invoices from Xero" },
-  { id: "gdrive", name: "Google Drive", color: "#1FA463", initial: "GD", subtitle: "Pull from spreadsheet file" },
-  { id: "manual", name: "Manual Entry", color: "#64748B", initial: "ME", subtitle: "Create an invoice manually" },
+  { id: "qb",     name: "QuickBooks",   color: "#2CA01C", initial: "QB",  logo: "https://cdn.simpleicons.org/quickbooks/FFFFFF",  subtitle: "Sync invoices from QuickBooks" },
+  { id: "fb",     name: "FreshBooks",   color: "#1068e0", initial: "FB",  logo: "https://cdn.simpleicons.org/freshbooks/FFFFFF",  subtitle: "Sync invoices from FreshBooks" },
+  { id: "stripe", name: "Stripe",       color: "#635BFF", initial: "ST",  logo: "https://cdn.simpleicons.org/stripe/FFFFFF",      subtitle: "Sync invoices from Stripe" },
+  { id: "xero",   name: "Xero",         color: "#13B5EA", initial: "XR",  logo: "https://cdn.simpleicons.org/xero/FFFFFF",        subtitle: "Sync invoices from Xero" },
+  { id: "gdrive", name: "Google Drive", color: "#1FA463", initial: "GD",  logo: "https://cdn.simpleicons.org/googledrive/FFFFFF", subtitle: "Pick a CSV from your Drive" },
+  { id: "csv",    name: "Upload CSV",   color: "#475569", initial: "CSV",                                                          subtitle: "Upload a CSV file from your computer" },
+  { id: "manual", name: "Manual Entry", color: "#64748B", initial: "ME",                                                           subtitle: "Create an invoice manually" },
+];
+
+export const driveFolders: DriveFolder[] = [
+  { name: "Accounts Receivable", files: 12, modified: "Apr 19, 2026" },
+  { name: "2026 Invoices",       files: 47, modified: "Apr 18, 2026" },
+  { name: "Recovery Logs",       files: 8,  modified: "Apr 11, 2026" },
+  { name: "Client Master",       files: 23, modified: "Mar 28, 2026" },
+];
+
+export const driveFiles: DriveFile[] = [
+  { name: "Q1_2026_Invoices.csv",       size: "84 KB",  modified: "Apr 18, 2026", rows: 47  },
+  { name: "Outstanding_AR_Master.csv",  size: "162 KB", modified: "Apr 12, 2026", rows: 128 },
+  { name: "March_Recovery_Log.csv",     size: "31 KB",  modified: "Mar 31, 2026", rows: 19  },
+  { name: "Client_Master_2025.csv",     size: "211 KB", modified: "Dec 30, 2025", rows: 314 },
+];
+
+export const googleAccounts: GoogleAccount[] = [
+  { email: "alex.morgan@phoresight.io",  name: "Alex Morgan", initial: "AM", color: "#4285F4" },
+  { email: "alex.personal@gmail.com",    name: "Alex Morgan", initial: "AM", color: "#34A853" },
 ];
 
 export const importedClients: ImportedClient[] = [
