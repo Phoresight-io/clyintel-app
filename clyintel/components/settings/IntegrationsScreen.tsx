@@ -10,6 +10,7 @@ interface ManagedIntegration {
   name: string;
   color: string;
   initial: string;
+  logo?: string;
   subtitle: string;
   status: IntegrationStatus;
   lastSync: string | null;
@@ -18,11 +19,11 @@ interface ManagedIntegration {
 }
 
 const INITIAL_INTEGRATIONS: ManagedIntegration[] = [
-  { id: "qb",     name: "QuickBooks",   color: "#2CA01C", initial: "QB", subtitle: "Sync invoices from QuickBooks Online",   status: "connected",    lastSync: "Today at 2:14 PM", clients: 6, invoices: 24 },
-  { id: "fb",     name: "FreshBooks",   color: "#1068e0", initial: "FB", subtitle: "Sync invoices from FreshBooks",          status: "disconnected", lastSync: null, clients: 0, invoices: 0 },
-  { id: "stripe", name: "Stripe",       color: "#635BFF", initial: "ST", subtitle: "Sync invoices from Stripe Billing",      status: "disconnected", lastSync: null, clients: 0, invoices: 0 },
-  { id: "xero",   name: "Xero",         color: "#13B5EA", initial: "XR", subtitle: "Sync invoices from Xero",               status: "disconnected", lastSync: null, clients: 0, invoices: 0 },
-  { id: "gdrive", name: "Google Drive", color: "#1FA463", initial: "GD", subtitle: "Import from a spreadsheet in Drive",     status: "disconnected", lastSync: null, clients: 0, invoices: 0 },
+  { id: "qb",     name: "QuickBooks",   color: "#2CA01C", initial: "QB", logo: "https://cdn.simpleicons.org/quickbooks/FFFFFF",   subtitle: "Sync invoices from QuickBooks Online",   status: "connected",    lastSync: "Today at 2:14 PM", clients: 6, invoices: 24 },
+  { id: "fb",     name: "FreshBooks",   color: "#1068e0", initial: "FB", logo: "https://cdn.simpleicons.org/freshbooks/FFFFFF",   subtitle: "Sync invoices from FreshBooks",          status: "disconnected", lastSync: null, clients: 0, invoices: 0 },
+  { id: "stripe", name: "Stripe",       color: "#635BFF", initial: "ST", logo: "https://cdn.simpleicons.org/stripe/FFFFFF",       subtitle: "Sync invoices from Stripe Billing",      status: "disconnected", lastSync: null, clients: 0, invoices: 0 },
+  { id: "xero",   name: "Xero",         color: "#13B5EA", initial: "XR", logo: "https://cdn.simpleicons.org/xero/FFFFFF",         subtitle: "Sync invoices from Xero",                status: "disconnected", lastSync: null, clients: 0, invoices: 0 },
+  { id: "gdrive", name: "Google Drive", color: "#1FA463", initial: "GD", logo: "https://cdn.simpleicons.org/googledrive/FFFFFF",  subtitle: "Import from a spreadsheet in Drive",     status: "disconnected", lastSync: null, clients: 0, invoices: 0 },
 ];
 
 const SETTING_TABS = [
@@ -159,7 +160,10 @@ export default function IntegrationsScreen() {
               >
                 {/* Logo */}
                 <div style={{ width: 48, height: 48, borderRadius: 12, background: integration.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{integration.initial}</span>
+                  {integration.logo
+                    ? <img src={integration.logo} alt={integration.name} style={{ width: 26, height: 26, objectFit: "contain" }} />
+                    : <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{integration.initial}</span>
+                  }
                 </div>
 
                 {/* Info */}
@@ -244,7 +248,10 @@ export default function IntegrationsScreen() {
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <div style={{ width: 40, height: 40, borderRadius: 10, background: integration.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#fff" }}>{integration.initial}</span>
+                    {integration.logo
+                      ? <img src={integration.logo} alt={integration.name} style={{ width: 22, height: 22, objectFit: "contain" }} />
+                      : <span style={{ fontSize: 11, fontWeight: 700, color: "#fff" }}>{integration.initial}</span>
+                    }
                   </div>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{integration.name}</div>
