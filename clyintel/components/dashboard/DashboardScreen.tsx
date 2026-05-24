@@ -119,7 +119,6 @@ export default function DashboardScreen() {
     <div style={{ padding: "28px 36px", minHeight: 520, fontFamily: C.sans }}>
       <div style={{ marginBottom: 24 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 4 }}>Clyintel</div>
           <div style={{ fontSize: 28, lineHeight: 1.15, fontWeight: 600, color: C.navy }}>Recovery Dashboard</div>
           <div style={{ display: "flex", gap: 12 }}>
             <button onClick={() => router.push("/connections")} style={{ padding: "8px 4px", fontSize: 14, fontWeight: 500, color: C.blue, background: "transparent", border: "none", cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 3 }} onMouseEnter={(e) => (e.currentTarget.style.color = C.amber)} onMouseLeave={(e) => (e.currentTarget.style.color = C.blue)}>+ Add Client</button>

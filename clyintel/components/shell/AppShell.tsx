@@ -20,14 +20,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: C.sans }}>
       {/* Top Nav */}
       <nav style={{ height: 64, borderBottom: `1px solid ${C.border}`, background: "#FFFFFF", display: "flex", alignItems: "center", padding: "0 36px", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center" }}>
           {/* Logo */}
           <img
             src="https://raw.githubusercontent.com/Phoresight-io/Brand-Kit/main/FullLogo_Transparent_NoBuffer.jpg"
             alt="Phoresight"
             onClick={() => router.push("/")}
-            style={{ height: 36, objectFit: "contain", cursor: "pointer", marginRight: 16 }}
+            style={{ height: 36, objectFit: "contain", cursor: "pointer" }}
           />
+          <div style={{ width: 1, height: 24, background: C.border, margin: "0 16px" }} />
+          <span style={{ fontSize: 18, fontWeight: 700, color: C.navy, letterSpacing: "-0.5px" }}>Clyintel</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           {/* Nav Items */}
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
             {navItems.map(item => (
@@ -53,10 +57,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               </button>
             ))}
           </div>
-        </div>
-        {/* Avatar */}
-        <div style={{ width: 32, height: 32, borderRadius: "50%", background: C.navy, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: "#FFFFFF" }}>JD</span>
+          {/* Avatar */}
+          <div style={{ width: 32, height: 32, borderRadius: "50%", background: C.navy, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#FFFFFF" }}>JD</span>
+          </div>
         </div>
       </nav>
 
