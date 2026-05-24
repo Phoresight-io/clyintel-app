@@ -191,14 +191,14 @@ export default function PTRWidget({ client }: Props) {
       {/* Projections */}
       <div style={{ borderTop: `1px solid ${C.border}`, display: "grid", gridTemplateColumns: "1fr 1px 1fr" }}>
         <div style={{ padding: "16px 20px", textAlign: "center" }}>
-          <div style={{ fontSize: 11, color: C.textMid, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Late Payment Reduction</div>
+          <div style={{ fontSize: 11, color: C.textMid, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Late Payment Reduction<span title="Estimated reduction in late payments based on the recommended terms and reminder strategy, compared to your current setup." style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", background: C.surface, border: `1px solid ${C.border}`, fontSize: 10, color: C.textDim, marginLeft: 5, cursor: "default", verticalAlign: "middle" }}>?</span></div>
           <div style={{ fontSize: 28, fontWeight: 700, color: C.green, fontFamily: C.mono, lineHeight: 1 }}>{rec.lossReduction}</div>
           <div style={{ fontSize: 11, color: C.textDim, marginTop: 5 }}>vs. current terms</div>
         </div>
         <div style={{ background: C.border }} />
         <div style={{ padding: "16px 20px", textAlign: "center" }}>
           <div style={{ fontSize: 11, color: C.textMid, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-            {rec.revImpactSign === "positive" ? "Est. Revenue Gain" : rec.revImpactSign === "neutral" ? "Revenue Impact" : "Est. Delay Cost"}
+            {rec.revImpactSign === "positive" ? "Est. Revenue Gain" : rec.revImpactSign === "neutral" ? "Revenue Impact" : "Estimated Delay Cost"}<span title="Estimated annual revenue impact. A delay cost reflects cash flow lost while payments sit overdue; a gain reflects improved collection timing." style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", background: C.surface, border: `1px solid ${C.border}`, fontSize: 10, color: C.textDim, marginLeft: 5, cursor: "default", verticalAlign: "middle" }}>?</span>
           </div>
           <div style={{ fontSize: 28, fontWeight: 700, color: revColor, fontFamily: C.mono, lineHeight: 1 }}>
             {rec.revImpactSign === "negative" ? "-" : rec.revImpactSign === "positive" ? "+" : ""}{rec.revImpact}
