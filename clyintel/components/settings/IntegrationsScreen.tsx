@@ -240,32 +240,43 @@ export default function IntegrationsScreen() {
             <div style={{ fontSize: 12, color: C.textDim, marginTop: 2 }}>Connect an invoice source to start importing clients automatically.</div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
             {available.map(integration => (
               <div
                 key={integration.id}
-                style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "20px 20px 18px", display: "flex", flexDirection: "column", gap: 14 }}
+                onClick={handleConnect}
+                style={{
+                  background: C.card,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 12,
+                  padding: "28px 20px",
+                  cursor: "pointer",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 14,
+                  textAlign: "center",
+                  transition: "border-color 0.15s",
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.borderColor = C.blue;
+                  e.currentTarget.style.boxShadow = `0 0 0 3px ${C.blueBg}`;
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.borderColor = C.border;
+                  e.currentTarget.style.boxShadow = "none";
+                }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div style={{ width: 40, height: 40, borderRadius: 10, background: integration.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    {integration.logo
-                      ? <img src={integration.logo} alt={integration.name} style={{ width: 22, height: 22, objectFit: "contain" }} />
-                      : <span style={{ fontSize: 11, fontWeight: 700, color: "#fff" }}>{integration.initial}</span>
-                    }
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{integration.name}</div>
-                    <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>{integration.subtitle}</div>
-                  </div>
+                <div style={{ width: 56, height: 56, borderRadius: 14, background: integration.color, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {integration.logo
+                    ? <img src={integration.logo} alt={integration.name} style={{ width: 32, height: 32, objectFit: "contain" }} />
+                    : <span style={{ fontSize: 16, fontWeight: 700, color: "#fff" }}>{integration.initial}</span>
+                  }
                 </div>
-                <button
-                  onClick={handleConnect}
-                  style={{ width: "100%", padding: "8px 0", fontSize: 12, fontWeight: 600, color: C.blue, background: C.blueBg, border: `1px solid ${C.blue}`, borderRadius: 6, cursor: "pointer" }}
-                  onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.8")}
-                  onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
-                >
-                  Connect
-                </button>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: C.text }}>{integration.name}</div>
+                  <div style={{ fontSize: 12, color: C.textDim, marginTop: 4 }}>{integration.subtitle}</div>
+                </div>
               </div>
             ))}
           </div>
