@@ -189,7 +189,7 @@ export default function PTRWidget({ client }: Props) {
                   background: isOverdue ? C.red : isToday ? C.navy : C.blueBg,
                   borderRadius: 5, padding: "3px 7px",
                 }}>
-                  {isToday ? "Due" : day > 0 ? `+${day}d` : `${day}d`}
+                  {isToday ? "Due Date" : day > 0 ? `+${day}d` : `${day}d`}
                 </span>
               );
             })}
