@@ -160,10 +160,20 @@ export default function IntegrationsScreen() {
               >
                 {/* Logo */}
                 <div style={{ width: 48, height: 48, borderRadius: 12, background: integration.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  {integration.logo
-                    ? <img src={integration.logo} alt={integration.name} style={{ width: 26, height: 26, objectFit: "contain" }} />
-                    : <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{integration.initial}</span>
-                  }
+                  {integration.logo && (
+                    <img
+                      src={integration.logo}
+                      alt={integration.name}
+                      style={{ width: 26, height: 26, objectFit: "contain" }}
+                      onError={e => {
+                        e.currentTarget.style.display = "none";
+                        (e.currentTarget.nextElementSibling as HTMLElement).style.display = "inline";
+                      }}
+                    />
+                  )}
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", display: integration.logo ? "none" : "inline" }}>
+                    {integration.initial}
+                  </span>
                 </div>
 
                 {/* Info */}
@@ -268,10 +278,20 @@ export default function IntegrationsScreen() {
                 }}
               >
                 <div style={{ width: 56, height: 56, borderRadius: 14, background: integration.color, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {integration.logo
-                    ? <img src={integration.logo} alt={integration.name} style={{ width: 32, height: 32, objectFit: "contain" }} />
-                    : <span style={{ fontSize: 16, fontWeight: 700, color: "#fff" }}>{integration.initial}</span>
-                  }
+                  {integration.logo && (
+                    <img
+                      src={integration.logo}
+                      alt={integration.name}
+                      style={{ width: 32, height: 32, objectFit: "contain" }}
+                      onError={e => {
+                        e.currentTarget.style.display = "none";
+                        (e.currentTarget.nextElementSibling as HTMLElement).style.display = "inline";
+                      }}
+                    />
+                  )}
+                  <span style={{ fontSize: 16, fontWeight: 700, color: "#fff", display: integration.logo ? "none" : "inline" }}>
+                    {integration.initial}
+                  </span>
                 </div>
                 <div>
                   <div style={{ fontSize: 15, fontWeight: 600, color: C.text }}>{integration.name}</div>

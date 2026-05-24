@@ -50,9 +50,24 @@ export default function ConnectionsScreen() {
   const integrations = invoiceServices.filter(s => ["qb","fb","stripe","xero"].includes(s.id));
   const bottomRow    = ["gdrive","csv","manual"].map(id => invoiceServices.find(s => s.id === id)!);
 
-  const svcIcon = (svc: InvoiceService, size = 32) => svc.logo
-    ? <img src={svc.logo} alt={svc.name} style={{ width: size, height: size, objectFit: "contain" }} onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
-    : <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>{svc.initial}</span>;
+  const svcIcon = (svc: InvoiceService, size = 32) => (
+    <>
+      {svc.logo && (
+        <img
+          src={svc.logo}
+          alt={svc.name}
+          style={{ width: size, height: size, objectFit: "contain" }}
+          onError={e => {
+            e.currentTarget.style.display = "none";
+            (e.currentTarget.nextElementSibling as HTMLElement).style.display = "inline";
+          }}
+        />
+      )}
+      <span style={{ fontSize: 14, fontWeight: 700, color: "#fff", display: svc.logo ? "none" : "inline" }}>
+        {svc.initial}
+      </span>
+    </>
+  );
 
   const backBtn = (onClick: () => void, label = "Back") => (
     <button onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", fontSize: 14, fontWeight: 600, color: C.blue, background: "transparent", border: "none", cursor: "pointer", marginBottom: 12 }} onMouseEnter={e => e.currentTarget.style.textDecoration = "underline"} onMouseLeave={e => e.currentTarget.style.textDecoration = "none"}>
