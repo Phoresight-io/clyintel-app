@@ -56,12 +56,8 @@ export default function IntegrationsScreen() {
 
   useEffect(() => {
     const isDirect = sessionStorage.getItem('clyintel_nav_direct') === 'true';
-    if (isDirect) {
-      sessionStorage.removeItem('clyintel_nav_direct');
-      setShowBack(false);
-    } else {
-      setShowBack(true);
-    }
+    setShowBack(!isDirect);
+    sessionStorage.removeItem('clyintel_nav_direct');
   }, []);
 
   const [activeTab, setActiveTab] = useState("integrations");

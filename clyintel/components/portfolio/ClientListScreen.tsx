@@ -10,12 +10,8 @@ export default function ClientListScreen() {
 
   useEffect(() => {
     const isDirect = sessionStorage.getItem('clyintel_nav_direct') === 'true';
-    if (isDirect) {
-      sessionStorage.removeItem('clyintel_nav_direct');
-      setShowBack(false);
-    } else {
-      setShowBack(true);
-    }
+    setShowBack(!isDirect);
+    sessionStorage.removeItem('clyintel_nav_direct');
   }, []);
 
   const getRecoveryYTD = (id: number): number => ({ 4: 15800, 1: 3200, 2: 8400, 3: 12400, 5: 2800 } as Record<number, number>)[id] || 0;
@@ -24,7 +20,7 @@ export default function ClientListScreen() {
     <div style={{ padding: "28px 36px", minHeight: 520, fontFamily: C.sans }}>
       {showBack && (
         <button onClick={() => router.back()} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", fontSize: 14, fontWeight: 600, color: C.blue, background: "transparent", border: "none", cursor: "pointer", marginBottom: 12 }} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>
-          <span style={{ fontSize: 16 }}>←</span> Back to Recovery
+          <span style={{ fontSize: 16 }}>←</span> Back
         </button>
       )}
       <div style={{ fontSize: 28, fontWeight: 600, color: C.navy, marginBottom: 24 }}>Portfolio Dashboard</div>
@@ -45,7 +41,7 @@ export default function ClientListScreen() {
           const currentInvoices = invoices ? (invoices.outstanding?.length || 0) + (invoices.upcoming?.length || 0) : 0;
 
           return (
-            <div key={client.id} onClick={() => router.push(`/client/${client.id}`)} style={{ display: "grid", gridTemplateColumns: "200px 140px 140px 120px 100px 140px 140px", gap: 16, padding: "14px 16px", borderBottom: i < clients.length - 1 ? `1px solid ${C.border}` : "none", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={(e) => (e.currentTarget.style.background = C.blueBg)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+            <div key={client.id} onClick={() => { sessionStorage.removeItem('clyintel_nav_direct'); router.push(`/client/${client.id}`); }} style={{ display: "grid", gridTemplateColumns: "200px 140px 140px 120px 100px 140px 140px", gap: 16, padding: "14px 16px", borderBottom: i < clients.length - 1 ? `1px solid ${C.border}` : "none", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={(e) => (e.currentTarget.style.background = C.blueBg)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
               <div style={{ fontSize: 14, fontWeight: 600, color: C.navy }}>{client.name}</div>
               <div style={{ fontSize: 13, color: C.textMid }}>{client.industry}</div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

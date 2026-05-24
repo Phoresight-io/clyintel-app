@@ -19,12 +19,8 @@ export default function DetailScreen({ client }: Props) {
 
   useEffect(() => {
     const isDirect = sessionStorage.getItem('clyintel_nav_direct') === 'true';
-    if (isDirect) {
-      sessionStorage.removeItem('clyintel_nav_direct');
-      setShowBack(false);
-    } else {
-      setShowBack(true);
-    }
+    setShowBack(!isDirect);
+    sessionStorage.removeItem('clyintel_nav_direct');
   }, []);
 
   const backLabel = from === "portfolio" ? "Back to Portfolio" : "Back to Recovery";
@@ -55,7 +51,7 @@ export default function DetailScreen({ client }: Props) {
       <div style={{ marginBottom: 24 }}>
         {showBack && (
           <button onClick={() => router.back()} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", fontSize: 14, fontWeight: 600, color: C.blue, background: "transparent", border: "none", cursor: "pointer", marginBottom: 12 }} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>
-            <span style={{ fontSize: 16 }}>←</span> {backLabel}
+            <span style={{ fontSize: 16 }}>←</span> Back
           </button>
         )}
 <div style={{ fontSize: 28, fontWeight: 600, color: C.navy }}>Clyintel Analyzer</div>

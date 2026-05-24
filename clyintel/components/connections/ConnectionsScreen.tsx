@@ -24,12 +24,8 @@ export default function ConnectionsScreen() {
 
   useEffect(() => {
     const isDirect = sessionStorage.getItem('clyintel_nav_direct') === 'true';
-    if (isDirect) {
-      sessionStorage.removeItem('clyintel_nav_direct');
-      setShowBack(false);
-    } else {
-      setShowBack(true);
-    }
+    setShowBack(!isDirect);
+    sessionStorage.removeItem('clyintel_nav_direct');
   }, []);
 
   const [stage, setStage]                   = useState<Stage>("connect");
@@ -57,7 +53,7 @@ export default function ConnectionsScreen() {
   const handleDriveFilePick = (f: DriveFile)   => { setSelectedFile(f); setStage("csv_uploading"); setTimeout(() => setStage("csv_done"), 1800); };
   const handleFileUpload    = () => { setSelectedFile({ name: "Q1_2026_Invoices.csv", rows: 47, size: "84 KB" }); setStage("csv_uploading"); setTimeout(() => setStage("csv_done"), 1800); };
   const handleUploadMore    = () => { setSelectedFile(null); setStage(csvSource === "drive" ? "drive_folders" : "csv_upload"); };
-  const handleClientPick    = (c: { name: string }) => { setPickedClient(c); setStage("analyzing"); setTimeout(() => router.push("/"), 2000); };
+  const handleClientPick    = (c: { name: string }) => { setPickedClient(c); setStage("analyzing"); setTimeout(() => { sessionStorage.removeItem('clyintel_nav_direct'); router.push("/"); }, 2000); };
 
   const integrations = invoiceServices.filter(s => ["qb","fb","stripe","xero"].includes(s.id));
   const bottomRow    = ["gdrive","csv","manual"].map(id => invoiceServices.find(s => s.id === id)!);
@@ -117,7 +113,7 @@ export default function ConnectionsScreen() {
       {/* ── CONNECT ── */}
       {stage === "connect" && (
         <>
-          {showBack && backBtn(() => router.back(), "Back to Recovery")}
+          {showBack && backBtn(() => router.back())}
           <div style={{ maxWidth: 860, margin: "0 auto", textAlign: "center" }}>
             <div style={{ marginBottom: 40 }}>
               <div style={{ fontSize: 28, fontWeight: 700, color: C.navy, marginBottom: 8 }}>Add Client</div>
@@ -453,7 +449,7 @@ export default function ConnectionsScreen() {
             <button onClick={() => { setSelectedFile(null); setSelectedFolder(null); setStage("connect"); }} style={{ padding: "12px 20px", fontSize: 14, fontWeight: 600, color: C.text, background: "#FFFFFF", border: `1px solid ${C.border}`, borderRadius: 8, cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.borderColor = C.blue} onMouseLeave={e => e.currentTarget.style.borderColor = C.border}>
               Back to Add Client
             </button>
-            <button onClick={() => router.push("/")} style={{ padding: "12px 20px", fontSize: 14, fontWeight: 600, color: C.text, background: "#FFFFFF", border: `1px solid ${C.border}`, borderRadius: 8, cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.borderColor = C.blue} onMouseLeave={e => e.currentTarget.style.borderColor = C.border}>
+            <button onClick={() => { sessionStorage.removeItem('clyintel_nav_direct'); router.push("/"); }} style={{ padding: "12px 20px", fontSize: 14, fontWeight: 600, color: C.text, background: "#FFFFFF", border: `1px solid ${C.border}`, borderRadius: 8, cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.borderColor = C.blue} onMouseLeave={e => e.currentTarget.style.borderColor = C.border}>
               Go to Recovery Dashboard →
             </button>
           </div>
@@ -485,7 +481,7 @@ export default function ConnectionsScreen() {
             ))}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
               <button onClick={() => setStage("connect")} style={{ padding: "9px 18px", fontSize: 13, fontWeight: 600, color: C.textMid, background: "#FFFFFF", border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}>Cancel</button>
-              <button onClick={() => { setManualSubmitted(true); setTimeout(() => router.push("/"), 1800); }} style={{ padding: "9px 18px", fontSize: 13, fontWeight: 600, color: "#FFFFFF", background: C.blue, border: "none", borderRadius: 6, cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.opacity = "0.88"} onMouseLeave={e => e.currentTarget.style.opacity = "1"}>Save Invoice</button>
+              <button onClick={() => { setManualSubmitted(true); setTimeout(() => { sessionStorage.removeItem('clyintel_nav_direct'); router.push("/"); }, 1800); }} style={{ padding: "9px 18px", fontSize: 13, fontWeight: 600, color: "#FFFFFF", background: C.blue, border: "none", borderRadius: 6, cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.opacity = "0.88"} onMouseLeave={e => e.currentTarget.style.opacity = "1"}>Save Invoice</button>
             </div>
           </div>
         </>

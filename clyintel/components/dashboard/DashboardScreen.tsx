@@ -121,7 +121,7 @@ export default function DashboardScreen() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <div style={{ fontSize: 28, lineHeight: 1.15, fontWeight: 600, color: C.navy }}>Recovery Dashboard</div>
           <div style={{ display: "flex", gap: 12 }}>
-            <button onClick={() => router.push("/connections")} style={{ padding: "8px 16px", fontSize: 14, fontWeight: 600, color: C.blue, background: C.blueBg, border: `1px solid ${C.blue}`, borderRadius: 6, cursor: "pointer" }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.85")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}>+ Add Client</button>
+            <button onClick={() => { sessionStorage.removeItem('clyintel_nav_direct'); router.push("/connections"); }} style={{ padding: "8px 16px", fontSize: 14, fontWeight: 600, color: C.blue, background: C.blueBg, border: `1px solid ${C.blue}`, borderRadius: 6, cursor: "pointer" }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.85")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}>+ Add Client</button>
           </div>
         </div>
       </div>
@@ -204,7 +204,7 @@ export default function DashboardScreen() {
           return (
             <div key={inv.id} style={{ display: "grid", gridTemplateColumns: "160px 120px 120px 120px 100px 120px 1fr 36px", alignItems: "center", padding: "18px 16px", paddingRight: 24, borderBottom: isLastRow ? "none" : `1px solid ${C.border}`, fontSize: 14, gap: 14, background: selectedInvoiceForHistory === inv.id ? C.blueBg : "#FFFFFF", borderLeft: selectedInvoiceForHistory === inv.id ? `3px solid ${C.blue}` : "3px solid transparent" }}>
               <div>
-                <button onClick={() => router.push(`/client/${inv.clientId}`)} style={{ fontWeight: prevSameClient ? 400 : 600, fontSize: prevSameClient ? 13 : 14, color: C.blue, background: "transparent", border: "none", cursor: "pointer", padding: 0, paddingLeft: prevSameClient ? 10 : 0, textAlign: "left" }} onMouseEnter={(e) => (e.currentTarget.style.color = C.amber)} onMouseLeave={(e) => (e.currentTarget.style.color = C.blue)}>{inv.clientName}</button>
+                <button onClick={() => { sessionStorage.removeItem('clyintel_nav_direct'); router.push(`/client/${inv.clientId}`); }} style={{ fontWeight: prevSameClient ? 400 : 600, fontSize: prevSameClient ? 13 : 14, color: C.blue, background: "transparent", border: "none", cursor: "pointer", padding: 0, paddingLeft: prevSameClient ? 10 : 0, textAlign: "left" }} onMouseEnter={(e) => (e.currentTarget.style.color = C.amber)} onMouseLeave={(e) => (e.currentTarget.style.color = C.blue)}>{inv.clientName}</button>
               </div>
               <div>
                 <button onClick={() => setSelectedInvoiceForHistory(inv.id)} style={{ fontFamily: C.mono, color: C.blue, fontSize: 14, background: "transparent", border: "none", cursor: "pointer", padding: 0 }} onMouseEnter={(e) => (e.currentTarget.style.color = C.amber)} onMouseLeave={(e) => (e.currentTarget.style.color = C.blue)}>{inv.id}</button>
