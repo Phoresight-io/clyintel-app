@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 
@@ -52,6 +52,18 @@ function StatusBadge({ status }: { status: IntegrationStatus }) {
 
 export default function IntegrationsScreen() {
   const router = useRouter();
+  const [showBack, setShowBack] = useState(false);
+
+  useEffect(() => {
+    const isDirect = sessionStorage.getItem('clyintel_nav_direct') === 'true';
+    if (isDirect) {
+      sessionStorage.removeItem('clyintel_nav_direct');
+      setShowBack(false);
+    } else {
+      setShowBack(true);
+    }
+  }, []);
+
   const [activeTab, setActiveTab] = useState("integrations");
   const [integrations, setIntegrations] = useState<ManagedIntegration[]>(INITIAL_INTEGRATIONS);
   const [disconnectConfirm, setDisconnectConfirm] = useState<string | null>(null);

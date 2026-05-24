@@ -37,7 +37,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {navItems.map(item => (
               <button
                 key={item.label}
-                onClick={() => !item.disabled && router.push(item.href)}
+                onClick={() => { if (!item.disabled) { sessionStorage.setItem('clyintel_nav_direct', 'true'); router.push(item.href); } }}
                 style={{
                   padding: "6px 14px",
                   fontSize: 14,

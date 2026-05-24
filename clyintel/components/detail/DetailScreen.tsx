@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { C } from "@/lib/theme";
 import { clientInvoices, Client } from "@/lib/mock-data";
@@ -15,6 +15,17 @@ export default function DetailScreen({ client }: Props) {
   const searchParams = useSearchParams();
   const from = searchParams.get("from");
   const [selectedInvoiceForExchanges, setSelectedInvoiceForExchanges] = useState<string | null>(null);
+  const [showBack, setShowBack] = useState(false);
+
+  useEffect(() => {
+    const isDirect = sessionStorage.getItem('clyintel_nav_direct') === 'true';
+    if (isDirect) {
+      sessionStorage.removeItem('clyintel_nav_direct');
+      setShowBack(false);
+    } else {
+      setShowBack(true);
+    }
+  }, []);
 
   const backLabel = from === "portfolio" ? "Back to Portfolio" : "Back to Recovery";
   const backHref = from === "portfolio" ? "/portfolio" : "/";
@@ -42,9 +53,11 @@ export default function DetailScreen({ client }: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0, padding: "28px 36px", minHeight: 520, fontFamily: C.sans }}>
       <div style={{ marginBottom: 24 }}>
-        <button onClick={() => router.push(backHref)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", fontSize: 14, fontWeight: 600, color: C.blue, background: "transparent", border: "none", cursor: "pointer", marginBottom: 12 }} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>
-          <span style={{ fontSize: 16 }}>←</span> {backLabel}
-        </button>
+        {showBack && (
+          <button onClick={() => router.back()} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", fontSize: 14, fontWeight: 600, color: C.blue, background: "transparent", border: "none", cursor: "pointer", marginBottom: 12 }} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>
+            <span style={{ fontSize: 16 }}>←</span> {backLabel}
+          </button>
+        )}
 <div style={{ fontSize: 28, fontWeight: 600, color: C.navy }}>Clyintel Analyzer</div>
       </div>
 

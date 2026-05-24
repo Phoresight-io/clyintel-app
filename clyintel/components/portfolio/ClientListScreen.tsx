@@ -1,18 +1,32 @@
 "use client";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 import { clients, clientInvoices } from "@/lib/mock-data";
 
 export default function ClientListScreen() {
   const router = useRouter();
+  const [showBack, setShowBack] = useState(false);
+
+  useEffect(() => {
+    const isDirect = sessionStorage.getItem('clyintel_nav_direct') === 'true';
+    if (isDirect) {
+      sessionStorage.removeItem('clyintel_nav_direct');
+      setShowBack(false);
+    } else {
+      setShowBack(true);
+    }
+  }, []);
 
   const getRecoveryYTD = (id: number): number => ({ 4: 15800, 1: 3200, 2: 8400, 3: 12400, 5: 2800 } as Record<number, number>)[id] || 0;
 
   return (
     <div style={{ padding: "28px 36px", minHeight: 520, fontFamily: C.sans }}>
-      <button onClick={() => router.push("/")} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", fontSize: 14, fontWeight: 600, color: C.blue, background: "transparent", border: "none", cursor: "pointer", marginBottom: 12 }} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>
-        <span style={{ fontSize: 16 }}>←</span> Back to Recovery
-      </button>
+      {showBack && (
+        <button onClick={() => router.back()} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", fontSize: 14, fontWeight: 600, color: C.blue, background: "transparent", border: "none", cursor: "pointer", marginBottom: 12 }} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>
+          <span style={{ fontSize: 16 }}>←</span> Back to Recovery
+        </button>
+      )}
       <div style={{ fontSize: 28, fontWeight: 600, color: C.navy, marginBottom: 24 }}>Portfolio Dashboard</div>
 
       <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden" }}>

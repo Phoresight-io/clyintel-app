@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 import {
@@ -20,6 +20,18 @@ type ManualForm = Record<string, string>;
 
 export default function ConnectionsScreen() {
   const router = useRouter();
+  const [showBack, setShowBack] = useState(false);
+
+  useEffect(() => {
+    const isDirect = sessionStorage.getItem('clyintel_nav_direct') === 'true';
+    if (isDirect) {
+      sessionStorage.removeItem('clyintel_nav_direct');
+      setShowBack(false);
+    } else {
+      setShowBack(true);
+    }
+  }, []);
+
   const [stage, setStage]                   = useState<Stage>("connect");
   const [selectedService, setSelectedService] = useState<InvoiceService | null>(null);
   const [pickedClient, setPickedClient]     = useState<{ name: string } | null>(null);
@@ -105,7 +117,7 @@ export default function ConnectionsScreen() {
       {/* ── CONNECT ── */}
       {stage === "connect" && (
         <>
-          {backBtn(() => router.push("/"), "Back to Recovery")}
+          {showBack && backBtn(() => router.back(), "Back to Recovery")}
           <div style={{ maxWidth: 860, margin: "0 auto", textAlign: "center" }}>
             <div style={{ marginBottom: 40 }}>
               <div style={{ fontSize: 28, fontWeight: 700, color: C.navy, marginBottom: 8 }}>Add Client</div>
