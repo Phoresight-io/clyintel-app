@@ -23,10 +23,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {/* Logo */}
           <img
-            src="https://raw.githubusercontent.com/Phoresight-io/Brand-Kit/main/IconOnly_Transparent_NoBuffer.png"
+            src="https://raw.githubusercontent.com/Phoresight-io/Brand-Kit/main/FullLogo_Transparent_NoBuffer.jpg"
             alt="Phoresight"
             onClick={() => router.push("/")}
-            style={{ height: 56, objectFit: "contain", cursor: "pointer", marginRight: 16 }}
+            style={{ height: 36, objectFit: "contain", cursor: "pointer", marginRight: 16 }}
           />
           {/* Nav Items */}
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
