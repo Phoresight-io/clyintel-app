@@ -1,6 +1,8 @@
 "use client";
+import { useState } from "react";
 import { C } from "@/lib/theme";
-import { invoiceExchanges } from "@/lib/mock-data";
+import { invoiceExchanges, negotiationRecs, NegotiationRec } from "@/lib/mock-data";
+import RecoveryRecModal, { RecCard } from "@/components/dashboard/RecoveryRecModal";
 
 interface Props {
   invoiceId: string;
@@ -9,6 +11,8 @@ interface Props {
 
 export default function ExchangeDrawer({ invoiceId, onClose }: Props) {
   const exchanges = invoiceExchanges[invoiceId] || [];
+  const rec = negotiationRecs.find((r: NegotiationRec) => r.id === invoiceId);
+  const [activeRec, setActiveRec] = useState<RecCard | null>(null);
   const channelIcons: Record<string, string> = { "Voice": "📞", "Email": "📧", "Text": "💬" };
   const channelColors: Record<string, string> = { "Voice": C.blue, "Email": C.amber, "Text": C.green };
 
@@ -18,10 +22,16 @@ export default function ExchangeDrawer({ invoiceId, onClose }: Props) {
       <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, width: 500, background: "#FFFFFF", boxShadow: "-4px 0 24px rgba(0,0,0,0.15)", zIndex: 1000, display: "flex", flexDirection: "column", fontFamily: C.sans }}>
         <style>{`@keyframes slideInRight{from{transform:translateX(100%)}to{transform:translateX(0)}}`}</style>
         <div style={{ animation: "slideInRight 0.3s ease-out", display: "flex", flexDirection: "column", height: "100%" }}>
-          <div style={{ padding: "24px 28px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
+          <div style={{ padding: "24px 28px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div style={{ flex: 1, marginRight: 16 }}>
               <div style={{ fontSize: 20, fontWeight: 600, color: C.text, marginBottom: 4 }}>Recovery Agent Exchanges</div>
               <div style={{ fontSize: 14, color: C.textMid, fontFamily: C.mono }}>Invoice {invoiceId}</div>
+              {rec && (
+                <div style={{ marginTop: 12, padding: "10px 14px", background: C.amberBg, border: `1px solid ${C.amber}33`, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: C.amber }}>Recovery Recommendation</span>
+                  <button onClick={() => setActiveRec({ ...rec, editAmount: rec.suggestedAmount, status: "pending" })} style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, color: "#fff", background: C.amber, border: "none", borderRadius: 5, cursor: "pointer" }}>Review</button>
+                </div>
+              )}
             </div>
             <button onClick={onClose} style={{ padding: "8px 12px", fontSize: 18, color: C.textMid, background: "transparent", border: "none", cursor: "pointer" }}>✕</button>
           </div>
@@ -53,6 +63,9 @@ export default function ExchangeDrawer({ invoiceId, onClose }: Props) {
           </div>
         </div>
       </div>
+      {activeRec && (
+        <RecoveryRecModal card={activeRec} onUpdate={() => {}} onClose={() => setActiveRec(null)} />
+      )}
     </>
   );
 }

@@ -2,9 +2,11 @@
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { C } from "@/lib/theme";
-import { clientInvoices, Client } from "@/lib/mock-data";
+import { clientInvoices, Client, negotiationRecs } from "@/lib/mock-data";
 import ExchangeDrawer from "@/components/shared/ExchangeDrawer";
 import PTRWidget from "./PTRWidget";
+import NegotiationActions from "@/components/dashboard/NegotiationActions";
+import { RecCard } from "@/components/dashboard/RecoveryRecModal";
 
 interface Props {
   client: Client;
@@ -16,6 +18,10 @@ export default function DetailScreen({ client }: Props) {
   const from = searchParams.get("from");
   const [selectedInvoiceForExchanges, setSelectedInvoiceForExchanges] = useState<string | null>(null);
   const [showBack, setShowBack] = useState(false);
+  const [recCards, setRecCards] = useState<RecCard[]>(
+    negotiationRecs.filter(r => clientInvoices[client.id]?.outstanding.some(inv => inv.id === r.id)).map(r => ({ ...r, editAmount: r.suggestedAmount, status: "pending" as const }))
+  );
+  const [activeRecModal, setActiveRecModal] = useState<string | null>(null);
 
   useEffect(() => {
     const isDirect = sessionStorage.getItem('clyintel_nav_direct') === 'true';
@@ -82,6 +88,8 @@ export default function DetailScreen({ client }: Props) {
               ))}
             </div>
           </div>
+
+          <NegotiationActions cards={recCards} onUpdate={(id, patch) => setRecCards(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c))} activeModal={activeRecModal} setActiveModal={setActiveRecModal} />
 
           {/* Invoice History Table */}
           <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden" }}>

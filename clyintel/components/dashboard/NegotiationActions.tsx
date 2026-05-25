@@ -15,7 +15,7 @@ export default function NegotiationActions({ cards, onUpdate, activeModal, setAc
   return (
     <div style={{ marginBottom: 28 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-        <div style={{ fontSize: 18, fontWeight: 600, color: C.navy }}>Recommendations</div>
+        <div style={{ fontSize: 18, fontWeight: 600, color: C.navy }}>Recovery Recommendations</div>
       </div>
 
       {cards.filter(c => c.status !== "dismissed").length === 0 ? (
