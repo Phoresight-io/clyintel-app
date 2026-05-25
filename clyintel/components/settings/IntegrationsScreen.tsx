@@ -36,14 +36,14 @@ const SETTING_TABS = [
 function StatusBadge({ status }: { status: IntegrationStatus }) {
   if (status === "syncing") {
     return (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, color: C.blue }}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 500, color: C.blue }}>
         <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.blue, display: "inline-block", animation: "pulse 1.2s ease-in-out infinite" }} />
         Syncing…
       </span>
     );
   }
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, color: C.green }}>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 500, color: C.green }}>
       <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.green, display: "inline-block" }} />
       Connected
     </span>
@@ -87,7 +87,7 @@ export default function IntegrationsScreen() {
       {/* Page header */}
       <div style={{ marginBottom: 28 }}>
         <div style={{ fontSize: 22, fontWeight: 700, color: C.navy, marginBottom: 4 }}>Settings</div>
-        <div style={{ fontSize: 14, color: C.textMid }}>Manage your account, integrations, and preferences.</div>
+        <div style={{ fontSize: 15, color: C.textMid, fontWeight: 500 }}>Manage your account, integrations, and preferences.</div>
       </div>
 
       {/* Sub-nav tabs */}
@@ -98,7 +98,7 @@ export default function IntegrationsScreen() {
             onClick={() => !tab.disabled && setActiveTab(tab.id)}
             style={{
               padding: "9px 18px",
-              fontSize: 13,
+              fontSize: 14,
               fontWeight: activeTab === tab.id ? 600 : 500,
               color: tab.disabled ? C.textDim : activeTab === tab.id ? C.navy : C.textMid,
               background: "transparent",
@@ -119,22 +119,22 @@ export default function IntegrationsScreen() {
       <section style={{ marginBottom: 40, animation: "fadeUp 0.2s ease" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: C.text }}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: C.text }}>
               Connected integrations
               {connected.length > 0 && (
-                <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, color: C.blue, background: C.blueBg, borderRadius: 10, padding: "2px 8px" }}>
+                <span style={{ marginLeft: 8, fontSize: 13, fontWeight: 600, color: C.blue, background: C.blueBg, borderRadius: 10, padding: "2px 8px" }}>
                   {connected.length}
                 </span>
               )}
             </div>
-            <div style={{ fontSize: 12, color: C.textDim, marginTop: 2 }}>
+            <div style={{ fontSize: 13, color: C.textDim, marginTop: 2, fontWeight: 500 }}>
               Your active data sources. Invoices sync automatically every 4 hours.
             </div>
           </div>
           <button
             onClick={handleConnect}
-            style={{ padding: "8px 16px", fontSize: 13, fontWeight: 600, color: "#FFFFFF", background: C.blue, border: "none", borderRadius: 6, cursor: "pointer" }}
-            onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.88")}
+            style={{ padding: "8px 16px", fontSize: 14, fontWeight: 600, color: "#FFFFFF", background: C.blue, border: "none", borderRadius: 6, cursor: "pointer" }}
+            onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.85")}
             onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
           >
             + Add integration
@@ -143,10 +143,10 @@ export default function IntegrationsScreen() {
 
         {connected.length === 0 ? (
           <div style={{ background: C.surface, border: `1px dashed ${C.border}`, borderRadius: 10, padding: "36px 24px", textAlign: "center" }}>
-            <div style={{ fontSize: 14, color: C.textMid, marginBottom: 12 }}>No integrations connected yet.</div>
+            <div style={{ fontSize: 15, color: C.textMid, marginBottom: 12, fontWeight: 500 }}>No integrations connected yet.</div>
             <button
               onClick={handleConnect}
-              style={{ padding: "9px 18px", fontSize: 13, fontWeight: 600, color: C.blue, background: C.blueBg, border: `1px solid ${C.blue}`, borderRadius: 6, cursor: "pointer" }}
+              style={{ padding: "9px 18px", fontSize: 14, fontWeight: 600, color: C.blue, background: C.blueBg, border: `1px solid ${C.blue}`, borderRadius: 6, cursor: "pointer" }}
             >
               Connect your first integration
             </button>
@@ -171,7 +171,7 @@ export default function IntegrationsScreen() {
                       }}
                     />
                   )}
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", display: integration.logo ? "none" : "inline" }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: "#fff", display: integration.logo ? "none" : "inline" }}>
                     {integration.initial}
                   </span>
                 </div>
@@ -179,10 +179,10 @@ export default function IntegrationsScreen() {
                 {/* Info */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 3 }}>
-                    <span style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{integration.name}</span>
+                    <span style={{ fontSize: 15, fontWeight: 600, color: C.text }}>{integration.name}</span>
                     <StatusBadge status={integration.status} />
                   </div>
-                  <div style={{ fontSize: 12, color: C.textDim }}>{integration.subtitle}</div>
+                  <div style={{ fontSize: 13, color: C.textDim, fontWeight: 500 }}>{integration.subtitle}</div>
                   {integration.lastSync && (
                     <div style={{ fontSize: 11, color: C.textDim, marginTop: 5, display: "flex", gap: 12 }}>
                       <span>Last synced: {integration.lastSync}</span>
@@ -198,7 +198,7 @@ export default function IntegrationsScreen() {
                     onClick={() => handleSyncNow(integration.id)}
                     disabled={integration.status === "syncing"}
                     style={{
-                      padding: "7px 14px", fontSize: 12, fontWeight: 600,
+                      padding: "7px 14px", fontSize: 13, fontWeight: 600,
                       color: integration.status === "syncing" ? C.textDim : C.blue,
                       background: integration.status === "syncing" ? C.surface : C.blueBg,
                       border: `1px solid ${integration.status === "syncing" ? C.border : C.blue}`,
@@ -214,13 +214,13 @@ export default function IntegrationsScreen() {
                       <span style={{ fontSize: 11, color: C.textMid }}>Disconnect?</span>
                       <button
                         onClick={() => handleDisconnect(integration.id)}
-                        style={{ padding: "7px 12px", fontSize: 12, fontWeight: 600, color: "#fff", background: C.red, border: "none", borderRadius: 6, cursor: "pointer" }}
+                        style={{ padding: "7px 12px", fontSize: 13, fontWeight: 600, color: "#fff", background: C.red, border: "none", borderRadius: 6, cursor: "pointer" }}
                       >
                         Yes, disconnect
                       </button>
                       <button
                         onClick={() => setDisconnectConfirm(null)}
-                        style={{ padding: "7px 12px", fontSize: 12, fontWeight: 500, color: C.textMid, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}
+                        style={{ padding: "7px 12px", fontSize: 13, fontWeight: 500, color: C.textMid, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}
                       >
                         Cancel
                       </button>
@@ -228,7 +228,7 @@ export default function IntegrationsScreen() {
                   ) : (
                     <button
                       onClick={() => setDisconnectConfirm(integration.id)}
-                      style={{ padding: "7px 14px", fontSize: 12, fontWeight: 600, color: C.textMid, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}
+                      style={{ padding: "7px 14px", fontSize: 13, fontWeight: 600, color: C.textMid, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}
                       onMouseEnter={(e) => { e.currentTarget.style.color = C.red; e.currentTarget.style.borderColor = C.red; }}
                       onMouseLeave={(e) => { e.currentTarget.style.color = C.textMid; e.currentTarget.style.borderColor = C.border; }}
                     >

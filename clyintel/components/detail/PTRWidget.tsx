@@ -71,12 +71,12 @@ export default function PTRWidget({ client }: Props) {
 
             {/* Context */}
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 500, color: C.text, lineHeight: 1.6, marginBottom: 12 }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: C.text, lineHeight: 1.6, marginBottom: 12 }}>
                 Generate a data-driven payment terms recommendation for <strong>{client.name}</strong> based on their payment history, industry benchmarks, and risk score.
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {rec?.keyFactors.slice(0, 3).map((f, i) => (
-                  <div key={i} style={{ fontSize: 12, color: C.textMid, display: "flex", gap: 6, alignItems: "flex-start" }}>
+                  <div key={i} style={{ fontSize: 13, color: C.textMid, fontWeight: 500, display: "flex", gap: 6, alignItems: "flex-start" }}>
                     <span style={{ color: scoreColor, fontWeight: 700, marginTop: 1 }}>•</span>
                     <span>{f}</span>
                   </div>
@@ -87,7 +87,7 @@ export default function PTRWidget({ client }: Props) {
 
           <button
             onClick={handleGenerate}
-            style={{ width: "100%", padding: "11px 0", fontSize: 13, fontWeight: 600, color: "#FFFFFF", background: C.navy, border: "none", borderRadius: 7, cursor: "pointer", letterSpacing: "0.01em", transition: "opacity 0.15s" }}
+            style={{ width: "100%", padding: "11px 0", fontSize: 14, fontWeight: 600, color: "#FFFFFF", background: C.navy, border: "none", borderRadius: 7, cursor: "pointer", letterSpacing: "0.01em", transition: "opacity 0.15s" }}
             onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.85")}
             onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
           >
@@ -106,7 +106,7 @@ export default function PTRWidget({ client }: Props) {
           <span style={{ fontSize: 11, fontWeight: 700, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.12em" }}>Payment Terms Recommendation</span>
         </div>
         <div style={{ padding: "28px 24px 30px" }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 20 }}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: C.text, marginBottom: 20 }}>
             Analyzing {client.name}…
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -127,7 +127,7 @@ export default function PTRWidget({ client }: Props) {
                     )}
                   </div>
                   <span style={{
-                    fontSize: 13,
+                    fontSize: 14,
                     fontWeight: done ? 500 : active ? 600 : 400,
                     color: done ? C.text : active ? C.blue : C.textDim,
                     transition: "color 0.3s",
@@ -170,7 +170,7 @@ export default function PTRWidget({ client }: Props) {
           <div style={{ fontSize: 11, fontWeight: 600, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Recommended Terms</div>
           <div style={{ fontSize: 16, fontWeight: 700, color: C.text, marginBottom: rec.discount ? 4 : 0 }}>{rec.terms}</div>
           {rec.discount && (
-            <div style={{ fontSize: 12, color: C.green, fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}>
+            <div style={{ fontSize: 13, color: C.green, fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}>
               <span>＋</span> {rec.discount}
             </div>
           )}
@@ -202,7 +202,7 @@ export default function PTRWidget({ client }: Props) {
       <div style={{ padding: "0 20px 16px" }}>
         <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px" }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: C.navy, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>Why this recommendation</div>
-          <div style={{ fontSize: 13, color: C.text, lineHeight: 1.7 }}>{rec.rationale}</div>
+          <div style={{ fontSize: 14, color: C.text, lineHeight: 1.7 }}>{rec.rationale}</div>
         </div>
       </div>
 
@@ -243,8 +243,8 @@ export default function PTRWidget({ client }: Props) {
         <div style={{ borderTop: `1px solid ${C.border}`, padding: "14px 20px" }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6 }}>Alternative</div>
           <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: C.text, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 5, padding: "3px 8px", whiteSpace: "nowrap", flexShrink: 0 }}>{rec.altTerms}</span>
-            <span style={{ fontSize: 12, color: C.textMid, lineHeight: 1.5 }}>{rec.altNote}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: C.text, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 5, padding: "3px 8px", whiteSpace: "nowrap", flexShrink: 0 }}>{rec.altTerms}</span>
+            <span style={{ fontSize: 13, color: C.textMid, lineHeight: 1.5, fontWeight: 500 }}>{rec.altNote}</span>
           </div>
         </div>
       )}

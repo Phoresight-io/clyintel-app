@@ -102,8 +102,8 @@ export default function DashboardScreen() {
     const active = sortCol === col;
     const arrow = active ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕";
     return (
-      <button onClick={() => toggleSort(col)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 12, fontWeight: 600, color: C.navy, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 3, whiteSpace: "nowrap" }}>
-        {label}<span style={{ fontSize: 14, color: C.blue, opacity: active ? 1 : 0.4 }}>{arrow}</span>
+      <button onClick={() => toggleSort(col)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 13, fontWeight: 600, color: C.navy, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 3, whiteSpace: "nowrap" }}>
+        {label}<span style={{ fontSize: 15, color: C.blue, opacity: active ? 1 : 0.4 }}>{arrow}</span>
       </button>
     );
   };
@@ -130,7 +130,7 @@ export default function DashboardScreen() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
         {kpis.map((kpi, i) => (
           <div key={i} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 12, textAlign: "center", boxShadow: "0 2px 8px rgba(43,108,176,0.10)" }}>
-            <div style={{ fontSize: 13, color: C.navy, marginBottom: 8, fontWeight: 600 }}>{kpi.label}</div>
+            <div style={{ fontSize: 14, color: C.navy, marginBottom: 8, fontWeight: 600 }}>{kpi.label}</div>
             <div style={{ fontSize: 34, fontWeight: 700, color: kpi.color, fontFamily: C.mono }}>{kpi.value}</div>
           </div>
         ))}
@@ -142,34 +142,34 @@ export default function DashboardScreen() {
         <div style={{ position: "relative" }}>
           <button
             onClick={() => { const d = document.getElementById("filter-dd"); if (d) d.style.display = d.style.display === "block" ? "none" : "block"; }}
-            style={{ padding: "8px 12px", fontSize: 13, fontWeight: 500, border: `1px solid ${C.blue}`, borderRadius: 6, color: C.blue, background: C.card, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+            style={{ padding: "8px 12px", fontSize: 14, fontWeight: 500, border: `1px solid ${C.blue}`, borderRadius: 6, color: C.blue, background: C.card, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
             <span>Filters</span>
             {totalFilterCount > 0 && <span style={{ background: C.blue, color: "white", borderRadius: 10, padding: "2px 6px", fontSize: 11, fontWeight: 600 }}>{totalFilterCount}</span>}
             <span style={{ fontSize: 10, color: C.blue }}>▼</span>
           </button>
           <div id="filter-dd" style={{ display: "none", position: "absolute", top: "100%", left: 0, marginTop: 4, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", zIndex: 1000, minWidth: 280, maxHeight: 400, overflow: "auto" }}>
             <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.border}` }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: C.textMid, marginBottom: 8 }}>Status</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.textMid, marginBottom: 8 }}>Status</div>
               {[{ v: "past_due", l: "Past Due" }, { v: "current", l: "Current" }, { v: "promise_to_pay", l: "Promise to Pay" }].map(s => (
                 <label key={s.v} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", cursor: "pointer" }}>
                   <input type="checkbox" checked={activeFilters.status.includes(s.v)} onChange={(e) => setActiveFilters({ ...activeFilters, status: e.target.checked ? [...activeFilters.status, s.v] : activeFilters.status.filter(x => x !== s.v) })} />
-                  <span style={{ fontSize: 13, color: C.text }}>{s.l}</span>
+                  <span style={{ fontSize: 14, color: C.text }}>{s.l}</span>
                 </label>
               ))}
             </div>
             <div style={{ padding: "12px 16px" }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: C.textMid, marginBottom: 8 }}>Due Date</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.textMid, marginBottom: 8 }}>Due Date</div>
               {[{ v: "overdue", l: "Overdue" }, { v: "due_soon", l: "Due Soon (≤7 days)" }, { v: "due_later", l: "Due Later (>7 days)" }].map(d => (
                 <label key={d.v} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", cursor: "pointer" }}>
                   <input type="checkbox" checked={activeFilters.dueDate.includes(d.v)} onChange={(e) => setActiveFilters({ ...activeFilters, dueDate: e.target.checked ? [...activeFilters.dueDate, d.v] : activeFilters.dueDate.filter(x => x !== d.v) })} />
-                  <span style={{ fontSize: 13, color: C.text }}>{d.l}</span>
+                  <span style={{ fontSize: 14, color: C.text }}>{d.l}</span>
                 </label>
               ))}
             </div>
           </div>
         </div>
         <div style={{ flex: 1, maxWidth: 400 }}>
-          <input type="text" placeholder="Search by client or invoice number (min. 3 chars)" value={searchText} onChange={(e) => setSearchText(e.target.value)} style={{ width: "100%", padding: "8px 12px", fontSize: 13, border: `1px solid ${C.blue}`, borderRadius: 6, color: C.text, background: C.card, outline: "none" }} />
+          <input type="text" placeholder="Search by client or invoice number (min. 3 chars)" value={searchText} onChange={(e) => setSearchText(e.target.value)} style={{ width: "100%", padding: "8px 12px", fontSize: 14, border: `1px solid ${C.blue}`, borderRadius: 6, color: C.text, background: C.card, outline: "none" }} />
           {searchText.length > 0 && searchText.length < 3 && <div style={{ fontSize: 11, color: C.textMid, marginTop: 4 }}>Type {3 - searchText.length} more character{3 - searchText.length > 1 ? "s" : ""} to search</div>}
         </div>
       </div>
@@ -187,7 +187,7 @@ export default function DashboardScreen() {
         </div>
 
         {allInvoices.length === 0 && (
-          <div style={{ textAlign: "center", padding: "40px 20px", color: C.textMid, fontSize: 14 }}>
+          <div style={{ textAlign: "center", padding: "40px 20px", color: C.textMid, fontSize: 15, fontWeight: 500 }}>
             No invoices match your filters.
           </div>
         )}
@@ -203,9 +203,9 @@ export default function DashboardScreen() {
           const lastExchangeOutcome = lastExchange ? (lastExchange.outcome.length > 50 ? lastExchange.outcome.substring(0, 50) + "..." : lastExchange.outcome) : null;
 
           return (
-            <div key={inv.id} style={{ display: "grid", gridTemplateColumns: "160px 120px 120px 120px 100px 120px 1fr 36px", alignItems: "center", padding: "18px 16px", paddingRight: 24, borderBottom: isLastRow ? "none" : `1px solid ${C.border}`, fontSize: 14, gap: 14, background: selectedInvoiceForHistory === inv.id ? C.blueBg : "#FFFFFF", borderLeft: selectedInvoiceForHistory === inv.id ? `3px solid ${C.blue}` : "3px solid transparent" }}>
+            <div key={inv.id} style={{ display: "grid", gridTemplateColumns: "160px 120px 120px 120px 100px 120px 1fr 36px", alignItems: "center", padding: "18px 16px", paddingRight: 24, borderBottom: isLastRow ? "none" : `1px solid ${C.border}`, fontSize: 15, gap: 14, background: selectedInvoiceForHistory === inv.id ? C.blueBg : "#FFFFFF", borderLeft: selectedInvoiceForHistory === inv.id ? `3px solid ${C.blue}` : "3px solid transparent" }}>
               <div>
-                <button onClick={() => router.push(`/client/${inv.clientId}`)} style={{ fontWeight: prevSameClient ? 400 : 600, fontSize: prevSameClient ? 13 : 14, color: C.blue, background: "transparent", border: "none", cursor: "pointer", padding: 0, paddingLeft: prevSameClient ? 10 : 0, textAlign: "left" }} onMouseEnter={(e) => (e.currentTarget.style.color = C.amber)} onMouseLeave={(e) => (e.currentTarget.style.color = C.blue)}>{inv.clientName}</button>
+                <button onClick={() => { sessionStorage.removeItem('clyintel_nav_direct'); router.push(`/client/${inv.clientId}`); }} style={{ fontWeight: prevSameClient ? 400 : 600, fontSize: prevSameClient ? 14 : 15, color: C.blue, background: "transparent", border: "none", cursor: "pointer", padding: 0, paddingLeft: prevSameClient ? 10 : 0, textAlign: "left" }} onMouseEnter={(e) => (e.currentTarget.style.color = C.amber)} onMouseLeave={(e) => (e.currentTarget.style.color = C.blue)}>{inv.clientName}</button>
               </div>
               <div>
                 <button onClick={() => setSelectedInvoiceForHistory(inv.id)} style={{ fontFamily: C.mono, color: C.blue, fontSize: 14, background: "transparent", border: "none", cursor: "pointer", padding: 0 }} onMouseEnter={(e) => (e.currentTarget.style.color = C.amber)} onMouseLeave={(e) => (e.currentTarget.style.color = C.blue)}>{inv.id}</button>
@@ -213,15 +213,15 @@ export default function DashboardScreen() {
               <div style={{ fontFamily: C.mono, fontSize: 15, color: inv.status === "past_due" ? C.red : C.text }}>${inv.amount.toLocaleString()}</div>
               <div style={{ color: inv.status === "past_due" ? C.red : C.textMid }}>{inv.dueDate}</div>
               <div style={{ fontWeight: 500, color: inv.status === "past_due" ? C.red : C.text }}>{inv.status === "past_due" && inv.daysOverdue ? `-${inv.daysOverdue}d` : inv.daysUntilDue ? `${inv.daysUntilDue}d` : "—"}</div>
-              <div style={{ fontSize: 13, color: statusStyle.color }}>{statusStyle.label}</div>
-              <div style={{ fontSize: 13, color: C.textMid, lineHeight: 1.4 }}>
+              <div style={{ fontSize: 14, color: statusStyle.color }}>{statusStyle.label}</div>
+              <div style={{ fontSize: 14, color: C.textMid, lineHeight: 1.4, fontWeight: 500 }}>
                 {lastExchange ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                     <div style={{ display: "flex", gap: 8 }}>
                       <span style={{ fontWeight: 600, color: C.text }}>{lastExchangeDate}</span>
                       <span style={{ color: C.textMid }}>{channelIcons[lastExchange.channel]} {lastExchange.channel}</span>
                     </div>
-                    <div style={{ fontStyle: "italic", fontSize: 12 }}>{lastExchangeOutcome}</div>
+                    <div style={{ fontStyle: "italic", fontSize: 13 }}>{lastExchangeOutcome}</div>
                   </div>
                 ) : "—"}
               </div>

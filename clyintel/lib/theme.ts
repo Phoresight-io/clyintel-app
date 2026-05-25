@@ -7,8 +7,8 @@ export const C = {
   green: "#16A34A", greenBg: "rgba(22,163,74,0.06)",
   navy: "#1E3A5F",
   text: "#1A202C",
-  textMid: "#64748B",
-  textDim: "#94A3B8",
+  textMid: "#1E293B",
+  textDim: "#334155",
   mono: "var(--font-mono, 'JetBrains Mono', monospace)",
   sans: "var(--font-sans, 'Inter', sans-serif)",
 };

@@ -34,21 +34,21 @@ export default function ExchangeDrawer({ invoiceId, onClose }: Props) {
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <span style={{ fontSize: 16 }}>{channelIcons[ex.channel] || "📋"}</span>
                         <span style={{ fontSize: 11, fontWeight: 600, color: "#FFFFFF", background: channelColors[ex.channel] || C.textMid, padding: "2px 8px", borderRadius: 4, textTransform: "uppercase", letterSpacing: "0.5px" }}>{ex.channel}</span>
-                        <span style={{ fontSize: 13, color: C.blue, fontFamily: C.mono, fontWeight: 500 }}>{ex.contact}</span>
+                        <span style={{ fontSize: 14, color: C.blue, fontFamily: C.mono, fontWeight: 500 }}>{ex.contact}</span>
                       </div>
-                      <span style={{ fontSize: 13, color: C.textMid, fontFamily: C.mono }}>{ex.timestamp}</span>
+                      <span style={{ fontSize: 14, color: C.textMid, fontFamily: C.mono, fontWeight: 500 }}>{ex.timestamp}</span>
                     </div>
-                    <div style={{ fontSize: 13, color: C.textMid, marginBottom: 4 }}><span style={{ color: C.text, fontWeight: 500 }}>From:</span> {ex.from}</div>
-                    <div style={{ fontSize: 13, color: C.textMid, marginBottom: 10 }}><span style={{ color: C.text, fontWeight: 500 }}>To:</span> {ex.to}</div>
-                    <div style={{ fontSize: 14, color: C.text, marginBottom: 8, lineHeight: 1.5 }}>
+                    <div style={{ fontSize: 14, color: C.textMid, marginBottom: 4, fontWeight: 500 }}><span style={{ color: C.text, fontWeight: 500 }}>From:</span> {ex.from}</div>
+                    <div style={{ fontSize: 14, color: C.textMid, marginBottom: 10, fontWeight: 500 }}><span style={{ color: C.text, fontWeight: 500 }}>To:</span> {ex.to}</div>
+                    <div style={{ fontSize: 15, color: C.text, marginBottom: 8, lineHeight: 1.5 }}>
                       <span style={{ fontWeight: 600, color: C.textMid }}>{ex.channel === "Email" ? "Body" : ex.channel === "Text" ? "Message" : "Summary"}:</span> {ex.message}
                     </div>
-                    {ex.outcome && <div style={{ fontSize: 14, color: C.text, fontWeight: 600, marginTop: 10 }}><span style={{ color: C.amber }}>Outcome:</span> {ex.outcome}</div>}
+                    {ex.outcome && <div style={{ fontSize: 15, color: C.text, fontWeight: 600, marginTop: 10 }}><span style={{ color: C.amber }}>Outcome:</span> {ex.outcome}</div>}
                   </div>
                 ))}
               </div>
             ) : (
-              <div style={{ textAlign: "center", padding: "40px 20px", color: C.textMid, fontSize: 14 }}>No exchanges recorded for this invoice yet.</div>
+              <div style={{ textAlign: "center", padding: "40px 20px", color: C.textMid, fontSize: 15, fontWeight: 500 }}>No exchanges recorded for this invoice yet.</div>
             )}
           </div>
         </div>
