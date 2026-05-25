@@ -56,7 +56,7 @@ export default function DetailScreen({ client }: Props) {
     <div style={{ display: "flex", flexDirection: "column", gap: 0, padding: "28px 36px", minHeight: 520, fontFamily: C.sans }}>
       <div style={{ marginBottom: 24 }}>
         {showBack && (
-          <button onClick={() => router.back()} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", fontSize: 14, fontWeight: 600, color: C.blue, background: "transparent", border: "none", cursor: "pointer", marginBottom: 12 }} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>
+          <button onClick={() => router.back()} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", fontSize: 15, fontWeight: 600, color: C.blue, background: "transparent", border: "none", cursor: "pointer", marginBottom: 12 }} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}>
             <span style={{ fontSize: 16 }}>←</span> Back
           </button>
         )}
@@ -110,16 +110,16 @@ export default function DetailScreen({ client }: Props) {
                   const statusColor = isPaid ? C.green : isPastDue ? C.red : C.text;
                   const statusLabel = isPaid ? "Paid" : isPastDue ? "Past Due" : "Current";
                   return (
-                    <div key={inv.id} style={{ display: "grid", gridTemplateColumns: "120px 120px 120px 100px 120px 1fr 36px", gap: 16, padding: "14px 16px", borderBottom: i < allInvoicesList.length - 1 ? `1px solid ${C.border}` : "none", fontSize: 14, alignItems: "center", background: isPaid ? "rgba(22,163,74,0.03)" : "transparent" }}>
-                      <div onClick={() => !isPaid && setSelectedInvoiceForExchanges(inv.id)} style={{ fontFamily: C.mono, fontSize: 13, color: isPaid ? C.textMid : C.blue, cursor: isPaid ? "default" : "pointer" }} onMouseEnter={(e) => { if (!isPaid) e.currentTarget.style.color = C.amber; }} onMouseLeave={(e) => { if (!isPaid) e.currentTarget.style.color = C.blue; }}>{inv.id}</div>
-                      <div style={{ fontFamily: C.mono, fontSize: 15, color: isPastDue ? C.red : C.text }}>${inv.amount.toLocaleString()}</div>
-                      <div style={{ fontSize: 14, color: isPastDue ? C.red : C.textMid }}>{inv.dueDate}</div>
-                      <div style={{ fontSize: 13, color: isPaid ? C.green : isPastDue ? C.red : C.text }}>{dueInValue}</div>
-                      <div style={{ fontSize: 13, fontWeight: isPaid ? 600 : 400, color: statusColor }}>{statusLabel}</div>
-                      <div style={{ fontSize: 13, color: C.textMid }}>{inv.lastActivity}</div>
+                    <div key={inv.id} style={{ display: "grid", gridTemplateColumns: "120px 120px 120px 100px 120px 1fr 36px", gap: 16, padding: "14px 16px", borderBottom: i < allInvoicesList.length - 1 ? `1px solid ${C.border}` : "none", fontSize: 15, alignItems: "center", background: isPaid ? "rgba(22,163,74,0.03)" : "transparent" }}>
+                      <div onClick={() => !isPaid && setSelectedInvoiceForExchanges(inv.id)} style={{ fontFamily: C.mono, fontSize: 14, color: isPaid ? C.textMid : C.blue, cursor: isPaid ? "default" : "pointer" }} onMouseEnter={(e) => { if (!isPaid) e.currentTarget.style.color = C.amber; }} onMouseLeave={(e) => { if (!isPaid) e.currentTarget.style.color = C.blue; }}>{inv.id}</div>
+                      <div style={{ fontFamily: C.mono, fontSize: 16, color: isPastDue ? C.red : C.text }}>${inv.amount.toLocaleString()}</div>
+                      <div style={{ fontSize: 15, color: isPastDue ? C.red : C.textMid }}>{inv.dueDate}</div>
+                      <div style={{ fontSize: 14, color: isPaid ? C.green : isPastDue ? C.red : C.text }}>{dueInValue}</div>
+                      <div style={{ fontSize: 14, fontWeight: isPaid ? 600 : 400, color: statusColor }}>{statusLabel}</div>
+                      <div style={{ fontSize: 14, color: C.textMid, fontWeight: 500 }}>{inv.lastActivity}</div>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
                         {!isPaid && negotiationRecs.some(r => r.id === inv.id) && (
-                          <button onClick={() => setActiveRecModal(inv.id)} title="Recovery recommendation pending" style={{ width: 26, height: 26, borderRadius: "50%", background: C.amberBg, color: C.amber, border: "none", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.75")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}>!</button>
+                          <button onClick={() => setActiveRecModal(inv.id)} title="Recovery recommendation pending" style={{ width: 26, height: 26, borderRadius: "50%", background: C.amberBg, color: C.amber, border: "none", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.75")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}>!</button>
                         )}
                       </div>
                     </div>
@@ -137,21 +137,21 @@ export default function DetailScreen({ client }: Props) {
             <div style={{ marginBottom: 16 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
                 <div style={{ fontSize: 48, fontWeight: 700, color: scoreColor, fontFamily: C.mono }}>{client.score}</div>
-                <div style={{ fontSize: 14, color: C.textMid }}>
+                <div style={{ fontSize: 15, color: C.textMid, fontWeight: 500 }}>
                   <span style={{ color: scoreColor, fontWeight: 600 }}>{scoreDelta > 0 ? "▲" : "▼"} {Math.abs(scoreDelta)}</span> (prev: {prevScore})
                 </div>
               </div>
-              <div style={{ fontSize: 12, color: C.textMid, marginBottom: 10 }}>out of 100</div>
+              <div style={{ fontSize: 13, color: C.textMid, fontWeight: 500, marginBottom: 10 }}>out of 100</div>
               <div style={{ height: 6, borderRadius: 3, background: "linear-gradient(to right, #DC2626 0%, #F59E0B 50%, #16A34A 100%)", marginBottom: 12, position: "relative" }}>
                 <div style={{ position: "absolute", left: `${client.score}%`, top: -2, width: 10, height: 10, borderRadius: "50%", background: scoreColor, border: "2px solid #FFFFFF" }} />
               </div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: scoreColor, marginBottom: 14 }}>{scoreLabel}</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: scoreColor, marginBottom: 14 }}>{scoreLabel}</div>
             </div>
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 10 }}>Score Summary</div>
               <div style={{ paddingLeft: 8 }}>
                 {client.scoreSummary.map((line, i) => (
-                  <div key={i} style={{ fontSize: 14, fontWeight: 500, color: C.textMid, marginBottom: i < client.scoreSummary.length - 1 ? 6 : 0 }}>• {line}</div>
+                  <div key={i} style={{ fontSize: 15, fontWeight: 500, color: C.textMid, marginBottom: i < client.scoreSummary.length - 1 ? 6 : 0 }}>• {line}</div>
                 ))}
               </div>
             </div>
@@ -159,7 +159,7 @@ export default function DetailScreen({ client }: Props) {
               <div style={{ fontSize: 11, fontWeight: 700, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 10 }}>Score Factors</div>
               <div style={{ paddingLeft: 8 }}>
                 {client.scoreFactors.map((line, i) => (
-                  <div key={i} style={{ fontSize: 14, fontWeight: 500, color: C.textMid, marginBottom: i < client.scoreFactors.length - 1 ? 6 : 0 }}>• {line}</div>
+                  <div key={i} style={{ fontSize: 15, fontWeight: 500, color: C.textMid, marginBottom: i < client.scoreFactors.length - 1 ? 6 : 0 }}>• {line}</div>
                 ))}
               </div>
             </div>
@@ -168,7 +168,7 @@ export default function DetailScreen({ client }: Props) {
               <div style={{ fontSize: 11, fontWeight: 700, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 10 }}>Risk Drivers</div>
               <div style={{ paddingLeft: 8 }}>
                 {client.riskDrivers.map((line, i) => (
-                  <div key={i} style={{ fontSize: 14, fontWeight: 500, color: C.textMid, marginBottom: i < client.riskDrivers.length - 1 ? 6 : 0 }}>• {line}</div>
+                  <div key={i} style={{ fontSize: 15, fontWeight: 500, color: C.textMid, marginBottom: i < client.riskDrivers.length - 1 ? 6 : 0 }}>• {line}</div>
                 ))}
               </div>
             </div>

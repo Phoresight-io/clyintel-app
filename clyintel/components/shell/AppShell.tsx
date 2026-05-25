@@ -40,7 +40,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 onClick={() => { if (!item.disabled) { sessionStorage.setItem('clyintel_nav_direct', 'true'); router.push(item.href); } }}
                 style={{
                   padding: "6px 14px",
-                  fontSize: 14,
+                  fontSize: 15,
                   fontWeight: item.active ? 600 : 500,
                   color: item.disabled ? C.textDim : item.active ? C.navy : C.textMid,
                   background: item.active ? C.blueBg : "transparent",
@@ -59,7 +59,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
           {/* Avatar */}
           <div style={{ width: 32, height: 32, borderRadius: "50%", background: C.navy, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: "#FFFFFF" }}>JD</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#FFFFFF" }}>JD</span>
           </div>
         </div>
       </nav>
@@ -71,8 +71,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Footer */}
       <footer style={{ height: 44, borderTop: `1px solid ${C.border}`, background: C.surface, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 36px" }}>
-        <span style={{ fontSize: 12, color: C.textDim, fontFamily: C.mono }}>Clyintel · Payment Intelligence</span>
-        <span style={{ fontSize: 12, color: C.textDim, fontFamily: C.mono }}>Updated {new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</span>
+        <span style={{ fontSize: 13, color: C.textDim, fontWeight: 500, fontFamily: C.mono }}>Clyintel · Payment Intelligence</span>
+        <span style={{ fontSize: 13, color: C.textDim, fontWeight: 500, fontFamily: C.mono }}>Updated {new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</span>
       </footer>
     </div>
   );
