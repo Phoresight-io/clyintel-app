@@ -14,9 +14,8 @@ export default function NegotiationActions({ cards, onUpdate, activeModal, setAc
 
   return (
     <div style={{ marginBottom: 28 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-        <div style={{ width: 3, height: 16, background: C.navy, borderRadius: 2 }} />
-        <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Recommendations</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+        <div style={{ fontSize: 18, fontWeight: 600, color: C.navy }}>Recommendations</div>
       </div>
 
       {cards.length === 0 ? (
@@ -56,6 +55,9 @@ export default function NegotiationActions({ cards, onUpdate, activeModal, setAc
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               {card.status === "approved" && <span style={{ fontSize: 12, fontWeight: 700, color: C.green }}>✓ Approved — ${card.editAmount.toLocaleString()}</span>}
               {card.status === "dismissed" && <span style={{ fontSize: 12, fontWeight: 600, color: C.textDim }}>Dismissed</span>}
+              {card.status !== "dismissed" && (
+                <button onClick={() => onUpdate(card.id, { status: "dismissed" })} style={{ width: 24, height: 24, borderRadius: "50%", border: "none", background: "transparent", cursor: "pointer", fontSize: 14, color: C.textDim, display: "flex", alignItems: "center", justifyContent: "center" }} onMouseEnter={(e) => (e.currentTarget.style.color = C.red)} onMouseLeave={(e) => (e.currentTarget.style.color = C.textDim)}>✕</button>
+              )}
               <button onClick={() => setActiveModal(card.id)} style={{ padding: "6px 14px", fontSize: 12, fontWeight: 600, color: card.status === "pending" ? "#FFFFFF" : C.textMid, background: card.status === "pending" ? C.amber : "transparent", border: card.status === "pending" ? "none" : `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.85")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}>
                 {card.status === "pending" ? "Review" : "View"}
               </button>
