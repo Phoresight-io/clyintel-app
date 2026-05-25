@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 
@@ -52,12 +52,19 @@ function StatusBadge({ status }: { status: IntegrationStatus }) {
 
 export default function IntegrationsScreen() {
   const router = useRouter();
+  const [showBack, setShowBack] = useState(false);
+
+  useEffect(() => {
+    const isDirect = sessionStorage.getItem('clyintel_nav_direct') === 'true';
+    setShowBack(!isDirect);
+    sessionStorage.removeItem('clyintel_nav_direct');
+  }, []);
+
   const [activeTab, setActiveTab] = useState("integrations");
   const [integrations, setIntegrations] = useState<ManagedIntegration[]>(INITIAL_INTEGRATIONS);
   const [disconnectConfirm, setDisconnectConfirm] = useState<string | null>(null);
 
   const connected  = integrations.filter(i => i.status !== "disconnected");
-  const available  = integrations.filter(i => i.status === "disconnected" && i.id !== "gdrive");
 
   const handleSyncNow = (id: string) => {
     setIntegrations(prev => prev.map(i => i.id === id ? { ...i, status: "syncing" } : i));
@@ -133,11 +140,11 @@ export default function IntegrationsScreen() {
           </div>
           <button
             onClick={handleConnect}
-            style={{ padding: "8px 16px", fontSize: 13, fontWeight: 600, color: "#FFFFFF", background: C.blue, border: "none", borderRadius: 6, cursor: "pointer" }}
-            onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.88")}
+            style={{ padding: "8px 16px", fontSize: 13, fontWeight: 600, color: C.blue, background: C.blueBg, border: `1px solid ${C.blue}`, borderRadius: 6, cursor: "pointer" }}
+            onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.85")}
             onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
           >
-            + Add integration
+            + Add Client
           </button>
         </div>
 
@@ -242,115 +249,6 @@ export default function IntegrationsScreen() {
         )}
       </section>
 
-      {/* Available integrations */}
-      {available.length > 0 && (
-        <section style={{ marginBottom: 0 }}>
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: C.text }}>Available integrations</div>
-            <div style={{ fontSize: 12, color: C.textDim, marginTop: 2 }}>Connect an invoice source to start importing clients automatically.</div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
-            {available.map(integration => (
-              <div
-                key={integration.id}
-                onClick={handleConnect}
-                style={{
-                  background: C.card,
-                  border: `1px solid ${C.border}`,
-                  borderRadius: 12,
-                  padding: "28px 20px",
-                  cursor: "pointer",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 14,
-                  textAlign: "center",
-                  transition: "border-color 0.15s",
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.borderColor = C.blue;
-                  e.currentTarget.style.boxShadow = `0 0 0 3px ${C.blueBg}`;
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.borderColor = C.border;
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-              >
-                <div style={{ width: 56, height: 56, borderRadius: 14, background: integration.color, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {integration.logo && (
-                    <img
-                      src={integration.logo}
-                      alt={integration.name}
-                      style={{ width: 32, height: 32, objectFit: "contain" }}
-                      onError={e => {
-                        e.currentTarget.style.display = "none";
-                        (e.currentTarget.nextElementSibling as HTMLElement).style.display = "inline";
-                      }}
-                    />
-                  )}
-                  <span style={{ fontSize: 16, fontWeight: 700, color: "#fff", display: integration.logo ? "none" : "inline" }}>
-                    {integration.initial}
-                  </span>
-                </div>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: C.text }}>{integration.name}</div>
-                  <div style={{ fontSize: 12, color: C.textDim, marginTop: 4 }}>{integration.subtitle}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Divider + 3-tile bottom row */}
-      <div style={{ display: "flex", alignItems: "center", gap: 16, margin: "24px 0" }}>
-        <div style={{ flex: 1, height: 1, background: C.border }} />
-        <div style={{ fontSize: 12, color: C.textDim, fontWeight: 500 }}>or</div>
-        <div style={{ flex: 1, height: 1, background: C.border }} />
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
-
-        {/* Google Drive */}
-        <div onClick={() => router.push("/connections")} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "24px 20px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 12, textAlign: "center", transition: "border-color 0.15s" }} onMouseEnter={e => { e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.boxShadow = `0 0 0 3px ${C.blueBg}`; }} onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.boxShadow = "none"; }}>
-          <div style={{ width: 52, height: 52, borderRadius: 12, background: "#1FA463", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <img src="https://cdn.simpleicons.org/googledrive/FFFFFF" alt="Google Drive" style={{ width: 28, height: 28, objectFit: "contain" }} onError={e => { e.currentTarget.style.display = "none"; (e.currentTarget.nextElementSibling as HTMLElement).style.display = "inline"; }} />
-            <span style={{ fontSize: 14, fontWeight: 700, color: "#fff", display: "none" }}>GD</span>
-          </div>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>Google Drive</div>
-            <div style={{ fontSize: 12, color: C.textDim, marginTop: 4 }}>Pick a CSV from your Drive</div>
-          </div>
-        </div>
-
-        {/* Upload CSV */}
-        <div onClick={() => router.push("/connections")} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "24px 20px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 12, textAlign: "center", transition: "border-color 0.15s" }} onMouseEnter={e => { e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.boxShadow = `0 0 0 3px ${C.blueBg}`; }} onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.boxShadow = "none"; }}>
-          <div style={{ width: 52, height: 52, borderRadius: 12, background: "#475569", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 3v12" /><path d="M7 8l5-5 5 5" /><path d="M5 21h14" />
-            </svg>
-          </div>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>Upload CSV</div>
-            <div style={{ fontSize: 12, color: C.textDim, marginTop: 4 }}>Upload a CSV file from your computer</div>
-          </div>
-        </div>
-
-        {/* Manual Entry */}
-        <div onClick={() => router.push("/connections?mode=manual")} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "24px 20px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 12, textAlign: "center", transition: "border-color 0.15s" }} onMouseEnter={e => { e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.boxShadow = `0 0 0 3px ${C.blueBg}`; }} onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.boxShadow = "none"; }}>
-          <div style={{ width: 52, height: 52, borderRadius: 12, background: "#64748B", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-            </svg>
-          </div>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>Manual Entry</div>
-            <div style={{ fontSize: 12, color: C.textDim, marginTop: 4 }}>Create an invoice manually</div>
-          </div>
-        </div>
-
-      </div>
     </div>
   );
 }

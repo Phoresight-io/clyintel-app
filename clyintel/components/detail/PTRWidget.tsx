@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { C } from "@/lib/theme";
 import { Client, ptrRecommendations } from "@/lib/mock-data";
 
@@ -12,12 +12,6 @@ const ANALYSIS_STEPS = [
   "Generating recommendation",
 ];
 
-const CONFIDENCE_COLORS = {
-  High:   { text: C.green,  bg: C.greenBg  },
-  Medium: { text: C.amber,  bg: C.amberBg  },
-  Low:    { text: C.red,    bg: C.redBg    },
-};
-
 interface Props {
   client: Client;
 }
@@ -25,7 +19,15 @@ interface Props {
 export default function PTRWidget({ client }: Props) {
   const [ptrState, setPtrState] = useState<PTRState>("result");
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
-  const [applied, setApplied] = useState(false);
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (!(e.target as Element).closest('[data-tooltip]')) setActiveTooltip(null);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   const rec = ptrRecommendations[client.id];
   const scoreColor = client.score >= 80 ? C.green : client.score >= 60 ? C.amber : C.red;
@@ -34,7 +36,6 @@ export default function PTRWidget({ client }: Props) {
   const handleGenerate = () => {
     setPtrState("generating");
     setCompletedSteps([]);
-    setApplied(false);
 
     ANALYSIS_STEPS.forEach((_, idx) => {
       setTimeout(() => {
@@ -44,11 +45,6 @@ export default function PTRWidget({ client }: Props) {
         }
       }, (idx + 1) * 520);
     });
-  };
-
-  const handleRegenerate = () => {
-    setPtrState("idle");
-    setTimeout(handleGenerate, 50);
   };
 
   /* ── IDLE ─────────────────────────────────────────────── */
@@ -146,7 +142,6 @@ export default function PTRWidget({ client }: Props) {
   /* ── RESULT ───────────────────────────────────────────── */
   if (!rec) return null;
 
-  const confColors = CONFIDENCE_COLORS[rec.confidence];
   const revColor = rec.revImpactSign === "positive" ? C.green : rec.revImpactSign === "negative" ? C.red : C.textMid;
 
   return (
@@ -159,9 +154,6 @@ export default function PTRWidget({ client }: Props) {
       {/* Header */}
       <div style={{ padding: "12px 20px", background: C.surface, borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.12em" }}>Payment Terms Recommendation</span>
-        <span style={{ fontSize: 11, fontWeight: 600, color: confColors.text, background: confColors.bg, borderRadius: 10, padding: "2px 10px" }}>
-          {rec.confidence} confidence
-        </span>
       </div>
 
       {/* Terms + Reminder */}
@@ -206,30 +198,39 @@ export default function PTRWidget({ client }: Props) {
         </div>
       </div>
 
-      {/* Key factors */}
-      <div style={{ padding: "0 20px 16px" }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>Key factors</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          {rec.keyFactors.map((f, i) => (
-            <div key={i} style={{ fontSize: 12, color: C.textMid, display: "flex", gap: 7, alignItems: "flex-start" }}>
-              <span style={{ color: C.blue, fontWeight: 700, marginTop: 1, flexShrink: 0 }}>·</span>
-              <span>{f}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
       {/* Projections */}
       <div style={{ borderTop: `1px solid ${C.border}`, display: "grid", gridTemplateColumns: "1fr 1px 1fr" }}>
         <div style={{ padding: "16px 20px", textAlign: "center" }}>
-          <div style={{ fontSize: 11, color: C.textMid, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Late Payment Reduction</div>
+          <div style={{ fontSize: 11, color: C.textMid, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+            Late Payment Reduction
+            <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+              <span data-tooltip="" onClick={() => setActiveTooltip(activeTooltip === 'left' ? null : 'left')} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", marginLeft: 5, cursor: "pointer", verticalAlign: "middle", flexShrink: 0, color: C.textDim }}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.3"/><path d="M7 6v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="7" cy="4.5" r="0.6" fill="currentColor"/></svg>
+              </span>
+              {activeTooltip === 'left' && (
+                <div style={{ position: "absolute", bottom: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)", width: 220, background: "#FFFFFF", color: C.text, border: `1px solid ${C.border}`, fontSize: 12, lineHeight: 1.6, borderRadius: 8, padding: "10px 14px", zIndex: 50, boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}>
+                  Estimated reduction in late payments based on the recommended terms and reminder strategy, compared to your current setup.
+                </div>
+              )}
+            </span>
+          </div>
           <div style={{ fontSize: 28, fontWeight: 700, color: C.green, fontFamily: C.mono, lineHeight: 1 }}>{rec.lossReduction}</div>
           <div style={{ fontSize: 11, color: C.textDim, marginTop: 5 }}>vs. current terms</div>
         </div>
         <div style={{ background: C.border }} />
         <div style={{ padding: "16px 20px", textAlign: "center" }}>
           <div style={{ fontSize: 11, color: C.textMid, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
-            {rec.revImpactSign === "positive" ? "Est. Revenue Gain" : rec.revImpactSign === "neutral" ? "Revenue Impact" : "Est. Delay Cost"}
+            {rec.revImpactSign === "positive" ? "Est. Revenue Gain" : rec.revImpactSign === "neutral" ? "Revenue Impact" : "Estimated Delay Cost"}
+            <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+              <span data-tooltip="" onClick={() => setActiveTooltip(activeTooltip === 'right' ? null : 'right')} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", marginLeft: 5, cursor: "pointer", verticalAlign: "middle", flexShrink: 0, color: C.textDim }}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.3"/><path d="M7 6v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="7" cy="4.5" r="0.6" fill="currentColor"/></svg>
+              </span>
+              {activeTooltip === 'right' && (
+                <div style={{ position: "absolute", bottom: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)", width: 220, background: "#FFFFFF", color: C.text, border: `1px solid ${C.border}`, fontSize: 12, lineHeight: 1.6, borderRadius: 8, padding: "10px 14px", zIndex: 50, boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}>
+                  Estimated annual revenue impact. A delay cost reflects cash flow lost while payments sit overdue; a gain reflects improved collection timing.
+                </div>
+              )}
+            </span>
           </div>
           <div style={{ fontSize: 28, fontWeight: 700, color: revColor, fontFamily: C.mono, lineHeight: 1 }}>
             {rec.revImpactSign === "negative" ? "-" : rec.revImpactSign === "positive" ? "+" : ""}{rec.revImpact}
@@ -249,32 +250,6 @@ export default function PTRWidget({ client }: Props) {
         </div>
       )}
 
-      {/* Actions */}
-      <div style={{ borderTop: `1px solid ${C.border}`, padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <button
-          onClick={() => { setApplied(false); handleRegenerate(); }}
-          style={{ padding: "7px 14px", fontSize: 12, fontWeight: 600, color: C.textMid, background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}
-          onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.color = C.blue; }}
-          onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.textMid; }}
-        >
-          Regenerate
-        </button>
-
-        {applied ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: C.green }}>
-            <span>✓</span> Terms applied
-          </div>
-        ) : (
-          <button
-            onClick={() => setApplied(true)}
-            style={{ padding: "7px 18px", fontSize: 12, fontWeight: 600, color: "#fff", background: C.navy, border: "none", borderRadius: 6, cursor: "pointer" }}
-            onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.85")}
-            onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
-          >
-            Apply Terms
-          </button>
-        )}
-      </div>
     </div>
   );
 }

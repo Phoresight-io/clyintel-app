@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 import {
@@ -20,6 +20,14 @@ type ManualForm = Record<string, string>;
 
 export default function ConnectionsScreen() {
   const router = useRouter();
+  const [showBack, setShowBack] = useState(false);
+
+  useEffect(() => {
+    const isDirect = sessionStorage.getItem('clyintel_nav_direct') === 'true';
+    setShowBack(!isDirect);
+    sessionStorage.removeItem('clyintel_nav_direct');
+  }, []);
+
   const [stage, setStage]                   = useState<Stage>("connect");
   const [selectedService, setSelectedService] = useState<InvoiceService | null>(null);
   const [pickedClient, setPickedClient]     = useState<{ name: string } | null>(null);
@@ -46,7 +54,7 @@ export default function ConnectionsScreen() {
   const handleDriveFilePick = (f: DriveFile)   => { setSelectedFile(f); setStage("csv_uploading"); setTimeout(() => setStage("csv_done"), 1800); };
   const handleFileUpload    = () => { setSelectedFile({ name: "Q1_2026_Invoices.csv", rows: 47, size: "84 KB" }); setStage("csv_uploading"); setTimeout(() => setStage("csv_done"), 1800); };
   const handleUploadMore    = () => { setSelectedFile(null); setStage(csvSource === "drive" ? "drive_folders" : "csv_upload"); };
-  const handleClientPick    = (c: { name: string }) => { setPickedClient(c); setStage("analyzing"); setTimeout(() => router.push("/"), 2000); };
+  const handleClientPick    = (c: { name: string }) => { setPickedClient(c); setStage("analyzing"); setTimeout(() => { sessionStorage.removeItem('clyintel_nav_direct'); router.push("/"); }, 2000); };
 
   const integrations = invoiceServices.filter(s => ["qb","fb","stripe","xero"].includes(s.id));
   const bottomRow    = ["gdrive","csv","manual"].map(id => invoiceServices.find(s => s.id === id)!);
@@ -106,7 +114,7 @@ export default function ConnectionsScreen() {
       {/* ── CONNECT ── */}
       {stage === "connect" && (
         <>
-          {backBtn(() => router.push("/"), "Back to Recovery")}
+          {showBack && backBtn(() => router.back())}
           <div style={{ maxWidth: 860, margin: "0 auto", textAlign: "center" }}>
             <div style={{ marginBottom: 40 }}>
               <div style={{ fontSize: 28, fontWeight: 700, color: C.navy, marginBottom: 8 }}>Add Client</div>
@@ -191,24 +199,23 @@ export default function ConnectionsScreen() {
           </div>
           <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", maxWidth: 580 }}>
             <div style={{ display: "grid", gridTemplateColumns: "32px 2fr 90px 110px", padding: "9px 16px", background: C.surface, borderBottom: `1px solid ${C.border}` }}>
-              <span />
+              <div />
               {["Client", "Invoices", "Balance"].map(h => <span key={h} style={{ fontSize: 11, fontWeight: 600, color: C.textMid, textTransform: "uppercase", letterSpacing: "0.06em" }}>{h}</span>)}
             </div>
             {importedClients.map((c, i) => {
               const isSelected = selectedClients.includes(c.name);
+              const toggle = () => setSelectedClients(prev => isSelected ? prev.filter(n => n !== c.name) : [...prev, c.name]);
               return (
                 <div
                   key={c.name}
-                  onClick={() => setSelectedClients(prev => prev.includes(c.name) ? prev.filter(n => n !== c.name) : [...prev, c.name])}
+                  onClick={toggle}
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "32px 2fr 90px 110px",
-                    alignItems: "center",
+                    display: "grid", gridTemplateColumns: "32px 2fr 90px 110px", alignItems: "center",
                     padding: "13px 16px",
                     borderBottom: i < importedClients.length - 1 ? `1px solid ${C.border}` : "none",
                     borderLeft: isSelected ? `2px solid ${C.blue}` : "2px solid transparent",
                     background: isSelected ? C.blueBg : "transparent",
-                    cursor: "pointer",
+                    cursor: "pointer", transition: "background 0.15s",
                   }}
                   onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = C.blueBg; }}
                   onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}
@@ -216,7 +223,8 @@ export default function ConnectionsScreen() {
                   <input
                     type="checkbox"
                     checked={isSelected}
-                    onChange={() => {}}
+                    onChange={toggle}
+                    onClick={e => e.stopPropagation()}
                     style={{ cursor: "pointer", accentColor: C.blue }}
                   />
                   <div style={{ fontSize: 13, fontWeight: 500, color: C.text }}>{c.name}</div>
@@ -226,33 +234,32 @@ export default function ConnectionsScreen() {
               );
             })}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, maxWidth: 580, marginTop: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16, maxWidth: 580 }}>
             <button
               onClick={() => setStage("connect")}
               style={{ padding: "9px 18px", fontSize: 13, fontWeight: 600, color: C.textMid, background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.color = C.blue; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.textMid; }}
             >
               Cancel
             </button>
             {selectedClients.length > 0 && (
-              <span style={{ fontSize: 13, color: C.textMid }}>
+              <span style={{ fontSize: 13, color: C.textMid, flex: 1 }}>
                 {selectedClients.length} client{selectedClients.length !== 1 ? "s" : ""} selected
               </span>
             )}
-            <div style={{ flex: 1 }} />
             <button
               onClick={() => selectedClients.length > 0 && handleClientPick({ name: selectedClients[0] })}
-              disabled={selectedClients.length === 0}
               style={{
-                padding: "9px 18px",
-                fontSize: 13,
-                fontWeight: 600,
-                color: "#fff",
-                background: C.blue,
-                border: "none",
-                borderRadius: 6,
-                cursor: selectedClients.length === 0 ? "not-allowed" : "pointer",
-                opacity: selectedClients.length === 0 ? 0.4 : 1,
+                marginLeft: "auto", padding: "9px 20px", fontSize: 13, fontWeight: 600,
+                color: selectedClients.length === 0 ? C.textDim : "#fff",
+                background: selectedClients.length === 0 ? C.surface : C.blue,
+                border: `1px solid ${selectedClients.length === 0 ? C.border : C.blue}`,
+                borderRadius: 6, cursor: selectedClients.length === 0 ? "not-allowed" : "pointer",
+                opacity: selectedClients.length === 0 ? 0.6 : 1, transition: "opacity 0.15s",
               }}
+              onMouseEnter={e => { if (selectedClients.length > 0) e.currentTarget.style.opacity = "0.85"; }}
+              onMouseLeave={e => { e.currentTarget.style.opacity = selectedClients.length === 0 ? "0.6" : "1"; }}
             >
               Continue
             </button>
@@ -498,7 +505,7 @@ export default function ConnectionsScreen() {
             <button onClick={() => { setSelectedFile(null); setSelectedFolder(null); setStage("connect"); }} style={{ padding: "12px 20px", fontSize: 14, fontWeight: 600, color: C.text, background: "#FFFFFF", border: `1px solid ${C.border}`, borderRadius: 8, cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.borderColor = C.blue} onMouseLeave={e => e.currentTarget.style.borderColor = C.border}>
               Back to Add Client
             </button>
-            <button onClick={() => router.push("/")} style={{ padding: "12px 20px", fontSize: 14, fontWeight: 600, color: C.text, background: "#FFFFFF", border: `1px solid ${C.border}`, borderRadius: 8, cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.borderColor = C.blue} onMouseLeave={e => e.currentTarget.style.borderColor = C.border}>
+            <button onClick={() => { sessionStorage.removeItem('clyintel_nav_direct'); router.push("/"); }} style={{ padding: "12px 20px", fontSize: 14, fontWeight: 600, color: C.text, background: "#FFFFFF", border: `1px solid ${C.border}`, borderRadius: 8, cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.borderColor = C.blue} onMouseLeave={e => e.currentTarget.style.borderColor = C.border}>
               Go to Recovery Dashboard →
             </button>
           </div>
@@ -530,7 +537,7 @@ export default function ConnectionsScreen() {
             ))}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
               <button onClick={() => setStage("connect")} style={{ padding: "9px 18px", fontSize: 13, fontWeight: 600, color: C.textMid, background: "#FFFFFF", border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}>Cancel</button>
-              <button onClick={() => { setManualSubmitted(true); setTimeout(() => router.push("/"), 1800); }} style={{ padding: "9px 18px", fontSize: 13, fontWeight: 600, color: "#FFFFFF", background: C.blue, border: "none", borderRadius: 6, cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.opacity = "0.88"} onMouseLeave={e => e.currentTarget.style.opacity = "1"}>Save Invoice</button>
+              <button onClick={() => { setManualSubmitted(true); setTimeout(() => { sessionStorage.removeItem('clyintel_nav_direct'); router.push("/"); }, 1800); }} style={{ padding: "9px 18px", fontSize: 13, fontWeight: 600, color: "#FFFFFF", background: C.blue, border: "none", borderRadius: 6, cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.opacity = "0.88"} onMouseLeave={e => e.currentTarget.style.opacity = "1"}>Save Invoice</button>
             </div>
           </div>
         </>
