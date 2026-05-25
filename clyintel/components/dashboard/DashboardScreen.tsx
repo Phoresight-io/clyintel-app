@@ -229,8 +229,8 @@ export default function DashboardScreen() {
               </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
                 {rec && (
-                  <button onClick={() => setActiveRecModal(rec.id)} title={rec.status === "approved" ? "Approved recovery rec" : rec.status === "dismissed" ? "Dismissed recovery rec" : "Recovery recommendation pending"} style={{ width: 26, height: 26, borderRadius: "50%", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, background: rec.status === "approved" ? C.greenBg : rec.status === "dismissed" ? C.surface : C.amberBg, color: rec.status === "approved" ? C.green : rec.status === "dismissed" ? C.textDim : C.amber }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.75")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}>
-                    {rec.status === "approved" ? "✓" : rec.status === "dismissed" ? "○" : "!"}
+                  <button onClick={() => setActiveRecModal(rec.id)} title="Recovery recommendation pending" style={{ width: 26, height: 26, borderRadius: "50%", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, background: C.amberBg, color: C.amber }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.75")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}>
+                    !
                   </button>
                 )}
               </div>
