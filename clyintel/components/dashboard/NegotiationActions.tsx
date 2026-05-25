@@ -25,7 +25,7 @@ export default function NegotiationActions({ cards, onUpdate, activeModal, setAc
       ) : (
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {cards.filter(c => c.status !== "dismissed").map(card => (
-          <div key={card.id} style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 18px", borderRadius: 8, background: card.status === "approved" ? C.greenBg : C.blueBg }}>
+          <div key={card.id} style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 18px", borderRadius: 8, background: card.status === "approved" ? C.greenBg : C.amberBg }}>
             <div style={{ width: 160 }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{card.client}</div>
               <div style={{ fontSize: 11, color: C.textDim, marginTop: 1 }}>Score <span style={{ color: C.red, fontWeight: 700 }}>{card.score}</span></div>
@@ -54,7 +54,7 @@ export default function NegotiationActions({ cards, onUpdate, activeModal, setAc
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               {card.status === "approved" && <span style={{ fontSize: 13, fontWeight: 700, color: C.green }}>✓ Approved — ${card.editAmount.toLocaleString()}</span>}
-              <button onClick={() => setActiveModal(card.id)} style={{ padding: "6px 14px", fontSize: 13, fontWeight: 600, color: card.status === "pending" ? "#FFFFFF" : C.textMid, background: card.status === "pending" ? C.blue : "transparent", border: card.status === "pending" ? "none" : `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.85")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}>
+              <button onClick={() => setActiveModal(card.id)} style={{ padding: "6px 14px", fontSize: 13, fontWeight: 600, color: card.status === "pending" ? "#FFFFFF" : C.textMid, background: card.status === "pending" ? C.amber : "transparent", border: card.status === "pending" ? "none" : `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.85")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}>
                 {card.status === "pending" ? "Review" : "View"}
               </button>
               {card.status !== "dismissed" && (
