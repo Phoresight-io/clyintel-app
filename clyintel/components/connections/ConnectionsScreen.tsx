@@ -398,7 +398,7 @@ export default function ConnectionsScreen() {
                 <div>Folder name</div><div>Files</div><div>Modified</div><div></div>
               </div>
               {driveFolders.map((f, i) => (
-                <div key={f.name} onClick={() => handleFolderPick(f)} style={{ display: "grid", gridTemplateColumns: "1fr 110px 140px 24px", gap: 16, padding: "14px 16px", alignItems: "center", borderBottom: i < driveFolders.length - 1 ? `1px solid ${C.border}` : "none", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => e.currentTarget.style.background = C.blueBg} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <div key={f.name} onClick={() => handleFolderPick(f)} style={{ display: "grid", gridTemplateColumns: "1fr 110px 140px 24px", gap: 16, padding: "14px 16px", alignItems: "center", borderBottom: i < driveFolders.length - 1 ? `1px solid ${C.border}` : "none", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={(e) => (e.currentTarget.style.background = C.blueBg)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="#FBBF24" stroke="#D97706" strokeWidth="0.5"><path d="M2 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6z" /></svg>
                     <span style={{ fontSize: 14, color: C.blue, fontWeight: 500 }}>{f.name}</span>
@@ -426,7 +426,7 @@ export default function ConnectionsScreen() {
                 <div>File name</div><div>Rows</div><div>Modified</div><div>Size</div>
               </div>
               {driveFiles.map((f, i) => (
-                <div key={f.name} onClick={() => handleDriveFilePick(f)} style={{ display: "grid", gridTemplateColumns: "1fr 100px 140px 90px", gap: 16, padding: "14px 16px", alignItems: "center", borderBottom: i < driveFiles.length - 1 ? `1px solid ${C.border}` : "none", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => e.currentTarget.style.background = C.blueBg} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <div key={f.name} onClick={() => handleDriveFilePick(f)} style={{ display: "grid", gridTemplateColumns: "1fr 100px 140px 90px", gap: 16, padding: "14px 16px", alignItems: "center", borderBottom: i < driveFiles.length - 1 ? `1px solid ${C.border}` : "none", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={(e) => (e.currentTarget.style.background = C.blueBg)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <span style={{ fontSize: 14, color: "#1FA463" }}>▤</span>
                     <span style={{ fontSize: 14, color: C.blue, fontWeight: 500 }}>{f.name}</span>
