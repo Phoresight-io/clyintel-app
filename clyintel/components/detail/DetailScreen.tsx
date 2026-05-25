@@ -100,8 +100,8 @@ export default function DetailScreen({ client }: Props) {
               <div style={{ textAlign: "center", padding: "40px 20px", color: "#6B7280" }}>No invoices found for this client.</div>
             ) : (
               <>
-                <div style={{ display: "grid", gridTemplateColumns: "120px 120px 120px 100px 120px 1fr", gap: 16, padding: "12px 16px", background: C.surface, borderBottom: `1px solid ${C.border}`, fontSize: 11, fontWeight: 600, color: C.navy, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                  <div>Invoice #</div><div>Amount</div><div>Due Date</div><div>Due In</div><div>Status</div><div>Last Activity</div>
+                <div style={{ display: "grid", gridTemplateColumns: "120px 120px 120px 100px 120px 1fr 36px", gap: 16, padding: "12px 16px", background: C.surface, borderBottom: `1px solid ${C.border}`, fontSize: 11, fontWeight: 600, color: C.navy, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  <div>Invoice #</div><div>Amount</div><div>Due Date</div><div>Due In</div><div>Status</div><div>Last Activity</div><div />
                 </div>
                 {allInvoicesList.map((inv, i) => {
                   const isPastDue = inv.status === "past_due";
@@ -110,13 +110,18 @@ export default function DetailScreen({ client }: Props) {
                   const statusColor = isPaid ? C.green : isPastDue ? C.red : C.text;
                   const statusLabel = isPaid ? "Paid" : isPastDue ? "Past Due" : "Current";
                   return (
-                    <div key={inv.id} style={{ display: "grid", gridTemplateColumns: "120px 120px 120px 100px 120px 1fr", gap: 16, padding: "14px 16px", borderBottom: i < allInvoicesList.length - 1 ? `1px solid ${C.border}` : "none", fontSize: 14, alignItems: "center", background: isPaid ? "rgba(22,163,74,0.03)" : "transparent" }}>
+                    <div key={inv.id} style={{ display: "grid", gridTemplateColumns: "120px 120px 120px 100px 120px 1fr 36px", gap: 16, padding: "14px 16px", borderBottom: i < allInvoicesList.length - 1 ? `1px solid ${C.border}` : "none", fontSize: 14, alignItems: "center", background: isPaid ? "rgba(22,163,74,0.03)" : "transparent" }}>
                       <div onClick={() => !isPaid && setSelectedInvoiceForExchanges(inv.id)} style={{ fontFamily: C.mono, fontSize: 13, color: isPaid ? C.textMid : C.blue, cursor: isPaid ? "default" : "pointer" }} onMouseEnter={(e) => { if (!isPaid) e.currentTarget.style.color = C.amber; }} onMouseLeave={(e) => { if (!isPaid) e.currentTarget.style.color = C.blue; }}>{inv.id}</div>
                       <div style={{ fontFamily: C.mono, fontSize: 15, color: isPastDue ? C.red : C.text }}>${inv.amount.toLocaleString()}</div>
                       <div style={{ fontSize: 14, color: isPastDue ? C.red : C.textMid }}>{inv.dueDate}</div>
                       <div style={{ fontSize: 13, color: isPaid ? C.green : isPastDue ? C.red : C.text }}>{dueInValue}</div>
                       <div style={{ fontSize: 13, fontWeight: isPaid ? 600 : 400, color: statusColor }}>{statusLabel}</div>
                       <div style={{ fontSize: 13, color: C.textMid }}>{inv.lastActivity}</div>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {!isPaid && negotiationRecs.some(r => r.id === inv.id) && (
+                          <button onClick={() => setActiveRecModal(inv.id)} title="Recovery recommendation pending" style={{ width: 26, height: 26, borderRadius: "50%", background: C.amberBg, color: C.amber, border: "none", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.75")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}>!</button>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
