@@ -16,9 +16,14 @@ export default function NegotiationActions({ cards, onUpdate, activeModal, setAc
     <div style={{ marginBottom: 28 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
         <div style={{ width: 3, height: 16, background: C.navy, borderRadius: 2 }} />
-        <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Recovery Recommendations</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Recommendations</div>
       </div>
 
+      {cards.length === 0 ? (
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "20px 24px" }}>
+          <span style={{ fontSize: 13, color: C.textMid }}>No recommendations at this time.</span>
+        </div>
+      ) : (
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {cards.map(card => (
           <div key={card.id} style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 18px", borderRadius: 8, background: card.status === "approved" ? C.greenBg : card.status === "dismissed" ? C.surface : C.amberBg }}>
@@ -58,6 +63,7 @@ export default function NegotiationActions({ cards, onUpdate, activeModal, setAc
           </div>
         ))}
       </div>
+      )}
 
       {activeCard && (
         <RecoveryRecModal

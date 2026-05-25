@@ -119,7 +119,7 @@ export default function DashboardScreen() {
     <div style={{ padding: "28px 36px", minHeight: 520, fontFamily: C.sans }}>
       <div style={{ marginBottom: 24 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <div style={{ fontSize: 28, lineHeight: 1.15, fontWeight: 600, color: C.navy }}>Recovery Dashboard</div>
+          <div style={{ fontSize: 28, lineHeight: 1.15, fontWeight: 600, color: C.navy }}>Receivables Dashboard</div>
           <div style={{ display: "flex", gap: 12 }}>
             <button onClick={() => { sessionStorage.removeItem('clyintel_nav_direct'); router.push("/connections"); }} style={{ padding: "8px 16px", fontSize: 14, fontWeight: 600, color: C.blue, background: C.blueBg, border: `1px solid ${C.blue}`, borderRadius: 6, cursor: "pointer" }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.85")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}>+ Add Client</button>
           </div>
@@ -137,6 +137,10 @@ export default function DashboardScreen() {
 
       <NegotiationActions cards={recCards} onUpdate={updateRec} activeModal={activeRecModal} setActiveModal={setActiveRecModal} />
 
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+        <div style={{ width: 3, height: 16, background: C.navy, borderRadius: 2 }} />
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Outstanding</div>
+      </div>
       <div style={{ marginBottom: 20, display: "flex", gap: 12, alignItems: "center" }}>
         <div style={{ position: "relative" }}>
           <button

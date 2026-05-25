@@ -11,7 +11,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const isSettingsActive = pathname.startsWith("/settings");
 
   const navItems = [
-    { label: "Recovery", href: "/", active: isRecoveryActive, disabled: false },
+    { label: "Receivables", href: "/", active: isRecoveryActive, disabled: false },
     { label: "Portfolio", href: "/portfolio", active: isPortfolioActive, disabled: false },
     { label: "Settings", href: "/settings", active: isSettingsActive, disabled: false },
   ];
