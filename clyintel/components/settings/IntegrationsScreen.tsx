@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
+import { DEMO_RESET_KEY } from "@/lib/demo-mode";
 
 type IntegrationStatus = "connected" | "syncing" | "disconnected";
 
@@ -63,6 +64,21 @@ export default function IntegrationsScreen() {
   const [activeTab, setActiveTab] = useState("integrations");
   const [integrations, setIntegrations] = useState<ManagedIntegration[]>(INITIAL_INTEGRATIONS);
   const [disconnectConfirm, setDisconnectConfirm] = useState<string | null>(null);
+  const [isDemoReset, setIsDemoReset] = useState(false);
+
+  useEffect(() => {
+    setIsDemoReset(localStorage.getItem(DEMO_RESET_KEY) === 'true');
+  }, []);
+
+  const handleResetDemo = () => {
+    localStorage.setItem(DEMO_RESET_KEY, 'true');
+    window.location.reload();
+  };
+
+  const handleRestoreDemo = () => {
+    localStorage.removeItem(DEMO_RESET_KEY);
+    window.location.reload();
+  };
 
   const connected  = integrations.filter(i => i.status !== "disconnected");
 
@@ -120,6 +136,17 @@ export default function IntegrationsScreen() {
             {tab.label}
           </button>
         ))}
+      </div>
+
+      {/* Demo mode status bar */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 28, padding: "10px 16px", background: isDemoReset ? "rgba(220,38,38,0.05)" : "rgba(22,163,74,0.05)", border: `1px solid ${isDemoReset ? "rgba(220,38,38,0.2)" : "rgba(22,163,74,0.2)"}`, borderRadius: 8 }}>
+        <span style={{ width: 8, height: 8, borderRadius: "50%", background: isDemoReset ? C.red : C.green, flexShrink: 0, display: "inline-block" }} />
+        <span style={{ fontSize: 13, fontWeight: 600, color: isDemoReset ? C.red : C.green }}>
+          Demo Mode: {isDemoReset ? "No Data" : "Live Data"}
+        </span>
+        <span style={{ fontSize: 13, color: C.textDim, fontWeight: 400 }}>
+          {isDemoReset ? "Mock data is hidden across all screens." : "All mock data is visible across all screens."}
+        </span>
       </div>
 
       {/* Connected integrations */}
@@ -247,6 +274,57 @@ export default function IntegrationsScreen() {
             ))}
           </div>
         )}
+      </section>
+
+      {/* Demo data controls */}
+      <section style={{ marginTop: 16, animation: "fadeUp 0.2s ease" }}>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: C.text, marginBottom: 4 }}>Demo Data</div>
+          <div style={{ fontSize: 13, color: C.textDim, fontWeight: 500 }}>
+            Control the mock data shown across the app. Useful for demos or testing the zero-state UI.
+          </div>
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "20px 24px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <button
+              onClick={handleResetDemo}
+              disabled={isDemoReset}
+              style={{
+                padding: "9px 18px", fontSize: 14, fontWeight: 600,
+                color: isDemoReset ? C.textDim : "#fff",
+                background: isDemoReset ? C.surface : C.red,
+                border: `1px solid ${isDemoReset ? C.border : C.red}`,
+                borderRadius: 6, cursor: isDemoReset ? "not-allowed" : "pointer",
+                opacity: isDemoReset ? 0.6 : 1,
+                transition: "opacity 0.15s",
+              }}
+              onMouseEnter={(e) => { if (!isDemoReset) e.currentTarget.style.opacity = "0.85"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = isDemoReset ? "0.6" : "1"; }}
+            >
+              Reset Mock Data
+            </button>
+            <button
+              onClick={handleRestoreDemo}
+              disabled={!isDemoReset}
+              style={{
+                padding: "9px 18px", fontSize: 14, fontWeight: 600,
+                color: !isDemoReset ? C.textDim : C.navy,
+                background: C.surface,
+                border: `1px solid ${!isDemoReset ? C.border : C.navy}`,
+                borderRadius: 6, cursor: !isDemoReset ? "not-allowed" : "pointer",
+                opacity: !isDemoReset ? 0.6 : 1,
+                transition: "opacity 0.15s",
+              }}
+              onMouseEnter={(e) => { if (isDemoReset) e.currentTarget.style.opacity = "0.8"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = !isDemoReset ? "0.6" : "1"; }}
+            >
+              Restore Demo Data
+            </button>
+            <span style={{ fontSize: 13, color: C.textDim, fontWeight: 400 }}>
+              Both actions reload the page immediately.
+            </span>
+          </div>
+        </div>
       </section>
 
     </div>
