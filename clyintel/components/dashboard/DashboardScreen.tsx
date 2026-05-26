@@ -100,7 +100,7 @@ export default function DashboardScreen() {
   const totalFilterCount = Object.values(activeFilters).reduce((s, a) => s + a.length, 0);
 
   const kpis = [
-    { label: "Recovery YTD", value: "$42,150", color: C.green },
+    { label: "Recovery YTD", value: isReset ? "$0" : "$42,150", color: C.green },
     { label: "Total Outstanding", value: `$${totalOutstanding.toLocaleString()}`, color: C.text },
     { label: "Past Due", value: `$${totalPastDue.toLocaleString()}`, color: C.red },
     { label: "Active Invoices", value: String(activeInvoices), color: C.text },
