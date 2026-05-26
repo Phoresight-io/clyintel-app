@@ -2,7 +2,8 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
-import { DEMO_RESET_KEY } from "@/lib/demo-mode";
+import { DEMO_RESET_KEY, CLIENTS_KEY } from "@/lib/demo-mode";
+import type { Client } from "@/lib/mock-data";
 
 type IntegrationStatus = "connected" | "syncing" | "disconnected";
 
@@ -28,6 +29,21 @@ const INITIAL_INTEGRATIONS: ManagedIntegration[] = [
   { id: "xero",   name: "Xero",         color: "#13B5EA", initial: "XR", logo: "https://cdn.simpleicons.org/xero/FFFFFF",         subtitle: "Sync invoices from Xero",                status: "disconnected", lastSync: null, clients: 0, invoices: 0 },
   { id: "gdrive", name: "Google Drive", color: "#1FA463", initial: "GD", logo: "https://cdn.simpleicons.org/googledrive/FFFFFF",  subtitle: "Import from a spreadsheet in Drive",     status: "disconnected", lastSync: null, clients: 0, invoices: 0 },
 ];
+
+const INTEGRATION_CLIENT_SEEDS: Record<string, Client[]> = {
+  stripe: [
+    { id: 101, name: "Atlas Commerce", industry: "E-commerce", score: 58, prevScore: 65, status: "past_due", balance: 3200, daysOverdue: 22, invoices: 3, lastActivity: "3 days ago", nextAction: "Send final notice", scoreSummary: ["Payment delayed 22 days"], scoreFactors: ["Late payment history"], riskDrivers: ["22 days overdue"] },
+  ],
+  fb: [
+    { id: 102, name: "Bright Solutions", industry: "Consulting", score: 71, prevScore: 68, status: "due", balance: 5800, daysOverdue: 0, invoices: 2, lastActivity: "Today", nextAction: "Follow up in 3 days", scoreSummary: ["Invoice due soon"], scoreFactors: [], riskDrivers: [] },
+  ],
+  xero: [
+    { id: 103, name: "Summit Partners", industry: "Finance", score: 45, prevScore: 52, status: "past_due", balance: 9400, daysOverdue: 45, invoices: 4, lastActivity: "1 week ago", nextAction: "Issue formal demand", scoreSummary: ["Critical collection risk"], scoreFactors: ["4 late payments"], riskDrivers: ["45 days overdue"] },
+  ],
+  gdrive: [
+    { id: 104, name: "Pixel Works", industry: "Creative", score: 63, prevScore: 60, status: "due", balance: 2100, daysOverdue: 0, invoices: 1, lastActivity: "2 days ago", nextAction: "Schedule follow-up", scoreSummary: ["Invoice due in 7 days"], scoreFactors: [], riskDrivers: [] },
+  ],
+};
 
 const SETTING_TABS = [
   { id: "integrations", label: "Integrations", disabled: false },
@@ -73,7 +89,7 @@ export default function IntegrationsScreen() {
   const [disconnectConfirm, setDisconnectConfirm] = useState<string | null>(null);
   const [isDemoReset, setIsDemoReset] = useState(false);
 
-  // Mount priority: reset → [] | saved localStorage → parse | fallback to INITIAL
+  // Mount priority: reset → [] | saved localStorage (non-empty) → parse | fallback to INITIAL
   useEffect(() => {
     const reset = localStorage.getItem(DEMO_RESET_KEY) === 'true';
     setIsDemoReset(reset);
@@ -83,9 +99,15 @@ export default function IntegrationsScreen() {
     }
     const saved = localStorage.getItem(INTEGRATIONS_KEY);
     if (saved) {
-      try { setIntegrations(JSON.parse(saved)); } catch { /* ignore corrupt data */ }
+      try {
+        const parsed = JSON.parse(saved) as ManagedIntegration[];
+        setIntegrations(Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_INTEGRATIONS);
+      } catch {
+        setIntegrations(INITIAL_INTEGRATIONS);
+      }
+    } else {
+      setIntegrations(INITIAL_INTEGRATIONS);
     }
-    // else: useState already seeded with INITIAL_INTEGRATIONS
   }, []);
 
   const handleResetDemo = () => {
@@ -96,6 +118,7 @@ export default function IntegrationsScreen() {
   const handleRestoreDemo = () => {
     localStorage.removeItem(DEMO_RESET_KEY);
     localStorage.removeItem(INTEGRATIONS_KEY);
+    localStorage.removeItem(CLIENTS_KEY);
     window.location.reload();
   };
 
@@ -121,20 +144,60 @@ export default function IntegrationsScreen() {
       persist(next);
       return next;
     });
+
+    const seedIds = new Set((INTEGRATION_CLIENT_SEEDS[id] ?? []).map(s => s.id));
+    if (seedIds.size > 0) {
+      try {
+        const existing: Client[] = JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]');
+        localStorage.setItem(CLIENTS_KEY, JSON.stringify(existing.filter(c => !seedIds.has(c.id))));
+      } catch { /* ignore */ }
+    }
   };
 
   const handleConnectIntegration = (id: string) => {
     setIntegrations(prev => {
+      const seeds = INTEGRATION_CLIENT_SEEDS[id] ?? [];
+      const clientCount = seeds.length;
       const next = prev.map(i =>
-        i.id === id ? { ...i, status: "connected" as const, lastSync: "Just now" } : i
+        i.id === id ? { ...i, status: "connected" as const, lastSync: "Just now", clients: clientCount, invoices: clientCount * 2 } : i
       );
       persist(next);
       return next;
     });
+
+    const seeds = INTEGRATION_CLIENT_SEEDS[id] ?? [];
+    if (seeds.length > 0) {
+      try {
+        const existing: Client[] = JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]');
+        const merged = [...existing.filter(c => !seeds.some(s => s.id === c.id)), ...seeds];
+        localStorage.setItem(CLIENTS_KEY, JSON.stringify(merged));
+      } catch { /* ignore */ }
+    }
   };
 
   const handleAddNew = () => {
-    router.push("/connections");
+    try {
+      const existing: Client[] = JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]');
+      const manualCount = existing.filter(c => c.id >= 200).length;
+      const newClient: Client = {
+        id: 200 + manualCount,
+        name: `Demo Client ${manualCount + 1}`,
+        industry: "General",
+        score: 72,
+        prevScore: 70,
+        status: "due",
+        balance: 4500,
+        daysOverdue: 0,
+        invoices: 1,
+        lastActivity: "Today",
+        nextAction: "Send welcome invoice",
+        scoreSummary: ["New client — no payment history"],
+        scoreFactors: [],
+        riskDrivers: [],
+      };
+      localStorage.setItem(CLIENTS_KEY, JSON.stringify([...existing, newClient]));
+    } catch { /* ignore */ }
+    router.push("/portfolio");
   };
 
   return (
@@ -198,7 +261,7 @@ export default function IntegrationsScreen() {
               onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.85")}
               onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
             >
-              + Add Integration
+              + Add Client
             </button>
           </div>
 

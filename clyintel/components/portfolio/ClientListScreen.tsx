@@ -4,11 +4,15 @@ import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 import * as mockRaw from "@/lib/mock-data";
 import type { Client, ClientInvoiceSet } from "@/lib/mock-data";
-import { isDemoReset } from "@/lib/demo-mode";
+import { isDemoReset, CLIENTS_KEY } from "@/lib/demo-mode";
 
 export default function ClientListScreen() {
   const isReset = isDemoReset();
-  const clients = isReset ? ([] as Client[]) : mockRaw.clients;
+  const storedClients: Client[] = (() => {
+    if (isReset) return [];
+    try { return JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]') as Client[]; } catch { return []; }
+  })();
+  const clients = isReset ? [] : [...mockRaw.clients, ...storedClients];
   const clientInvoices = isReset ? ({} as Record<number, ClientInvoiceSet>) : mockRaw.clientInvoices;
 
   const router = useRouter();
