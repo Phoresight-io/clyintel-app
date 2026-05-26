@@ -68,7 +68,9 @@ export default function IntegrationsScreen() {
   const [isDemoReset, setIsDemoReset] = useState(false);
 
   useEffect(() => {
-    setIsDemoReset(localStorage.getItem(DEMO_RESET_KEY) === 'true');
+    const reset = localStorage.getItem(DEMO_RESET_KEY) === 'true';
+    setIsDemoReset(reset);
+    if (reset) setIntegrations([]);
   }, []);
 
   const handleResetDemo = () => {
