@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
-import { DEMO_RESET_KEY, CLIENTS_KEY } from "@/lib/demo-mode";
+import { DEMO_RESET_KEY, CLIENTS_KEY, INTEGRATIONS_KEY, DEFAULT_INTEGRATIONS } from "@/lib/demo-mode";
 import type { Client } from "@/lib/mock-data";
 
 type IntegrationStatus = "connected" | "syncing" | "disconnected";
@@ -20,15 +20,6 @@ interface ManagedIntegration {
   invoices: number;
 }
 
-const INTEGRATIONS_KEY = 'clyintel_integrations';
-
-const INITIAL_INTEGRATIONS: ManagedIntegration[] = [
-  { id: "qb",     name: "QuickBooks",   color: "#2CA01C", initial: "QB", logo: "https://cdn.simpleicons.org/quickbooks/FFFFFF",   subtitle: "Sync invoices from QuickBooks Online",   status: "connected",    lastSync: "Today at 2:14 PM", clients: 6, invoices: 24 },
-  { id: "fb",     name: "FreshBooks",   color: "#1068e0", initial: "FB", logo: "https://cdn.simpleicons.org/freshbooks/FFFFFF",   subtitle: "Sync invoices from FreshBooks",          status: "disconnected", lastSync: null, clients: 0, invoices: 0 },
-  { id: "stripe", name: "Stripe",       color: "#635BFF", initial: "ST", logo: "https://cdn.simpleicons.org/stripe/FFFFFF",       subtitle: "Sync invoices from Stripe Billing",      status: "disconnected", lastSync: null, clients: 0, invoices: 0 },
-  { id: "xero",   name: "Xero",         color: "#13B5EA", initial: "XR", logo: "https://cdn.simpleicons.org/xero/FFFFFF",         subtitle: "Sync invoices from Xero",                status: "disconnected", lastSync: null, clients: 0, invoices: 0 },
-  { id: "gdrive", name: "Google Drive", color: "#1FA463", initial: "GD", logo: "https://cdn.simpleicons.org/googledrive/FFFFFF",  subtitle: "Import from a spreadsheet in Drive",     status: "disconnected", lastSync: null, clients: 0, invoices: 0 },
-];
 
 const INTEGRATION_CLIENT_SEEDS: Record<string, Client[]> = {
   stripe: [
@@ -85,7 +76,7 @@ export default function IntegrationsScreen() {
   }, []);
 
   const [activeTab, setActiveTab] = useState("integrations");
-  const [integrations, setIntegrations] = useState<ManagedIntegration[]>(INITIAL_INTEGRATIONS);
+  const [integrations, setIntegrations] = useState<ManagedIntegration[]>(DEFAULT_INTEGRATIONS as ManagedIntegration[]);
   const [disconnectConfirm, setDisconnectConfirm] = useState<string | null>(null);
   const [isDemoReset, setIsDemoReset] = useState(false);
 
@@ -101,17 +92,19 @@ export default function IntegrationsScreen() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved) as ManagedIntegration[];
-        setIntegrations(Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_INTEGRATIONS);
+        setIntegrations(Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_INTEGRATIONS as ManagedIntegration[]);
       } catch {
-        setIntegrations(INITIAL_INTEGRATIONS);
+        setIntegrations(DEFAULT_INTEGRATIONS as ManagedIntegration[]);
       }
     } else {
-      setIntegrations(INITIAL_INTEGRATIONS);
+      setIntegrations(DEFAULT_INTEGRATIONS as ManagedIntegration[]);
     }
   }, []);
 
   const handleResetDemo = () => {
     localStorage.setItem(DEMO_RESET_KEY, 'true');
+    localStorage.removeItem(CLIENTS_KEY);
+    localStorage.removeItem(INTEGRATIONS_KEY);
     window.location.reload();
   };
 
@@ -154,50 +147,10 @@ export default function IntegrationsScreen() {
     }
   };
 
-  const handleConnectIntegration = (id: string) => {
-    setIntegrations(prev => {
-      const seeds = INTEGRATION_CLIENT_SEEDS[id] ?? [];
-      const clientCount = seeds.length;
-      const next = prev.map(i =>
-        i.id === id ? { ...i, status: "connected" as const, lastSync: "Just now", clients: clientCount, invoices: clientCount * 2 } : i
-      );
-      persist(next);
-      return next;
-    });
-
-    const seeds = INTEGRATION_CLIENT_SEEDS[id] ?? [];
-    if (seeds.length > 0) {
-      try {
-        const existing: Client[] = JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]');
-        const merged = [...existing.filter(c => !seeds.some(s => s.id === c.id)), ...seeds];
-        localStorage.setItem(CLIENTS_KEY, JSON.stringify(merged));
-      } catch { /* ignore */ }
-    }
-  };
 
   const handleAddNew = () => {
-    try {
-      const existing: Client[] = JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]');
-      const manualCount = existing.filter(c => c.id >= 200).length;
-      const newClient: Client = {
-        id: 200 + manualCount,
-        name: `Demo Client ${manualCount + 1}`,
-        industry: "General",
-        score: 72,
-        prevScore: 70,
-        status: "due",
-        balance: 4500,
-        daysOverdue: 0,
-        invoices: 1,
-        lastActivity: "Today",
-        nextAction: "Send welcome invoice",
-        scoreSummary: ["New client — no payment history"],
-        scoreFactors: [],
-        riskDrivers: [],
-      };
-      localStorage.setItem(CLIENTS_KEY, JSON.stringify([...existing, newClient]));
-    } catch { /* ignore */ }
-    router.push("/portfolio");
+    sessionStorage.removeItem('clyintel_nav_direct');
+    router.push("/connections");
   };
 
   return (
@@ -265,22 +218,16 @@ export default function IntegrationsScreen() {
             </button>
           </div>
 
-          {integrations.length === 0 ? (
+          {connected.length === 0 ? (
             <div style={{ background: C.surface, border: `1px dashed ${C.border}`, borderRadius: 10, padding: "36px 24px", textAlign: "center" }}>
-              <div style={{ fontSize: 15, color: C.textMid, fontWeight: 500, marginBottom: 12 }}>No integrations available.</div>
-              <button
-                onClick={handleAddNew}
-                style={{ padding: "9px 18px", fontSize: 14, fontWeight: 600, color: C.blue, background: C.blueBg, border: `1px solid ${C.blue}`, borderRadius: 6, cursor: "pointer" }}
-              >
-                Connect your first integration
-              </button>
+              <div style={{ fontSize: 15, color: C.textMid, fontWeight: 500 }}>No integrations available.</div>
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {integrations.map(integration => (
+              {connected.map(integration => (
                 <div
                   key={integration.id}
-                  style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "20px 24px", display: "flex", alignItems: "center", gap: 20, animation: "fadeUp 0.18s ease", opacity: integration.status === "disconnected" ? 0.72 : 1 }}
+                  style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "20px 24px", display: "flex", alignItems: "center", gap: 20, animation: "fadeUp 0.18s ease" }}
                 >
                   {/* Logo */}
                   <div style={{ width: 48, height: 48, borderRadius: 12, background: integration.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -318,59 +265,46 @@ export default function IntegrationsScreen() {
 
                   {/* Actions */}
                   <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                    {integration.status === "disconnected" ? (
-                      <button
-                        onClick={() => handleConnectIntegration(integration.id)}
-                        style={{ padding: "7px 14px", fontSize: 13, fontWeight: 600, color: C.blue, background: C.blueBg, border: `1px solid ${C.blue}`, borderRadius: 6, cursor: "pointer", transition: "opacity 0.15s" }}
-                        onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.8")}
-                        onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
-                      >
-                        Connect
-                      </button>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => handleSyncNow(integration.id)}
-                          disabled={integration.status === "syncing"}
-                          style={{
-                            padding: "7px 14px", fontSize: 13, fontWeight: 600,
-                            color: integration.status === "syncing" ? C.textDim : C.blue,
-                            background: integration.status === "syncing" ? C.surface : C.blueBg,
-                            border: `1px solid ${integration.status === "syncing" ? C.border : C.blue}`,
-                            borderRadius: 6, cursor: integration.status === "syncing" ? "not-allowed" : "pointer",
-                            transition: "opacity 0.15s",
-                          }}
-                        >
-                          {integration.status === "syncing" ? "Syncing…" : "Sync now"}
-                        </button>
+                    <button
+                      onClick={() => handleSyncNow(integration.id)}
+                      disabled={integration.status === "syncing"}
+                      style={{
+                        padding: "7px 14px", fontSize: 13, fontWeight: 600,
+                        color: integration.status === "syncing" ? C.textDim : C.blue,
+                        background: integration.status === "syncing" ? C.surface : C.blueBg,
+                        border: `1px solid ${integration.status === "syncing" ? C.border : C.blue}`,
+                        borderRadius: 6, cursor: integration.status === "syncing" ? "not-allowed" : "pointer",
+                        transition: "opacity 0.15s",
+                      }}
+                    >
+                      {integration.status === "syncing" ? "Syncing…" : "Sync now"}
+                    </button>
 
-                        {disconnectConfirm === integration.id ? (
-                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                            <span style={{ fontSize: 11, color: C.textMid, fontWeight: 500 }}>Disconnect?</span>
-                            <button
-                              onClick={() => handleDisconnect(integration.id)}
-                              style={{ padding: "7px 12px", fontSize: 13, fontWeight: 600, color: "#fff", background: C.red, border: "none", borderRadius: 6, cursor: "pointer" }}
-                            >
-                              Yes, disconnect
-                            </button>
-                            <button
-                              onClick={() => setDisconnectConfirm(null)}
-                              style={{ padding: "7px 12px", fontSize: 13, fontWeight: 500, color: C.textMid, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => setDisconnectConfirm(integration.id)}
-                            style={{ padding: "7px 14px", fontSize: 13, fontWeight: 600, color: C.textMid, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}
-                            onMouseEnter={(e) => { e.currentTarget.style.color = C.red; e.currentTarget.style.borderColor = C.red; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.color = C.textMid; e.currentTarget.style.borderColor = C.border; }}
-                          >
-                            Disconnect
-                          </button>
-                        )}
-                      </>
+                    {disconnectConfirm === integration.id ? (
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <span style={{ fontSize: 11, color: C.textMid, fontWeight: 500 }}>Disconnect?</span>
+                        <button
+                          onClick={() => handleDisconnect(integration.id)}
+                          style={{ padding: "7px 12px", fontSize: 13, fontWeight: 600, color: "#fff", background: C.red, border: "none", borderRadius: 6, cursor: "pointer" }}
+                        >
+                          Yes, disconnect
+                        </button>
+                        <button
+                          onClick={() => setDisconnectConfirm(null)}
+                          style={{ padding: "7px 12px", fontSize: 13, fontWeight: 500, color: C.textMid, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setDisconnectConfirm(integration.id)}
+                        style={{ padding: "7px 14px", fontSize: 13, fontWeight: 600, color: C.textMid, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = C.red; e.currentTarget.style.borderColor = C.red; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = C.textMid; e.currentTarget.style.borderColor = C.border; }}
+                      >
+                        Disconnect
+                      </button>
                     )}
                   </div>
                 </div>
@@ -419,18 +353,16 @@ export default function IntegrationsScreen() {
               </button>
               <button
                 onClick={handleRestoreDemo}
-                disabled={!isDemoReset}
                 style={{
                   padding: "9px 18px", fontSize: 14, fontWeight: 600,
-                  color: !isDemoReset ? C.textDim : C.navy,
+                  color: C.navy,
                   background: C.surface,
-                  border: `1px solid ${!isDemoReset ? C.border : C.navy}`,
-                  borderRadius: 6, cursor: !isDemoReset ? "not-allowed" : "pointer",
-                  opacity: !isDemoReset ? 0.6 : 1,
+                  border: `1px solid ${C.navy}`,
+                  borderRadius: 6, cursor: "pointer",
                   transition: "opacity 0.15s",
                 }}
-                onMouseEnter={(e) => { if (isDemoReset) e.currentTarget.style.opacity = "0.8"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.opacity = !isDemoReset ? "0.6" : "1"; }}
+                onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.8"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
               >
                 Restore Demo Data
               </button>

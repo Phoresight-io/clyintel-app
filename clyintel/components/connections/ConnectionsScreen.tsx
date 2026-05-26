@@ -7,6 +7,20 @@ import {
   driveFolders, driveFiles, googleAccounts,
   InvoiceService, DriveFolder, DriveFile, GoogleAccount,
 } from "@/lib/mock-data";
+import type { Client } from "@/lib/mock-data";
+import { CLIENTS_KEY, INTEGRATIONS_KEY, DEFAULT_INTEGRATIONS, DEMO_RESET_KEY } from "@/lib/demo-mode";
+
+const SEED_CLIENTS: Record<string, Client[]> = {
+  stripe: [
+    { id: 101, name: "Atlas Commerce", industry: "E-commerce", score: 58, prevScore: 65, status: "past_due", balance: 3200, daysOverdue: 22, invoices: 3, lastActivity: "3 days ago", nextAction: "Send final notice", scoreSummary: ["Payment delayed 22 days"], scoreFactors: ["Late payment history"], riskDrivers: ["22 days overdue"] },
+  ],
+  fb: [
+    { id: 102, name: "Bright Solutions", industry: "Consulting", score: 71, prevScore: 68, status: "due", balance: 5800, daysOverdue: 0, invoices: 2, lastActivity: "Today", nextAction: "Follow up in 3 days", scoreSummary: ["Invoice due soon"], scoreFactors: [], riskDrivers: [] },
+  ],
+  xero: [
+    { id: 103, name: "Summit Partners", industry: "Finance", score: 45, prevScore: 52, status: "past_due", balance: 9400, daysOverdue: 45, invoices: 4, lastActivity: "1 week ago", nextAction: "Issue formal demand", scoreSummary: ["Critical collection risk"], scoreFactors: ["4 late payments"], riskDrivers: ["45 days overdue"] },
+  ],
+};
 
 type Stage =
   | "connect"
@@ -54,7 +68,33 @@ export default function ConnectionsScreen() {
   const handleDriveFilePick = (f: DriveFile)   => { setSelectedFile(f); setStage("csv_uploading"); setTimeout(() => setStage("csv_done"), 1800); };
   const handleFileUpload    = () => { setSelectedFile({ name: "Q1_2026_Invoices.csv", rows: 47, size: "84 KB" }); setStage("csv_uploading"); setTimeout(() => setStage("csv_done"), 1800); };
   const handleUploadMore    = () => { setSelectedFile(null); setStage(csvSource === "drive" ? "drive_folders" : "csv_upload"); };
-  const handleClientPick    = (c: { name: string }) => { setPickedClient(c); setStage("analyzing"); setTimeout(() => { sessionStorage.removeItem('clyintel_nav_direct'); router.push("/"); }, 2000); };
+  const handleClientPick = (c: { name: string }) => {
+    setPickedClient(c);
+    setStage("analyzing");
+
+    if (selectedService) {
+      const svcId = selectedService.id;
+      const seeds = SEED_CLIENTS[svcId] ?? [];
+      try {
+        if (seeds.length > 0) {
+          const existing: Client[] = JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]');
+          const merged = [...existing.filter(e => !seeds.some(s => s.id === e.id)), ...seeds];
+          localStorage.setItem(CLIENTS_KEY, JSON.stringify(merged));
+        }
+        const stored = localStorage.getItem(INTEGRATIONS_KEY);
+        const list: typeof DEFAULT_INTEGRATIONS = stored ? JSON.parse(stored) : DEFAULT_INTEGRATIONS;
+        const updated = list.map(i =>
+          i.id === svcId
+            ? { ...i, status: "connected" as const, lastSync: "Just now", clients: seeds.length, invoices: seeds.length * 2 }
+            : i
+        );
+        localStorage.setItem(INTEGRATIONS_KEY, JSON.stringify(updated));
+        localStorage.removeItem(DEMO_RESET_KEY);
+      } catch { /* ignore */ }
+    }
+
+    setTimeout(() => { sessionStorage.removeItem('clyintel_nav_direct'); router.push("/"); }, 2000);
+  };
 
   const integrations = invoiceServices.filter(s => ["qb","fb","stripe","xero"].includes(s.id));
   const bottomRow    = ["gdrive","csv","manual"].map(id => invoiceServices.find(s => s.id === id)!);
