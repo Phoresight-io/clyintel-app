@@ -2,9 +2,15 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
-import { clients, clientInvoices } from "@/lib/mock-data";
+import * as mockRaw from "@/lib/mock-data";
+import type { Client, ClientInvoiceSet } from "@/lib/mock-data";
+import { isDemoReset } from "@/lib/demo-mode";
 
 export default function ClientListScreen() {
+  const isReset = isDemoReset();
+  const clients = isReset ? ([] as Client[]) : mockRaw.clients;
+  const clientInvoices = isReset ? ({} as Record<number, ClientInvoiceSet>) : mockRaw.clientInvoices;
+
   const router = useRouter();
   const [showBack, setShowBack] = useState(false);
 

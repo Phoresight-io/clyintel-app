@@ -2,7 +2,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
-import { clients, clientInvoices, invoiceExchanges, negotiationRecs, Invoice } from "@/lib/mock-data";
+import * as mockRaw from "@/lib/mock-data";
+import type { Invoice, Client, NegotiationRec, ClientInvoiceSet, Exchange } from "@/lib/mock-data";
+import { isDemoReset } from "@/lib/demo-mode";
 import ExchangeDrawer from "@/components/shared/ExchangeDrawer";
 import NegotiationActions from "./NegotiationActions";
 import { RecCard } from "./RecoveryRecModal";
@@ -23,6 +25,12 @@ interface FlatInvoice extends Invoice {
 }
 
 export default function DashboardScreen() {
+  const isReset = isDemoReset();
+  const clients = isReset ? ([] as Client[]) : mockRaw.clients;
+  const clientInvoices = isReset ? ({} as Record<number, ClientInvoiceSet>) : mockRaw.clientInvoices;
+  const invoiceExchanges = isReset ? ({} as Record<string, Exchange[]>) : mockRaw.invoiceExchanges;
+  const negotiationRecs = isReset ? ([] as NegotiationRec[]) : mockRaw.negotiationRecs;
+
   const router = useRouter();
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({ status: [], dueDate: [], customer: [], invoiceNumber: [] });
   const [searchText, setSearchText] = useState("");

@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { clients } from "@/lib/mock-data";
-import DetailScreen from "@/components/detail/DetailScreen";
+import ClientDetailWrapper from "@/components/detail/ClientDetailWrapper";
 
 export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -9,7 +9,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   if (!client) notFound();
   return (
     <Suspense fallback={null}>
-      <DetailScreen client={client} />
+      <ClientDetailWrapper client={client} />
     </Suspense>
   );
 }

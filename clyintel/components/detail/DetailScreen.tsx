@@ -2,7 +2,9 @@
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { C } from "@/lib/theme";
-import { clientInvoices, Client, negotiationRecs } from "@/lib/mock-data";
+import * as mockRaw from "@/lib/mock-data";
+import type { Client, NegotiationRec, ClientInvoiceSet } from "@/lib/mock-data";
+import { isDemoReset } from "@/lib/demo-mode";
 import ExchangeDrawer from "@/components/shared/ExchangeDrawer";
 import PTRWidget from "./PTRWidget";
 import NegotiationActions from "@/components/dashboard/NegotiationActions";
@@ -13,6 +15,10 @@ interface Props {
 }
 
 export default function DetailScreen({ client }: Props) {
+  const isReset = isDemoReset();
+  const clientInvoices = isReset ? ({} as Record<number, ClientInvoiceSet>) : mockRaw.clientInvoices;
+  const negotiationRecs = isReset ? ([] as NegotiationRec[]) : mockRaw.negotiationRecs;
+
   const router = useRouter();
   const searchParams = useSearchParams();
   const from = searchParams.get("from");
