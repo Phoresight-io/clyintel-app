@@ -20,7 +20,18 @@ const SEED_CLIENTS: Record<string, Client[]> = {
   xero: [
     { id: 103, name: "Summit Partners", industry: "Finance", score: 45, prevScore: 52, status: "past_due", balance: 9400, daysOverdue: 45, invoices: 4, lastActivity: "1 week ago", nextAction: "Issue formal demand", scoreSummary: ["Critical collection risk"], scoreFactors: ["4 late payments"], riskDrivers: ["45 days overdue"] },
   ],
+  qb: [
+    { id: 104, name: "Harlow & Co.", industry: "Retail", score: 82, prevScore: 79, status: "current", balance: 3200, daysOverdue: 0, invoices: 6, lastActivity: "Today", nextAction: "Reminder scheduled", scoreSummary: ["Consistent, reliable payer"], scoreFactors: [], riskDrivers: [] },
+    { id: 105, name: "Meridian Group", industry: "Financial Services", score: 61, prevScore: 68, status: "past_due", balance: 8750, daysOverdue: 18, invoices: 4, lastActivity: "4 days ago", nextAction: "Send overdue notice", scoreSummary: ["Payment overdue 18 days"], scoreFactors: ["Late payment history"], riskDrivers: ["18 days overdue"] },
+    { id: 106, name: "Vance Studio", industry: "Creative", score: 74, prevScore: 71, status: "due", balance: 12400, daysOverdue: 0, invoices: 8, lastActivity: "2 days ago", nextAction: "Monitor invoice", scoreSummary: ["Invoice due soon"], scoreFactors: [], riskDrivers: [] },
+  ],
 };
+
+// Used when no stored integrations exist (first connect from reset state).
+// Prevents DEFAULT_INTEGRATIONS from injecting QB=connected as an unintended side effect.
+const DISCONNECTED_INTEGRATIONS = DEFAULT_INTEGRATIONS.map(i => ({
+  ...i, status: "disconnected" as const, lastSync: null as null, clients: 0, invoices: 0,
+}));
 
 const DRIVE_SEED_CLIENTS: Client[] = [
   { id: 150, name: "Pixel Works", industry: "Creative", score: 63, prevScore: 60, status: "due", balance: 2100, daysOverdue: 0, invoices: 1, lastActivity: "2 days ago", nextAction: "Monitor invoice", scoreSummary: ["Invoice due in 7 days"], scoreFactors: [], riskDrivers: [] },
@@ -186,7 +197,7 @@ export default function ConnectionsScreen() {
           localStorage.setItem(CLIENTS_KEY, JSON.stringify(merged));
         }
         const stored = localStorage.getItem(INTEGRATIONS_KEY);
-        const list: typeof DEFAULT_INTEGRATIONS = stored ? JSON.parse(stored) : DEFAULT_INTEGRATIONS;
+        const list: typeof DEFAULT_INTEGRATIONS = stored ? JSON.parse(stored) : DISCONNECTED_INTEGRATIONS;
         const updated = list.map(i =>
           i.id === svcId
             ? { ...i, status: "connected" as const, lastSync: "Just now", clients: seeds.length, invoices: seeds.length * 2 }

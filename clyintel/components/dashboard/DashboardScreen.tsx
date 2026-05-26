@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 import * as mockRaw from "@/lib/mock-data";
 import type { Invoice, Client, NegotiationRec, ClientInvoiceSet, Exchange } from "@/lib/mock-data";
-import { isDemoReset, CLIENTS_KEY } from "@/lib/demo-mode";
+import { isDemoReset, CLIENTS_KEY, INTEGRATIONS_KEY } from "@/lib/demo-mode";
 import ExchangeDrawer from "@/components/shared/ExchangeDrawer";
 import NegotiationActions from "./NegotiationActions";
 import { RecCard } from "./RecoveryRecModal";
@@ -26,11 +26,12 @@ interface FlatInvoice extends Invoice {
 
 export default function DashboardScreen() {
   const isReset = isDemoReset();
+  const isCustomMode = !!localStorage.getItem(INTEGRATIONS_KEY);
   const storedClients: Client[] = (() => {
     if (isReset) return [];
     try { return JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]') as Client[]; } catch { return []; }
   })();
-  const clients = isReset ? [] : [...mockRaw.clients, ...storedClients];
+  const clients = isReset ? [] : isCustomMode ? storedClients : [...mockRaw.clients, ...storedClients];
   const clientInvoices = isReset ? ({} as Record<number, ClientInvoiceSet>) : mockRaw.clientInvoices;
   const invoiceExchanges = isReset ? ({} as Record<string, Exchange[]>) : mockRaw.invoiceExchanges;
   const negotiationRecs = isReset ? ([] as NegotiationRec[]) : mockRaw.negotiationRecs;
