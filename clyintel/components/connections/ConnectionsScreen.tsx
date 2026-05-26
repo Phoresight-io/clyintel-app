@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 import {
@@ -7,7 +7,7 @@ import {
   driveFolders, driveFiles, googleAccounts,
   InvoiceService, DriveFolder, DriveFile, GoogleAccount,
 } from "@/lib/mock-data";
-import type { Client } from "@/lib/mock-data";
+import type { Client, ClientStatus } from "@/lib/mock-data";
 import { CLIENTS_KEY, INTEGRATIONS_KEY, DEFAULT_INTEGRATIONS, DEMO_RESET_KEY } from "@/lib/demo-mode";
 
 const SEED_CLIENTS: Record<string, Client[]> = {
@@ -22,6 +22,72 @@ const SEED_CLIENTS: Record<string, Client[]> = {
   ],
 };
 
+const DRIVE_SEED_CLIENTS: Client[] = [
+  { id: 150, name: "Pixel Works", industry: "Creative", score: 63, prevScore: 60, status: "due", balance: 2100, daysOverdue: 0, invoices: 1, lastActivity: "2 days ago", nextAction: "Monitor invoice", scoreSummary: ["Invoice due in 7 days"], scoreFactors: [], riskDrivers: [] },
+  { id: 151, name: "Meridian Labs", industry: "Technology", score: 49, prevScore: 57, status: "past_due", balance: 7800, daysOverdue: 31, invoices: 3, lastActivity: "5 days ago", nextAction: "Send overdue notice", scoreSummary: ["Payment overdue 31 days"], scoreFactors: ["Missed payment"], riskDrivers: ["31 days overdue"] },
+];
+
+function parseCSVToClients(text: string, startId: number): Client[] {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) return [];
+
+  const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase());
+  const col = (row: string[], name: string) => {
+    const idx = headers.indexOf(name);
+    return idx >= 0 ? (row[idx] ?? '').trim().replace(/^["']|["']$/g, '') : '';
+  };
+
+  const clients: Client[] = [];
+  let nextId = startId;
+
+  for (let i = 1; i < lines.length; i++) {
+    const row = lines[i].split(',');
+    const name = col(row, 'name') || col(row, 'client_name') || col(row, 'client');
+    if (!name) continue;
+
+    const rawBalance = parseFloat((col(row, 'balance') || col(row, 'amount') || '0').replace(/[$,]/g, ''));
+    const balance = isNaN(rawBalance) ? 0 : rawBalance;
+
+    const rawStatus = (col(row, 'status') || '').toLowerCase();
+    const status: ClientStatus =
+      rawStatus === 'past_due' || rawStatus === 'overdue' || rawStatus === 'late' ? 'past_due' :
+      rawStatus === 'due' || rawStatus === 'pending' ? 'due' : 'current';
+
+    const score = status === 'past_due' ? 48 + (i % 5) * 2 :
+                  status === 'due'      ? 67 + (i % 4) * 2 : 80 + (i % 3) * 2;
+    const daysOverdue = status === 'past_due' ? 15 + (i % 3) * 10 : 0;
+
+    clients.push({
+      id: nextId++,
+      name,
+      industry: col(row, 'industry') || 'Other',
+      score,
+      prevScore: score + 4,
+      status,
+      balance,
+      daysOverdue,
+      invoices: 1 + (i % 4),
+      lastActivity: status === 'current' ? 'Today' : `${daysOverdue} days ago`,
+      nextAction: status === 'past_due' ? 'Send overdue notice' : status === 'due' ? 'Monitor invoice' : 'No action needed',
+      scoreSummary: status === 'past_due' ? [`Payment overdue ${daysOverdue} days`] : [],
+      scoreFactors: [],
+      riskDrivers: status === 'past_due' ? [`${daysOverdue} days overdue`] : [],
+    });
+  }
+
+  return clients;
+}
+
+function writeClientsToStorage(newClients: Client[]) {
+  try {
+    const existing: Client[] = JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]');
+    const newIds = new Set(newClients.map(c => c.id));
+    const merged = [...existing.filter(c => !newIds.has(c.id)), ...newClients];
+    localStorage.setItem(CLIENTS_KEY, JSON.stringify(merged));
+    localStorage.removeItem(DEMO_RESET_KEY);
+  } catch { /* ignore */ }
+}
+
 type Stage =
   | "connect"
   | "connecting" | "select" | "analyzing"
@@ -35,6 +101,7 @@ type ManualForm = Record<string, string>;
 export default function ConnectionsScreen() {
   const router = useRouter();
   const [showBack, setShowBack] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const isDirect = sessionStorage.getItem('clyintel_nav_direct') === 'true';
@@ -65,9 +132,46 @@ export default function ConnectionsScreen() {
   const handleAccountPick   = (acct: GoogleAccount) => { setSelectedAccount(acct); setStage("oauth_consent"); };
   const handleConsentAllow  = () => { setStage("oauth_redirect"); setTimeout(() => setStage("drive_folders"), 1400); };
   const handleFolderPick    = (f: DriveFolder) => { setSelectedFolder(f); setStage("drive_files"); };
-  const handleDriveFilePick = (f: DriveFile)   => { setSelectedFile(f); setStage("csv_uploading"); setTimeout(() => setStage("csv_done"), 1800); };
-  const handleFileUpload    = () => { setSelectedFile({ name: "Q1_2026_Invoices.csv", rows: 47, size: "84 KB" }); setStage("csv_uploading"); setTimeout(() => setStage("csv_done"), 1800); };
+  const handleDriveFilePick = (f: DriveFile) => {
+    setSelectedFile(f);
+    setStage("csv_uploading");
+    writeClientsToStorage(DRIVE_SEED_CLIENTS);
+    setTimeout(() => setStage("csv_done"), 1800);
+  };
   const handleUploadMore    = () => { setSelectedFile(null); setStage(csvSource === "drive" ? "drive_folders" : "csv_upload"); };
+
+  const processFile = (file: File) => {
+    setStage("csv_uploading");
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const existing: Client[] = (() => { try { return JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]') as Client[]; } catch { return []; } })();
+      const startId = Math.max(200, ...existing.map(c => c.id)) + 1;
+      const parsed = parseCSVToClients(text, startId);
+      writeClientsToStorage(parsed);
+      setSelectedFile({ name: file.name, rows: parsed.length, size: `${Math.max(1, Math.round(file.size / 1024))} KB` });
+      setTimeout(() => setStage("csv_done"), 1800);
+    };
+    reader.onerror = () => {
+      setSelectedFile({ name: file.name, rows: 0, size: "0 KB" });
+      setTimeout(() => setStage("csv_done"), 1800);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processFile(file);
+    e.target.value = '';
+  };
+
+  const handleFileUpload = () => { fileInputRef.current?.click(); };
+
+  const handleFileDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file) processFile(file);
+  };
   const handleClientPick = (c: { name: string }) => {
     setPickedClient(c);
     setStage("analyzing");
@@ -490,7 +594,8 @@ export default function ConnectionsScreen() {
               <div style={{ fontSize: 22, fontWeight: 600, color: C.text, marginBottom: 6 }}>Upload a CSV file</div>
               <div style={{ fontSize: 14, color: C.textMid, fontWeight: 500 }}>Drag-and-drop a CSV from your computer, or browse to select one.</div>
             </div>
-            <div onClick={handleFileUpload} style={{ background: C.card, border: `2px dashed ${C.borderLight ?? C.border}`, borderRadius: 12, padding: "48px 32px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 14, marginBottom: 20, transition: "all 0.15s" }} onMouseEnter={e => { e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.background = C.blueBg; }} onMouseLeave={e => { e.currentTarget.style.borderColor = C.borderLight ?? C.border; e.currentTarget.style.background = C.card; }}>
+            <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" style={{ display: "none" }} onChange={handleFileSelect} />
+        <div onClick={handleFileUpload} onDrop={handleFileDrop} onDragOver={e => e.preventDefault()} onDragEnter={e => { e.preventDefault(); e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.background = C.blueBg; }} onDragLeave={e => { e.currentTarget.style.borderColor = C.borderLight ?? C.border; e.currentTarget.style.background = C.card; }} style={{ background: C.card, border: `2px dashed ${C.borderLight ?? C.border}`, borderRadius: 12, padding: "48px 32px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 14, marginBottom: 20, transition: "all 0.15s" }} onMouseEnter={e => { e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.background = C.blueBg; }} onMouseLeave={e => { e.currentTarget.style.borderColor = C.borderLight ?? C.border; e.currentTarget.style.background = C.card; }}>
               <div style={{ width: 56, height: 56, borderRadius: 14, background: C.surface, border: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke={C.blue} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 3v12" /><path d="M7 8l5-5 5 5" /><path d="M5 21h14" />
