@@ -178,7 +178,7 @@ export default function ConnectionsScreen() {
 
     if (selectedService) {
       const svcId = selectedService.id;
-      const seeds = SEED_CLIENTS[svcId] ?? [];
+      const seeds = (SEED_CLIENTS[svcId] ?? []).filter(s => selectedClients.includes(s.name));
       try {
         if (seeds.length > 0) {
           const existing: Client[] = JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]');
@@ -346,7 +346,7 @@ export default function ConnectionsScreen() {
               <div />
               {["Client", "Invoices", "Balance"].map(h => <span key={h} style={{ fontSize: 11, fontWeight: 600, color: C.textMid, textTransform: "uppercase", letterSpacing: "0.06em" }}>{h}</span>)}
             </div>
-            {importedClients.map((c, i) => {
+            {(SEED_CLIENTS[selectedService.id] ?? importedClients).map((c, i) => {
               const isSelected = selectedClients.includes(c.name);
               const toggle = () => setSelectedClients(prev => isSelected ? prev.filter(n => n !== c.name) : [...prev, c.name]);
               return (
@@ -356,7 +356,7 @@ export default function ConnectionsScreen() {
                   style={{
                     display: "grid", gridTemplateColumns: "32px 2fr 90px 110px", alignItems: "center",
                     padding: "13px 16px",
-                    borderBottom: i < importedClients.length - 1 ? `1px solid ${C.border}` : "none",
+                    borderBottom: i < (SEED_CLIENTS[selectedService.id] ?? importedClients).length - 1 ? `1px solid ${C.border}` : "none",
                     borderLeft: isSelected ? `2px solid ${C.blue}` : "2px solid transparent",
                     background: isSelected ? C.blueBg : "transparent",
                     cursor: "pointer", transition: "background 0.15s",
