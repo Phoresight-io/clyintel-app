@@ -185,3 +185,69 @@ Removed from launch. Roadmap item. Do not re-add without a product decision from
 
 ### Open items carried forward
 See CODE_CONTEXT.md → "What does not exist yet" — 12 Beta blockers in priority order. Auth + RLS policies are the first session.
+
+---
+
+## Entry 008 — 2026-05-27
+**Phase:** Build — Auth + RLS + Audit Log
+**Scope:** Session 1 of Beta blockers
+
+### What was completed
+
+**Supabase Auth (Beta blocker #1)**
+- Installed `@supabase/ssr@0.10.3`
+- Created `lib/supabase-server.ts` — server-side client using `createServerClient`, reads cookies from `next/headers`
+- Created `lib/supabase-browser.ts` — browser client using `createBrowserClient`
+- Created `app/auth/callback/route.ts` — exchanges OAuth code for session, redirects to `/` on success or `/login` on error
+- Deleted `app/api/auth/google/callback/route.ts` — old implicit-grant handler, replaced by Supabase Auth PKCE flow
+- Created `app/login/page.tsx` — email/password sign in + sign up + Google OAuth button, styled with C tokens, no external UI libraries
+- Updated `AppShell.tsx` — bypass shell chrome when `pathname === '/login'` or starts with `/auth/`
+
+**Auth middleware (Beta blocker #2)**
+- Created `middleware.ts` — refreshes session on every request, redirects unauthenticated users to `/login`, redirects authenticated users away from `/login`. Public paths: `/login`, `/auth/callback`, `/api/stripe-webhook`
+
+**Subscriber record on signup (Beta blocker #6)**
+- Applied migration `create_subscriber_on_signup` — Postgres function + trigger on `auth.users INSERT`
+- Inserts subscriber row with: `id = auth.uid()`, `email`, `plan_id` = Free tier, `billing_path = 'revenue_share'`, `subscription_status = 'trialing'`, `business_name = ''`
+- `ON CONFLICT (id) DO NOTHING` guards against duplicate inserts
+- Fires for both email/password signups and Google OAuth new users
+
+**Audit log table (Beta blocker #4)**
+- Applied migration `create_audit_log` — creates `audit_log` table with required columns
+- RLS enabled: subscribers can read own rows (SELECT policy), no INSERT policy = service role only
+- Columns: `id, subscriber_id, actor, actor_detail, action, entity_type, entity_id, payload, created_at`
+
+**RLS policies (Beta blocker #3)**
+- Applied migration `rls_policies_all_tables` — `subscriber_isolation` policy on all 10 subscriber-scoped tables
+- `invoice_payments` scoped via join to `invoices`
+- `templates` allows own rows OR `subscriber_id IS NULL` (system defaults)
+- `plans` read-only for all authenticated users, no write policies
+- `demo_sessions` — intentionally no policies (service role only)
+
+**Schema cleanup (Beta blocker #5)**
+- Applied migration `remove_payg_billing_path` in previous session ✅
+
+### Migration names applied
+1. `remove_payg_billing_path` (previous session)
+2. `create_audit_log`
+3. `rls_policies_all_tables`
+4. `create_subscriber_on_signup`
+
+### Policy verification
+All 12 subscriber-facing tables have at least one RLS policy. `demo_sessions` and `audit_log` (INSERT) are service-role-only by design. `communications` retains two pre-existing demo policies alongside the new `subscriber_isolation` policy — demo AI agents still function.
+
+### What does not exist yet (remaining Beta blockers)
+| # | Item | Notes |
+|---|---|---|
+| 7 | Stripe Checkout → webhook → subscriber plan update | Next session priority |
+| 8 | Replace mock data with real Supabase queries | Requires auth session context wired into components |
+| 9 | AI agent subscriber scoping | Replace `'demo'` hardcode in email/SMS/voice agents |
+| 10 | Twilio account + phone number | External setup required |
+| 11 | MailerSend inbound routing | External config required |
+| 12 | Stripe webhook re-pointed from Make to Next.js | `STRIPE_WEBHOOK_SECRET` env var pending |
+
+### Open items requiring decisions or follow-up
+1. **Google OAuth — manual Supabase config required:** The Supabase MCP does not expose Auth provider settings. Enable Google provider in Supabase dashboard → Authentication → Providers → Google. Add redirect URLs: `https://clyintel-app-git-main-phoresight-ios-projects.vercel.app/auth/callback` and `http://localhost:3000/auth/callback`. Add `NEXT_PUBLIC_GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to Vercel env vars.
+2. **Import page Drive picker broken:** `app/import/page.tsx` references the now-deleted `/api/auth/google/callback` for Drive OAuth (separate from auth). The import CSV-from-Drive flow will not work until this is re-implemented. Not a Beta blocker — import page is demo-only.
+3. **Email confirmation flow:** Supabase email confirmation is enabled by default. New email signups will receive a confirmation email before they can log in. Decision needed: disable email confirmation for Beta, or keep and handle the "check your email" UX (currently handled — login page shows the message).
+4. **`NEXT_PUBLIC_GOOGLE_CLIENT_ID` env var:** Required for Google OAuth to work. Must be added to Vercel project settings before Google sign-in is functional.
