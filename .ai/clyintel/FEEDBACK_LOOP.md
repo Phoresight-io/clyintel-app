@@ -167,3 +167,21 @@ Remaining P1 items:
 - QBO OAuth: register app
 - ST-01: Archive legacy AR Hunter Stripe products
 - GH-01: Fix GitHub MCP connector scope
+
+---
+
+## Entry 007 — 2026-05-27
+**Phase:** Sync — stack documentation + schema cleanup
+**Scope:** SOURCES.md updated, CODE_CONTEXT.md updated, TEST_SPEC.md created, billing_path enum cleaned
+
+### What was completed
+- SOURCES.md: Vapi confirmed, PAYG removed from launch, Make/Airtable/Softr fully retired, Google OAuth confirmed
+- CODE_CONTEXT.md: Full current state including what exists, what doesn't, all Beta blockers in priority order
+- TEST_SPEC.md: 3-category test plan — schema integrity, RLS enforcement (critical), subscriber Beta flows
+- Supabase migration: removed `payg` from `billing_path` enum — Revenue Share only at launch
+
+### PAYG status
+Removed from launch. Roadmap item. Do not re-add without a product decision from Charles.
+
+### Open items carried forward
+See CODE_CONTEXT.md → "What does not exist yet" — 12 Beta blockers in priority order. Auth + RLS policies are the first session.
