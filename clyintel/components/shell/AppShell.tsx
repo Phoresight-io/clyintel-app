@@ -6,6 +6,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
+  // Auth routes render without shell chrome
+  if (pathname === '/login' || pathname.startsWith('/auth/')) {
+    return <>{children}</>;
+  }
+
   const isRecoveryActive = pathname === "/" || pathname.startsWith("/client") || pathname === "/connections";
   const isPortfolioActive = pathname === "/portfolio";
   const isSettingsActive = pathname.startsWith("/settings");
