@@ -14,6 +14,50 @@ export type Database = {
   }
   public: {
     Tables: {
+      audit_log: {
+        Row: {
+          action: string
+          actor: string
+          actor_detail: string | null
+          created_at: string
+          entity_id: string | null
+          entity_type: string | null
+          id: string
+          payload: Json | null
+          subscriber_id: string | null
+        }
+        Insert: {
+          action: string
+          actor: string
+          actor_detail?: string | null
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string | null
+          id?: string
+          payload?: Json | null
+          subscriber_id?: string | null
+        }
+        Update: {
+          action?: string
+          actor?: string
+          actor_detail?: string | null
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string | null
+          id?: string
+          payload?: Json | null
+          subscriber_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audit_log_subscriber_id_fkey"
+            columns: ["subscriber_id"]
+            isOneToOne: false
+            referencedRelation: "subscribers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       clients: {
         Row: {
           avg_days_to_pay: number | null
@@ -886,7 +930,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      billing_path: "revenue_share" | "payg"
+      billing_path: "revenue_share"
       communication_channel: "email" | "sms" | "voice"
       communication_direction: "outbound" | "inbound"
       integration_provider: "stripe" | "quickbooks" | "twilio" | "mailersend"
@@ -1035,7 +1079,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      billing_path: ["revenue_share", "payg"],
+      billing_path: ["revenue_share"],
       communication_channel: ["email", "sms", "voice"],
       communication_direction: ["outbound", "inbound"],
       integration_provider: ["stripe", "quickbooks", "twilio", "mailersend"],

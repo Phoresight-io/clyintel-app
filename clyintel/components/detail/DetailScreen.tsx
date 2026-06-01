@@ -12,12 +12,16 @@ import { RecCard } from "@/components/dashboard/RecoveryRecModal";
 
 interface Props {
   client: Client;
+  // Real Supabase-backed invoice set for this client. When present, the screen
+  // renders real data; otherwise it falls back to mock data for demo mode.
+  invoiceSet?: ClientInvoiceSet;
 }
 
-export default function DetailScreen({ client }: Props) {
+export default function DetailScreen({ client, invoiceSet }: Props) {
   const isReset = isDemoReset();
-  const clientInvoices = isReset ? ({} as Record<number, ClientInvoiceSet>) : mockRaw.clientInvoices;
-  const negotiationRecs = isReset ? ([] as NegotiationRec[]) : mockRaw.negotiationRecs;
+  const realMode = invoiceSet !== undefined;
+  const negotiationRecs = realMode ? ([] as NegotiationRec[]) : isReset ? ([] as NegotiationRec[]) : mockRaw.negotiationRecs;
+  const invoices = realMode ? invoiceSet : isReset ? undefined : mockRaw.clientInvoices[client.id];
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -25,7 +29,7 @@ export default function DetailScreen({ client }: Props) {
   const [selectedInvoiceForExchanges, setSelectedInvoiceForExchanges] = useState<string | null>(null);
   const [showBack, setShowBack] = useState(false);
   const [recCards, setRecCards] = useState<RecCard[]>(
-    negotiationRecs.filter(r => clientInvoices[client.id]?.outstanding.some(inv => inv.id === r.id)).map(r => ({ ...r, editAmount: r.suggestedAmount, status: "pending" as const }))
+    negotiationRecs.filter(r => invoices?.outstanding.some(inv => inv.id === r.id)).map(r => ({ ...r, editAmount: r.suggestedAmount, status: "pending" as const }))
   );
   const [activeRecModal, setActiveRecModal] = useState<string | null>(null);
 
@@ -41,7 +45,6 @@ export default function DetailScreen({ client }: Props) {
   const scoreColor = client.score >= 80 ? C.green : client.score >= 60 ? C.amber : C.red;
   const scoreLabel = client.score >= 80 ? "Low risk" : client.score >= 60 ? "Medium risk" : "High risk";
 
-  const invoices = clientInvoices[client.id];
   const allActive = invoices ? [...(invoices.outstanding || []), ...(invoices.upcoming || [])] : [];
   const allInvoicesList = invoices ? [...(invoices.outstanding || []), ...(invoices.upcoming || []), ...(invoices.paid || [])] : [];
 

@@ -269,3 +269,97 @@ Security advisor re-scan: 0 findings.
 ### Migration
 fix_security_advisor_findings — applied to clyintel-dev via apply_migration.
 SQL committed to clyintel/schema/fix_security_advisor_findings.sql
+
+## Entry 010 — 2026-06-01
+**Phase:** Build — Real data wiring + Stripe webhook
+**Scope:** Session 2 of Beta blockers
+
+### What was completed
+
+**Stripe webhook → Supabase (Beta blocker #7 + #12)**
+- Created `clyintel/app/api/stripe-webhook/route.ts` (Node runtime, `force-dynamic`)
+- Manual HMAC-SHA256 signature verification against `STRIPE_WEBHOOK_SECRET` — no
+  new npm package added (honours product rule "no packages without approval").
+  Includes a 5-minute timestamp tolerance to mitigate replay attacks.
+- Handles: `customer.subscription.created` / `.updated` → `subscription_status = 'active'`
+  + plan match by `stripe_product_id`; `.deleted` → `'canceled'`;
+  `invoice.payment_succeeded` → `'active'`; `invoice.payment_failed` → `'past_due'`.
+- Matches subscriber by `stripe_customer_id`; writes to `audit_log` (actor = 'system',
+  action = the Stripe event type) after every successful update.
+- Returns 200 immediately; processes asynchronously via `waitUntil`.
+
+**Data layer (Beta blocker #8)**
+- Created `clyintel/lib/data.ts` — `getSubscriber`, `getClient`, `getClients`,
+  `getInvoices`, `getInvoicesByClient`, `getCommunications`, `getPtrScores`,
+  `getRecoveryAttempts`, plus a `getUIPortfolio` aggregator. Every query is
+  explicitly scoped to the passed `userId` (= `auth.uid()`) per CONSTITUTION rule 9.
+- Created `clyintel/lib/adapters.ts` — maps real Supabase rows onto the existing
+  UI shapes (`Client`, `Invoice`, `ClientInvoiceSet`) so the screens stay
+  presentation-only and demo mode is untouched.
+- Dashboard, Portfolio, and Client Detail pages are now Server Components that
+  fetch real data (scoped to the logged-in subscriber) and pass it as props to
+  client wrappers. Mock data is used only when demo mode is active (`isDemoReset()`
+  / integrations localStorage). KPI cards compute from real data; Recovery YTD is
+  hardcoded to `$0` until `recovery_attempts` has data.
+- Client Detail: numeric ids resolve to mock/demo clients; UUIDs resolve to real
+  clients via `getClient` (RLS-equivalent subscriber scoping) → `notFound()` when
+  missing or owned by another subscriber.
+
+**Subscriber context in app shell**
+- `AppShell.tsx` fetches the current subscriber on mount (browser client),
+  renders the subscriber's initials in the avatar (was "JD") and the plan name
+  in the footer.
+
+**Manual invoice entry → real database (Beta blocker, manual path of #8)**
+- Created `clyintel/app/api/invoices/create/route.ts` — authenticated route that
+  extracts the user from the session, creates/matches a client by name for the
+  subscriber, inserts the invoice with `subscriber_id = auth.uid()`, writes to
+  `audit_log` (actor = 'subscriber', action = 'create_invoice'), returns the id.
+- `ConnectionsScreen` manual entry now POSTs to that route with saving/error states.
+
+**Types**
+- Regenerated `types/supabase.ts` to include `audit_log` and the cleaned
+  `billing_path` enum (`revenue_share` only).
+- Widened UI `Client.id` / `clientInvoices` / `ptrRecommendations` keys to
+  `string | number` to accommodate real UUIDs alongside demo numeric ids.
+
+### Verification
+- `npx tsc --noEmit` → clean.
+- `npm run build` → clean (with env vars present). Routes registered:
+  `/api/stripe-webhook`, `/api/invoices/create`; `/`, `/portfolio`, `/client/[id]`
+  now server-rendered on demand.
+
+### Beta blockers cleared
+- #7 Stripe Checkout → webhook → subscriber plan update (webhook half — Checkout
+  session creation is separate and still pending).
+- #8 Replace mock data with Supabase queries (dashboard, portfolio, client detail,
+  manual invoice entry).
+- #12 Stripe webhook re-pointed to the Next.js API route (code side complete;
+  endpoint registration in Stripe dashboard is a manual step — see below).
+
+### Remaining Beta blockers
+- #7 (Checkout half): the Stripe Checkout session creation + upgrade flow is not
+  yet built — the webhook is ready to receive its events.
+- #9 AI agent subscriber scoping (replace `'demo'` hardcode).
+- #10 Twilio account + phone number (external).
+- #11 MailerSend inbound routing (external).
+
+### Open items or decisions needed (Charles)
+1. **Create the Stripe webhook endpoint + secret.** In the Stripe dashboard →
+   Developers → Webhooks → Add endpoint:
+   - URL: `https://clyintel-app-git-main-phoresight-ios-projects.vercel.app/api/stripe-webhook`
+   - Events: `customer.subscription.created`, `customer.subscription.updated`,
+     `customer.subscription.deleted`, `invoice.payment_succeeded`,
+     `invoice.payment_failed`
+   - Copy the signing secret and add it as `STRIPE_WEBHOOK_SECRET` in Vercel
+     (Production, Preview, Development).
+2. **Plan `stripe_product_id` mapping.** The webhook matches plans by
+   `plans.stripe_product_id`. Confirm each live plan row has the correct
+   `stripe_product_id` set, or subscription events won't update `plan_id`.
+3. **AppShell uses `createSupabaseBrowser()`** (cookie/session-aware) rather than
+   `getPublicSupabase()` as literally specced — `getPublicSupabase()` has no auth
+   session and could not read the current subscriber. Flag if a different client
+   is preferred.
+4. Exchange history in the UI (`ExchangeDrawer`) still reads demo data;
+   `getCommunications` is wired in `lib/data.ts` but not yet surfaced for real
+   invoices. Deferred — not a listed blocker for this session.

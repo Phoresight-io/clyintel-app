@@ -1,7 +1,7 @@
 export type ClientStatus = "current" | "due" | "past_due" | "recovered";
 
 export interface Client {
-  id: number;
+  id: string | number;
   name: string;
   industry: string;
   score: number;
@@ -163,7 +163,7 @@ export const clients: Client[] = [
   },
 ];
 
-export const clientInvoices: Record<number, ClientInvoiceSet> = {
+export const clientInvoices: Record<string | number, ClientInvoiceSet> = {
   3: {
     outstanding: [{ id: "INV-1042", amount: 12400, dueDate: "3/17/26", daysOverdue: 31, status: "past_due", lastActivity: "3/22/26 - Phone", nextAction: "Verify payment received" }],
     upcoming:    [{ id: "INV-1053", amount: 8200,  dueDate: "4/25/26", daysUntilDue: 6, status: "current", lastActivity: "—", nextAction: "Auto-reminder at -3 days" }],
@@ -376,7 +376,7 @@ export interface PTRRecommendation {
   altNote?: string;
 }
 
-export const ptrRecommendations: Record<number, PTRRecommendation> = {
+export const ptrRecommendations: Record<string | number, PTRRecommendation> = {
   1: {
     terms: "Net 30",
     reminderDays: [-7, -3, 0],

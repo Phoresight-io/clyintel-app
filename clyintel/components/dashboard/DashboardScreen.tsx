@@ -21,20 +21,29 @@ interface ActiveFilters {
 
 interface FlatInvoice extends Invoice {
   clientName: string;
-  clientId: number;
+  clientId: string | number;
 }
 
-export default function DashboardScreen() {
+interface DashboardScreenProps {
+  // Real Supabase-backed data, scoped to the authenticated subscriber.
+  // When demo mode is active these are ignored in favour of mock data.
+  initialClients?: Client[];
+  initialClientInvoices?: Record<string | number, ClientInvoiceSet>;
+}
+
+export default function DashboardScreen({ initialClients, initialClientInvoices }: DashboardScreenProps = {}) {
   const isReset = isDemoReset();
   const isCustomMode = !!localStorage.getItem(INTEGRATIONS_KEY);
+  const demoActive = isReset || isCustomMode;
   const storedClients: Client[] = (() => {
     if (isReset) return [];
     try { return JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]') as Client[]; } catch { return []; }
   })();
-  const clients = isReset ? [] : isCustomMode ? storedClients : [...mockRaw.clients, ...storedClients];
-  const clientInvoices = isReset ? ({} as Record<number, ClientInvoiceSet>) : mockRaw.clientInvoices;
-  const invoiceExchanges = isReset ? ({} as Record<string, Exchange[]>) : mockRaw.invoiceExchanges;
-  const negotiationRecs = isReset ? ([] as NegotiationRec[]) : mockRaw.negotiationRecs;
+  // Default path = real subscriber data. Mock data is used only for demo mode.
+  const clients = isReset ? [] : isCustomMode ? storedClients : (initialClients ?? []);
+  const clientInvoices = demoActive ? mockRaw.clientInvoices : (initialClientInvoices ?? ({} as Record<string | number, ClientInvoiceSet>));
+  const invoiceExchanges = demoActive ? mockRaw.invoiceExchanges : ({} as Record<string, Exchange[]>);
+  const negotiationRecs = demoActive ? mockRaw.negotiationRecs : ([] as NegotiationRec[]);
 
   const router = useRouter();
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({ status: [], dueDate: [], customer: [], invoiceNumber: [] });
@@ -105,7 +114,7 @@ export default function DashboardScreen() {
   const totalFilterCount = Object.values(activeFilters).reduce((s, a) => s + a.length, 0);
 
   const kpis = [
-    { label: "Recovery YTD", value: isReset ? "$0" : "$42,150", color: C.green },
+    { label: "Recovery YTD", value: demoActive ? (isReset ? "$0" : "$42,150") : "$0", color: C.green },
     { label: "Total Outstanding", value: `$${totalOutstanding.toLocaleString()}`, color: C.text },
     { label: "Past Due", value: `$${totalPastDue.toLocaleString()}`, color: C.red },
     { label: "Active Invoices", value: String(activeInvoices), color: C.text },

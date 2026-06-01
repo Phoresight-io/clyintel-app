@@ -125,6 +125,8 @@ export default function ConnectionsScreen() {
   const [pickedClient, setPickedClient]     = useState<{ name: string } | null>(null);
   const [manualForm, setManualForm]         = useState<ManualForm>({ client: "", invoice: "", amount: "", dueDate: "", terms: "Net 30", notes: "" });
   const [manualSubmitted, setManualSubmitted] = useState(false);
+  const [manualSaving, setManualSaving] = useState(false);
+  const [manualError, setManualError] = useState<string | null>(null);
   const [selectedAccount, setSelectedAccount] = useState<GoogleAccount | null>(null);
   const [selectedFolder, setSelectedFolder] = useState<DriveFolder | null>(null);
   const [selectedFile, setSelectedFile]     = useState<DriveFile | { name: string; rows: number; size: string } | null>(null);
@@ -157,7 +159,7 @@ export default function ConnectionsScreen() {
     reader.onload = (e) => {
       const text = e.target?.result as string;
       const existing: Client[] = (() => { try { return JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]') as Client[]; } catch { return []; } })();
-      const startId = Math.max(200, ...existing.map(c => c.id)) + 1;
+      const startId = Math.max(200, ...existing.map(c => typeof c.id === "number" ? c.id : 0)) + 1;
       const parsed = parseCSVToClients(text, startId);
       writeClientsToStorage(parsed);
       setSelectedFile({ name: file.name, rows: parsed.length, size: `${Math.max(1, Math.round(file.size / 1024))} KB` });
@@ -183,6 +185,31 @@ export default function ConnectionsScreen() {
     const file = e.dataTransfer.files?.[0];
     if (file) processFile(file);
   };
+  const handleManualSubmit = async () => {
+    if (manualSaving) return;
+    setManualError(null);
+    if (!manualForm.client.trim()) { setManualError("Client name is required."); return; }
+    setManualSaving(true);
+    try {
+      const res = await fetch("/api/invoices/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(manualForm),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setManualError(body.error || "Failed to save invoice.");
+        setManualSaving(false);
+        return;
+      }
+      setManualSubmitted(true);
+      setTimeout(() => { sessionStorage.removeItem("clyintel_nav_direct"); router.push("/"); }, 1800);
+    } catch {
+      setManualError("Network error — please try again.");
+      setManualSaving(false);
+    }
+  };
+
   const handleClientPick = (c: { name: string }) => {
     setPickedClient(c);
     setStage("analyzing");
@@ -691,9 +718,12 @@ export default function ConnectionsScreen() {
                 )}
               </div>
             ))}
+            {manualError && (
+              <div style={{ fontSize: 13, color: C.red, fontWeight: 500, marginBottom: 12 }}>{manualError}</div>
+            )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
               <button onClick={() => setStage("connect")} style={{ padding: "9px 18px", fontSize: 14, fontWeight: 600, color: C.textMid, background: "#FFFFFF", border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}>Cancel</button>
-              <button onClick={() => { setManualSubmitted(true); setTimeout(() => { sessionStorage.removeItem('clyintel_nav_direct'); router.push("/"); }, 1800); }} style={{ padding: "9px 18px", fontSize: 14, fontWeight: 600, color: "#FFFFFF", background: C.blue, border: "none", borderRadius: 6, cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.opacity = "0.88"} onMouseLeave={e => e.currentTarget.style.opacity = "1"}>Save Invoice</button>
+              <button onClick={handleManualSubmit} disabled={manualSaving} style={{ padding: "9px 18px", fontSize: 14, fontWeight: 600, color: "#FFFFFF", background: C.blue, border: "none", borderRadius: 6, cursor: manualSaving ? "not-allowed" : "pointer", opacity: manualSaving ? 0.7 : 1 }} onMouseEnter={e => { if (!manualSaving) e.currentTarget.style.opacity = "0.88"; }} onMouseLeave={e => { if (!manualSaving) e.currentTarget.style.opacity = "1"; }}>{manualSaving ? "Saving…" : "Save Invoice"}</button>
             </div>
           </div>
         </>

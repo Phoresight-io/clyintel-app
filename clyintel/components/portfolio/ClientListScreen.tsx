@@ -6,15 +6,22 @@ import * as mockRaw from "@/lib/mock-data";
 import type { Client, ClientInvoiceSet } from "@/lib/mock-data";
 import { isDemoReset, CLIENTS_KEY, INTEGRATIONS_KEY } from "@/lib/demo-mode";
 
-export default function ClientListScreen() {
+interface ClientListScreenProps {
+  initialClients?: Client[];
+  initialClientInvoices?: Record<string | number, ClientInvoiceSet>;
+}
+
+export default function ClientListScreen({ initialClients, initialClientInvoices }: ClientListScreenProps = {}) {
   const isReset = isDemoReset();
   const isCustomMode = !!localStorage.getItem(INTEGRATIONS_KEY);
+  const demoActive = isReset || isCustomMode;
   const storedClients: Client[] = (() => {
     if (isReset) return [];
     try { return JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]') as Client[]; } catch { return []; }
   })();
-  const clients = isReset ? [] : isCustomMode ? storedClients : [...mockRaw.clients, ...storedClients];
-  const clientInvoices = isReset ? ({} as Record<number, ClientInvoiceSet>) : mockRaw.clientInvoices;
+  // Default path = real subscriber data. Mock data is used only for demo mode.
+  const clients = isReset ? [] : isCustomMode ? storedClients : (initialClients ?? []);
+  const clientInvoices = demoActive ? mockRaw.clientInvoices : (initialClientInvoices ?? ({} as Record<string | number, ClientInvoiceSet>));
 
   const router = useRouter();
   const [showBack, setShowBack] = useState(false);
@@ -25,7 +32,8 @@ export default function ClientListScreen() {
     sessionStorage.removeItem('clyintel_nav_direct');
   }, []);
 
-  const getRecoveryYTD = (id: number): number => ({ 4: 15800, 1: 3200, 2: 8400, 3: 12400, 5: 2800 } as Record<number, number>)[id] || 0;
+  const getRecoveryYTD = (id: string | number): number =>
+    demoActive ? (({ 4: 15800, 1: 3200, 2: 8400, 3: 12400, 5: 2800 } as Record<string | number, number>)[id] || 0) : 0;
 
   return (
     <div style={{ padding: "28px 36px", minHeight: 520, fontFamily: C.sans }}>
