@@ -65,11 +65,11 @@ Expected: ['draft', 'sent', 'partial', 'paid', 'overdue', 'in_recovery', 'writte
 
 **Test:** 5 plan records exist with correct tiers
 ```
-free (tier 0) — monthly_price_cents = 0, revenue_share_rate = 22
-starter (tier 1) — monthly_price_cents = 2900, revenue_share_rate = 18
-plus (tier 2) — monthly_price_cents = 7900, revenue_share_rate = 12
-pro (tier 3) — monthly_price_cents = 14900, revenue_share_rate = 8
-enterprise (tier 4) — monthly_price_cents = 0, revenue_share_rate = 5
+free (tier 0) — monthly_price_cents = 0, revenue_share_rate = 0.22
+starter (tier 1) — monthly_price_cents = 2900, revenue_share_rate = 0.18
+plus (tier 2) — monthly_price_cents = 7900, revenue_share_rate = 0.12
+pro (tier 3) — monthly_price_cents = 14900, revenue_share_rate = 0.08
+enterprise (tier 4) — monthly_price_cents = 0, revenue_share_rate = 0.05
 ```
 
 **Test:** Pro and Enterprise plans have `ai_sms_agent` and `ai_voice_agent` flags — if columns exist
