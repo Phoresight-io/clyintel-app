@@ -251,3 +251,21 @@ All 12 subscriber-facing tables have at least one RLS policy. `demo_sessions` an
 2. **Import page Drive picker broken:** `app/import/page.tsx` references the now-deleted `/api/auth/google/callback` for Drive OAuth (separate from auth). The import CSV-from-Drive flow will not work until this is re-implemented. Not a Beta blocker — import page is demo-only.
 3. **Email confirmation flow:** Supabase email confirmation is enabled by default. New email signups will receive a confirmation email before they can log in. Decision needed: disable email confirmation for Beta, or keep and handle the "check your email" UX (currently handled — login page shows the message).
 4. **`NEXT_PUBLIC_GOOGLE_CLIENT_ID` env var:** Required for Google OAuth to work. Must be added to Vercel project settings before Google sign-in is functional.
+
+## Entry 009 — 2026-05-31
+**Phase:** Security — Supabase advisor remediation
+**Scope:** 7 findings → 0 findings
+
+### Findings fixed
+- demo_sessions: explicit default-deny RLS policy added
+- set_ptr_score_month: search_path pinned to ''
+- update_updated_at: search_path pinned to ''
+- handle_new_auth_user: EXECUTE revoked from anon, authenticated, public
+- rls_auto_enable: EXECUTE revoked from anon, authenticated, public
+
+### Result
+Security advisor re-scan: 0 findings.
+
+### Migration
+fix_security_advisor_findings — applied to clyintel-dev via apply_migration.
+SQL committed to clyintel/schema/fix_security_advisor_findings.sql
