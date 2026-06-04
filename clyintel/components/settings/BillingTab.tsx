@@ -14,11 +14,11 @@ interface PlanRow {
 // Display order and the subset of tiers that are self-serve checkout-able.
 const TIER_ORDER: Record<string, number> = { free: 0, starter: 1, plus: 2, pro: 3, enterprise: 4 };
 const CHECKOUT_TIERS = new Set(["starter", "plus", "pro"]);
-// Tiers shown in the Billing tab during Beta. Pro is defined in the DB but not
-// actively sold yet, so it is excluded here (presentation-layer only — the plan
-// record and its Stripe product are untouched). To re-enable Pro later, add
-// "pro" back to this set.
-const BETA_VISIBLE_TIERS = new Set(["free", "starter", "plus", "enterprise"]);
+// Tiers shown in the Billing tab during Beta. Pro and Enterprise are defined in
+// the DB but not actively sold yet, so they are excluded here (presentation-layer
+// only — their plan records and Stripe products are untouched). To re-enable a
+// tier later, add it back to this set.
+const BETA_VISIBLE_TIERS = new Set(["free", "starter", "plus"]);
 
 function priceLabel(plan: PlanRow): string {
   if (plan.tier === "free") return "$0 / mo";
