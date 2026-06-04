@@ -33,6 +33,9 @@ export default function LoginPage() {
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        // Best-effort: ensure a Stripe customer exists for this subscriber.
+        // Idempotent and non-blocking — a failure here must not block login.
+        await fetch('/api/stripe/ensure-customer', { method: 'POST' }).catch(() => {});
         router.push('/');
         router.refresh();
       }
