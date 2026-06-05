@@ -14,6 +14,24 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_config: {
+        Row: {
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value: Json
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: []
+      }
       audit_log: {
         Row: {
           action: string
@@ -310,36 +328,48 @@ export type Database = {
           conversation_history: Json
           created_at: string
           email: string | null
+          event_tag: string | null
           id: string
           invoice_number: string | null
           last_reply_at: string | null
+          method_used: string | null
           name: string
           phone: string
           scenario: number
+          scenario_used: string | null
+          submitted_at: string | null
         }
         Insert: {
           company_name?: string | null
           conversation_history?: Json
           created_at?: string
           email?: string | null
+          event_tag?: string | null
           id?: string
           invoice_number?: string | null
           last_reply_at?: string | null
+          method_used?: string | null
           name: string
           phone: string
           scenario: number
+          scenario_used?: string | null
+          submitted_at?: string | null
         }
         Update: {
           company_name?: string | null
           conversation_history?: Json
           created_at?: string
           email?: string | null
+          event_tag?: string | null
           id?: string
           invoice_number?: string | null
           last_reply_at?: string | null
+          method_used?: string | null
           name?: string
           phone?: string
           scenario?: number
+          scenario_used?: string | null
+          submitted_at?: string | null
         }
         Relationships: []
       }
@@ -766,6 +796,107 @@ export type Database = {
             foreignKeyName: "recovery_attempts_subscriber_id_fkey"
             columns: ["subscriber_id"]
             isOneToOne: false
+            referencedRelation: "subscribers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      recovery_links: {
+        Row: {
+          created_at: string
+          id: string
+          invoice_id: string
+          link_expires_at: string | null
+          link_status: string
+          link_type: string
+          payment_link_url: string | null
+          settlement_amount_cents: number | null
+          stripe_checkout_session_id: string | null
+          subscriber_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          invoice_id: string
+          link_expires_at?: string | null
+          link_status?: string
+          link_type: string
+          payment_link_url?: string | null
+          settlement_amount_cents?: number | null
+          stripe_checkout_session_id?: string | null
+          subscriber_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          invoice_id?: string
+          link_expires_at?: string | null
+          link_status?: string
+          link_type?: string
+          payment_link_url?: string | null
+          settlement_amount_cents?: number | null
+          stripe_checkout_session_id?: string | null
+          subscriber_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recovery_links_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recovery_links_subscriber_id_fkey"
+            columns: ["subscriber_id"]
+            isOneToOne: false
+            referencedRelation: "subscribers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stripe_connect_accounts: {
+        Row: {
+          account_type: string
+          charges_enabled: boolean
+          created_at: string
+          id: string
+          onboarding_status: string
+          payouts_enabled: boolean
+          stripe_account_id: string | null
+          subscriber_id: string
+          updated_at: string
+        }
+        Insert: {
+          account_type?: string
+          charges_enabled?: boolean
+          created_at?: string
+          id?: string
+          onboarding_status?: string
+          payouts_enabled?: boolean
+          stripe_account_id?: string | null
+          subscriber_id: string
+          updated_at?: string
+        }
+        Update: {
+          account_type?: string
+          charges_enabled?: boolean
+          created_at?: string
+          id?: string
+          onboarding_status?: string
+          payouts_enabled?: boolean
+          stripe_account_id?: string | null
+          subscriber_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stripe_connect_accounts_subscriber_id_fkey"
+            columns: ["subscriber_id"]
+            isOneToOne: true
             referencedRelation: "subscribers"
             referencedColumns: ["id"]
           },
