@@ -25,16 +25,20 @@ AI-powered accounts receivable and collections intelligence platform for solopre
 | Pro | $149/mo | 50/mo | 8% | Revenue Share · Subscription |
 | Enterprise | Custom | Unlimited | 5% | Revenue Share only |
 
-### Beta Billing Surface (Self-Serve Scope)
+### Beta Billing Surface (Self-Serve Scope) — GUARDRAIL
 
-At Beta, the in-app Billing tab surfaces three self-serve tiers only: Free,
-Starter ($29/mo), and Plus ($79/mo). Pro and Enterprise remain fully defined in
-the plans table and in Stripe (products and default prices set) but are not
-rendered in the Billing UI and are not self-serve purchasable. Billing path at
-Beta is Revenue Share only; Subscription/checkout is Phase 2.
+**Constraint for agents and UI work:**
+- The in-app Billing tab MUST surface only the three self-serve tiers: Free,
+  Starter ($29/mo), Plus ($79/mo). This is enforced by `BETA_VISIBLE_TIERS` in
+  `clyintel/components/settings/BillingTab.tsx`.
+- Do NOT render Pro or Enterprise in the Billing UI and do NOT make them
+  self-serve purchasable. They remain fully defined in the `plans` table and in
+  Stripe (products + default prices set) — re-enabling either is a one-line
+  change to `BETA_VISIBLE_TIERS`, gated on a product decision from Charles.
+- Billing path at Beta is Revenue Share only. Subscription/checkout is Phase 2.
 
-_(The five-tier table above is the full data model — all five tiers exist. This
-subsection clarifies what is surfaced for sale vs. defined in the system.)_
+_The five-tier reference table above is the full data model — all five tiers
+exist. This guardrail governs what is surfaced for sale, not what is defined._
 
 ---
 
@@ -120,6 +124,6 @@ subsection clarifies what is surfaced for sale vs. defined in the system.)_
 | ⚠️ | Vercel: deployed at git-main URL. Production branch still set to old feature branch — `clyintel-app.vercel.app` not live. Fix: Settings → Git → Production Branch → `main`. |
 | P1 | QBO OAuth: register app in QuickBooks Developer portal |
 | ✅ | ST-01: Legacy AR Hunter Stripe products archived (prod_TQM8ODk7fiW82r, prod_TPCn2lRuTLTMF4) |
-| P1 | GH-01: Add clyintel-ops + phoresight-clyintel-ai-ops to GitHub MCP scope via code.claude.com env settings |
+| — | GH-01: Obsolete — there is no separate `clyintel-ops` repo. The only repo is `phoresight-io/clyintel-app`. |
 | P2 | Softr: reconnect to Supabase via REST API |
 | P2 | Test framework: configure Vitest + Playwright |

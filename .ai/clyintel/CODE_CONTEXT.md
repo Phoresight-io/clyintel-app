@@ -1,6 +1,6 @@
 # CODE_CONTEXT.md — clyintel
 _Live architectural map. Update after each Claude Code session._
-_Last updated: 2026-05-27_
+_Last updated: 2026-06-05_
 
 ---
 
@@ -9,15 +9,15 @@ _Last updated: 2026-05-27_
 | Layer | Tool | Notes |
 |---|---|---|
 | App framework | Next.js 16 (App Router) | TypeScript only. All files `.ts` / `.tsx`. |
-| Database | Supabase (Postgres 17) · `clyintel-dev` (`mhvuqjryesjsrictesuk`) | 16 migrations applied. RLS enabled, policies not yet written. |
-| Auth | Supabase Auth | **Not yet built.** Email/password + Google OAuth. Middleware not yet in place. |
+| Database | Supabase (Postgres 17) · `clyintel-dev` (`mhvuqjryesjsrictesuk`) | RLS enabled; isolation policies written on all tables (Session 1). |
+| Auth | Supabase Auth | **Live.** Email/password + Google OAuth, both working end-to-end. Middleware in place (`middleware.ts`). |
 | Edge Functions | Supabase Edge Functions | **None built yet.** Replaces all retired Make scenarios. |
 | Billing | Stripe live mode · `acct_1RfpP0P2aVnfVhOw` | Write ops via Claude Code on local machine. |
 | Email delivery | MailerSend | Configured. Inbound routing not yet confirmed. |
 | SMS | Twilio | Route built (`/api/sms-reply`). Account + phone number setup pending. |
 | Voice | Vapi | Live (demo-scoped). Subscriber-scoped calls are Phase 2. |
 | AI agents | Anthropic API · `claude-sonnet-4-6` | Live for demo. Not yet subscriber-scoped. |
-| Hosting | Vercel | Live at git-main URL. Confirm production branch = `main`. |
+| Hosting | Vercel · team `phoresight-projects` | Live; `main` auto-deploys to production (`clyintel.vercel.app`). |
 | Accounting sync | QuickBooks via Make (strategic only) | QBO OAuth app not yet registered. |
 
 ---
@@ -123,31 +123,34 @@ Project: `clyintel-dev` (`mhvuqjryesjsrictesuk`) — us-east-1, Postgres 17
 ## Architectural state
 
 ### What exists and works
-- Next.js 16 app — 6 routes, all rendering correctly on mock data
+- Next.js 16 app — routes render real subscriber data (mock retained for demo mode only)
 - Supabase project fully provisioned — schema, types, client wired
 - Supabase client (`lib/supabase.ts`) — `getSupabase()` server-side, `getPublicSupabase()` client-side
+- **Supabase Auth — live.** Email/password + Google OAuth, both working end-to-end (Session 3 re-paired the Google client ID + secret in Supabase to fix the OAuth exchange)
+- **Auth middleware** (`middleware.ts`) — protects all routes except `/login`, `/auth/callback`, `/api/stripe-webhook`
+- **RLS isolation policies** — written on all subscriber-scoped tables (Session 1)
+- **`audit_log` table** + service-role-only writes (Session 1)
+- **Subscriber record creation on signup** (trigger) + **Stripe customer creation on signup** — `stripe_customer_id` populated for new signups (email + Google OAuth)
+- **Real Supabase data wiring** (`lib/data.ts` + `lib/adapters.ts`) — dashboard / portfolio / client detail / manual invoice entry, all scoped to `auth.uid()`
+- **Stripe Checkout upgrade flow** — `BillingTab.tsx` → `/api/stripe/checkout`, $29/$79 price resolution verified
+- **Stripe webhook** (`/api/stripe-webhook`) — Next.js route, manual HMAC verification, subscriber sync + audit log
 - AI email agent — MailerSend inbound → Claude → reply (demo-scoped, `airtable_subscriber_id: 'demo'`)
 - AI SMS agent — Twilio webhook → Claude → TwiML (demo-scoped)
 - AI voice agent — Vapi outbound calls (demo-scoped)
-- Stripe products live — 4 tiers, prices set
-- Vercel deployment live
+- Stripe — 5 plans; paid products + default prices set; Pro + Enterprise defined but not surfaced for sale (see Beta Billing Surface)
+- Vercel deployment live (team `phoresight-projects`)
 
-### What does not exist yet (Beta blockers — in priority order)
+### What does not exist yet (remaining Beta blockers)
+
+Blockers #1–#8 and #12 (Auth, middleware, RLS, audit_log, `billing_path` enum,
+subscriber creation, Stripe customer/checkout/webhook, real data wiring) were
+cleared across Sessions 1–3. Remaining:
 
 | # | Item | Blocks |
 |---|---|---|
-| 1 | Supabase Auth — email/password + Google OAuth | Everything subscriber-facing |
-| 2 | Auth middleware — protect all routes except `/login`, `/api/stripe-webhook` | Data isolation |
-| 3 | RLS policies — all 12 tables | Data isolation |
-| 4 | `audit_log` table + policies | AI agent safety |
-| 5 | `billing_path` enum — remove `payg` | Schema correctness |
-| 6 | Subscriber record creation on signup | Onboarding |
-| 7 | Stripe Checkout → webhook → subscriber record | Money path |
-| 8 | Replace mock data with Supabase queries (scoped to `auth.uid()`) | Real data in portal |
 | 9 | AI agent subscriber scoping (replace `'demo'` hardcode) | Agents safe for real subscribers |
 | 10 | Twilio account + phone number | SMS agent live |
 | 11 | MailerSend inbound routing | Email agent live |
-| 12 | Stripe webhook re-pointed from Make to Next.js API route | Billing events flow |
 
 ### What is intentionally deferred (not Beta blockers)
 - Supabase Edge Functions (reminder sequences, scoring) — Phase 2
@@ -187,10 +190,9 @@ Sourced from `.ai/CONSTITUTION.md`. Authoritative copy lives there.
 | `VAPI_API_KEY` | Vercel | ✅ Set |
 | `VAPI_ASSISTANT_ID` | Vercel | ✅ Set |
 | `VAPI_PHONE_NUMBER_ID` | Vercel | ✅ Set |
-| `STRIPE_SECRET_KEY` | `.env.local` only | ✅ Set locally |
-| `STRIPE_WEBHOOK_SECRET` | To be set | ❌ Pending |
+| `STRIPE_SECRET_KEY` | Vercel (all envs) + `.env.local` | ✅ Set (Prod/Preview/Dev) |
+| `STRIPE_WEBHOOK_SECRET` | To be set | ❌ Pending (webhook endpoint registration in Stripe dashboard) |
 | `TWILIO_ACCOUNT_SID` | To be set | ❌ Pending |
 | `TWILIO_AUTH_TOKEN` | To be set | ❌ Pending |
 | `TWILIO_PHONE_NUMBER` | To be set | ❌ Pending |
-| `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | To be set | ❌ Required for Google OAuth |
-| `GOOGLE_CLIENT_SECRET` | To be set | ❌ Required for Google OAuth |
+| Google OAuth (client ID + secret) | Supabase provider config | ✅ Configured in Supabase — Google sign-in works end-to-end. Not Vercel env vars; Supabase manages the OAuth exchange. |

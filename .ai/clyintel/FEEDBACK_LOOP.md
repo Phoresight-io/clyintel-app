@@ -82,7 +82,7 @@ Clean TypeScript pass. 6 routes: `/`, `/client/[id]`, `/connections`, `/portfoli
 - Vercel `clyintel-app.vercel.app` 404: Root cause identified — production branch still set to `claude/setup-open-d3-framework-fAvPt`. Vercel API PATCH attempts failed. Carrying forward.
 
 ### Working URL
-https://clyintel-app-git-main-phoresight-ios-projects.vercel.app
+https://clyintel-app-git-main-phoresight-projects.vercel.app
 
 ### Open items carried forward
 - Vercel: find and update Production Branch setting to `main` so `clyintel-app.vercel.app` resolves
@@ -247,7 +247,7 @@ All 12 subscriber-facing tables have at least one RLS policy. `demo_sessions` an
 | 12 | Stripe webhook re-pointed from Make to Next.js | `STRIPE_WEBHOOK_SECRET` env var pending |
 
 ### Open items requiring decisions or follow-up
-1. **Google OAuth — manual Supabase config required:** The Supabase MCP does not expose Auth provider settings. Enable Google provider in Supabase dashboard → Authentication → Providers → Google. Add redirect URLs: `https://clyintel-app-git-main-phoresight-ios-projects.vercel.app/auth/callback` and `http://localhost:3000/auth/callback`. Add `NEXT_PUBLIC_GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to Vercel env vars.
+1. **Google OAuth — manual Supabase config required:** The Supabase MCP does not expose Auth provider settings. Enable Google provider in Supabase dashboard → Authentication → Providers → Google. Add redirect URLs: `https://clyintel-app-git-main-phoresight-projects.vercel.app/auth/callback` and `http://localhost:3000/auth/callback`. Add `NEXT_PUBLIC_GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to Vercel env vars.
 2. **Import page Drive picker broken:** `app/import/page.tsx` references the now-deleted `/api/auth/google/callback` for Drive OAuth (separate from auth). The import CSV-from-Drive flow will not work until this is re-implemented. Not a Beta blocker — import page is demo-only.
 3. **Email confirmation flow:** Supabase email confirmation is enabled by default. New email signups will receive a confirmation email before they can log in. Decision needed: disable email confirmation for Beta, or keep and handle the "check your email" UX (currently handled — login page shows the message).
 4. **`NEXT_PUBLIC_GOOGLE_CLIENT_ID` env var:** Required for Google OAuth to work. Must be added to Vercel project settings before Google sign-in is functional.
@@ -347,7 +347,7 @@ SQL committed to clyintel/schema/fix_security_advisor_findings.sql
 ### Open items or decisions needed (Charles)
 1. **Create the Stripe webhook endpoint + secret.** In the Stripe dashboard →
    Developers → Webhooks → Add endpoint:
-   - URL: `https://clyintel-app-git-main-phoresight-ios-projects.vercel.app/api/stripe-webhook`
+   - URL: `https://clyintel-app-git-main-phoresight-projects.vercel.app/api/stripe-webhook`
    - Events: `customer.subscription.created`, `customer.subscription.updated`,
      `customer.subscription.deleted`, `invoice.payment_succeeded`,
      `invoice.payment_failed`
@@ -429,3 +429,60 @@ SQL committed to clyintel/schema/fix_security_advisor_findings.sql
 
 ### Remaining Beta blockers (unchanged)
 - #9 AI agent subscriber scoping · #10 Twilio · #11 MailerSend inbound.
+
+---
+
+## Entry 012 — 2026-06-05
+**Phase:** Sync — Documentation refresh after Session 3 billing merge
+**Scope:** Reconcile `.ai/clyintel/` docs with current state (main HEAD `14f3ce2`)
+
+### What was completed
+Docs-only pass. No application code touched. Corrected statements in
+`CODE_CONTEXT.md`, `PRODUCT_CONTEXT.md`, and `FEEDBACK_LOOP.md` that the
+post-merge reality now contradicts.
+
+**Session 3 billing merge (commit `14f3ce2`) — now TRUE and reflected in docs:**
+- **Stripe customer creation on signup** — BUILT + verified for both email and
+  Google OAuth. New signups get `stripe_customer_id` populated (e.g.
+  `cus_Ue7inuHp3Q4qjq`).
+- **Stripe Checkout upgrade flow** — BUILT. `BillingTab.tsx` → `/api/stripe/checkout`,
+  $29 / $79 price resolution verified via runtime `default_price` lookup.
+- **`STRIPE_SECRET_KEY`** — now set in Vercel for ALL environments (Prod/Preview/Dev).
+  CODE_CONTEXT env table corrected (was "`.env.local` only / ✅ Set locally").
+
+**Beta Billing Surface decision (commit `14f3ce2`):**
+- Billing tab renders Free / Starter / Plus only, enforced by `BETA_VISIBLE_TIERS`
+  in `clyintel/components/settings/BillingTab.tsx`. Pro + Enterprise remain
+  defined in the `plans` table and in Stripe (products + default prices set) but
+  are not surfaced and not self-serve purchasable.
+- PRODUCT_CONTEXT note reworded as an **agent guardrail / constraint** (imperative
+  MUST/Do-NOT phrasing), not a PRD-style spec. Five-tier reference table left intact.
+
+**Google OAuth fix:**
+- Was failing with `invalid_client` — Google rejected Supabase's server-to-server
+  code exchange because the Google **client secret** stored in Supabase was wrong.
+  Re-paired the client ID + secret in the Supabase Google provider; sign-in now
+  works end-to-end. App code (`redirectTo`, `/auth/callback` exchange, middleware)
+  was already correct — this was a config fix, not a code change.
+
+**Stale-reference corrections:**
+- Vercel team slug: `phoresight-ios-projects` → `phoresight-projects` (3
+  occurrences across prior entries — URLs only; narrative untouched). Canonical
+  production URL is now `https://clyintel.vercel.app` (`main` auto-deploys).
+- Removed the claim of a separate `clyintel-ops` repo (GH-01 open item) — it does
+  not exist; the only repo is `phoresight-io/clyintel-app`.
+- Clarified: the canonical **PRD v2.0 lives in Google Drive (Google Doc)**. There
+  is no `.ai/clyintel/PRD_v2.0.docx` in this repo. `PRODUCT_CONTEXT.md` remains the
+  in-repo product-context doc (per its own Agent Rule 1).
+- CODE_CONTEXT: Auth marked **Live** (was "Not yet built"); RLS policies marked
+  written; Beta-blocker list trimmed — #1–#8 and #12 cleared across Sessions 1–3.
+
+### Remaining Beta blockers (unchanged — still open)
+- #9 AI agent subscriber scoping (replace `'demo'` hardcode)
+- #10 Twilio account + phone number (external)
+- #11 MailerSend inbound routing (config)
+
+### Note
+Carried-over Stripe items still genuinely pending: `STRIPE_WEBHOOK_SECRET` +
+webhook endpoint registration in the Stripe dashboard (Entry 010/011). Left as
+❌ Pending — not asserted complete by this sync.
