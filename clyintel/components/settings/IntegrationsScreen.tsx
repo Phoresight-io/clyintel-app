@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 import { DEMO_RESET_KEY, CLIENTS_KEY, INTEGRATIONS_KEY, DEFAULT_INTEGRATIONS } from "@/lib/demo-mode";
 import type { Client } from "@/lib/mock-data";
+import BillingTab from "@/components/settings/BillingTab";
 
 type IntegrationStatus = "connected" | "syncing" | "disconnected";
 
@@ -40,7 +41,7 @@ const SETTING_TABS = [
   { id: "integrations", label: "Integrations", disabled: false },
   { id: "demo",         label: "Demo",          disabled: false },
   { id: "profile",      label: "Profile",       disabled: true },
-  { id: "billing",      label: "Billing",       disabled: true },
+  { id: "billing",      label: "Billing",       disabled: false },
   { id: "notifications",label: "Notifications", disabled: true },
 ];
 
@@ -373,6 +374,9 @@ export default function IntegrationsScreen() {
           </div>
         </section>
       )}
+
+      {/* Billing tab */}
+      {activeTab === "billing" && <BillingTab />}
 
     </div>
   );

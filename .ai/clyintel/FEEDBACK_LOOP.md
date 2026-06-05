@@ -363,3 +363,69 @@ SQL committed to clyintel/schema/fix_security_advisor_findings.sql
 4. Exchange history in the UI (`ExchangeDrawer`) still reads demo data;
    `getCommunications` is wired in `lib/data.ts` but not yet surfaced for real
    invoices. Deferred — not a listed blocker for this session.
+
+## Entry 011 — 2026-06-04
+**Phase:** Build — Stripe customer creation + Checkout (Session 3)
+**Scope:** Remaining Stripe work for Beta (steps 1–4)
+**Branch:** `claude/inspiring-gates-8N01g` (not merged to main)
+
+### What was completed
+
+**Stripe REST helper (no new npm package)**
+- `clyintel/lib/stripe.ts` — minimal Stripe REST client over `fetch` with
+  bracketed form-encoding, mirroring the webhook's "no `stripe` package" rule.
+  Exports `createCustomer`, `getProductDefaultPrice`, `createCheckoutSession`.
+  Server-only (reads `STRIPE_SECRET_KEY`).
+
+**Stripe customer on signup (task step 2)**
+- `clyintel/lib/stripe-customer.ts` — `ensureStripeCustomer(userId)`: idempotent,
+  creates a Stripe customer (email + `metadata.subscriber_id`) only when
+  `stripe_customer_id` is null, stores it on the subscriber row (service role),
+  guards against concurrent writes, and writes an `audit_log` row
+  (actor='system', action='create_stripe_customer').
+- `clyintel/app/api/stripe/ensure-customer/route.ts` — authenticated POST wrapper.
+- Wired into all auth entry points: `app/auth/callback/route.ts` (Google +
+  confirmed-email link) calls it after `exchangeCodeForSession`; `app/login/page.tsx`
+  fires `POST /api/stripe/ensure-customer` (best-effort) after password sign-in;
+  the Checkout route also ensures one as a safety net. The Postgres
+  `handle_new_auth_user` trigger can't make the outbound call, so this lives at
+  the app layer. (Chose app-route over Edge Function — no new infra.)
+
+**Stripe Checkout flow (task step 4)**
+- `clyintel/app/api/stripe/checkout/route.ts` — authenticated POST { planId }:
+  ensures customer, resolves the plan's price via the Stripe product's
+  `default_price` (per Charles' decision — no `stripe_price_id` column, no
+  migration), creates a subscription-mode Checkout Session, returns the URL.
+  Rejects free/enterprise/zero-price plans (business rule #1). Audits
+  action='start_checkout'.
+- `clyintel/components/settings/BillingTab.tsx` + enabled the **Billing** tab in
+  `IntegrationsScreen.tsx`. Shows current plan, lists plans, "Upgrade" buttons
+  for paid tiers above current (Free→Starter/Plus/Pro), Enterprise → Contact
+  sales. Handles `?upgrade=success|cancelled` banner. On success the existing
+  webhook updates `plan_id` + `subscription_status`.
+
+### Verification
+- `npx tsc --noEmit` → clean.
+- `npm run build` → clean. New routes registered: `/api/stripe/checkout`,
+  `/api/stripe/ensure-customer`.
+
+### Decisions made this session (Charles)
+- **Step 3 (Free $0 Stripe product): SKIPPED.** Free is revenue-share only and
+  business rule #1 blocks Free users from subscription billing, so Checkout never
+  targets it; the webhook only needs product IDs for paid plans, which already
+  exist. `plans.free.stripe_product_id` left null by design.
+- **Checkout price resolution:** runtime `default_price` lookup (no migration).
+
+### Open items / required before this works in Production (Charles)
+1. **`STRIPE_SECRET_KEY` is NOT in Vercel** (CODE_CONTEXT lists it as `.env.local`
+   only). Add it to Vercel (Production, Preview, Development) or both new routes
+   and customer creation fail at runtime in deployed environments. ← task step 1.
+2. **Each live paid Stripe product must have a `default_price` set** (`prod_UG5P6BwawRlmf2`
+   Starter, `prod_UG5Pn5BS7UGHtD` Plus, `prod_UG5Q9TLOQd99ey` Pro). The Checkout
+   route reads `default_price`; if any is unset, that plan's checkout returns 502.
+   Verify/set on the local machine (Stripe writes are local-machine only).
+3. Webhook endpoint + `STRIPE_WEBHOOK_SECRET` (carried over from Entry 010) still
+   required for the success path to update the subscriber.
+
+### Remaining Beta blockers (unchanged)
+- #9 AI agent subscriber scoping · #10 Twilio · #11 MailerSend inbound.
