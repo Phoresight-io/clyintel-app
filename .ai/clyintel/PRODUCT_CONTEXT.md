@@ -25,6 +25,17 @@ AI-powered accounts receivable and collections intelligence platform for solopre
 | Pro | $149/mo | 50/mo | 8% | Revenue Share · Subscription |
 | Enterprise | Custom | Unlimited | 5% | Revenue Share only |
 
+### Beta Billing Surface (Self-Serve Scope)
+
+At Beta, the in-app Billing tab surfaces three self-serve tiers only: Free,
+Starter ($29/mo), and Plus ($79/mo). Pro and Enterprise remain fully defined in
+the plans table and in Stripe (products and default prices set) but are not
+rendered in the Billing UI and are not self-serve purchasable. Billing path at
+Beta is Revenue Share only; Subscription/checkout is Phase 2.
+
+_(The five-tier table above is the full data model — all five tiers exist. This
+subsection clarifies what is surfaced for sale vs. defined in the system.)_
+
 ---
 
 ## Business Rules
