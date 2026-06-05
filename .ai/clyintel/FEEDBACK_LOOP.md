@@ -486,3 +486,39 @@ post-merge reality now contradicts.
 Carried-over Stripe items still genuinely pending: `STRIPE_WEBHOOK_SECRET` +
 webhook endpoint registration in the Stripe dashboard (Entry 010/011). Left as
 ❌ Pending — not asserted complete by this sync.
+
+---
+
+## Entry 013 — 2026-06-05
+**Phase:** Sync — Billing-path decision + status correction
+**Scope:** Revenue Share / Stripe Connect direction; `STRIPE_WEBHOOK_SECRET` confirmed
+
+### Status correction
+- `STRIPE_WEBHOOK_SECRET` is now **set in Vercel (All Environments)** — flipped
+  from ❌ Pending to ✓ Done in CODE_CONTEXT. The platform-side Stripe webhook
+  path (subscriber subscription/payment sync) is fully provisioned.
+
+### Decision locked — Revenue Share processing via Stripe Connect EXPRESS
+- Subscriber payment processing on the **Revenue Share** billing path will use
+  **Stripe Connect Express accounts**, with **Clyintel-managed onboarding** (we
+  drive the Express onboarding flow for each subscriber).
+- Per-invoice **payment link generation** against the connected account is the
+  mechanic that collects on overdue invoices and routes the revenue-share cut to
+  the platform. **This is NOT built yet — it is the top Session 4 build.**
+- Scope clarity: platform-side Stripe (subscriber billing, customer creation,
+  Checkout upgrade flow) is DONE. The Connect / Rev-Share side is the remaining
+  work and the actual Beta launch billing mechanic.
+
+### Deliberately deferred
+- **Payment + webhook live-testing** (Connect charges, transfer/application-fee
+  flows, connected-account webhook events) — deferred until the Connect build
+  lands; no live-money testing before then.
+- **Free-tier $0 Stripe product** — NOT needed. Free-tier Revenue Share runs
+  through Connect (per-invoice links on the connected account), so there is no
+  separate Free subscription product to create. `plans.free.stripe_product_id`
+  stays null by design.
+
+### Remaining Beta blockers
+- **#0 (new top priority)** Stripe Connect (Express) onboarding + per-invoice
+  payment links — Revenue Share billing path.
+- #9 AI agent subscriber scoping · #10 Twilio · #11 MailerSend inbound.

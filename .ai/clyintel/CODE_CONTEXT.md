@@ -146,8 +146,15 @@ Blockers #1–#8 and #12 (Auth, middleware, RLS, audit_log, `billing_path` enum,
 subscriber creation, Stripe customer/checkout/webhook, real data wiring) were
 cleared across Sessions 1–3. Remaining:
 
+**TOP REMAINING BUILD (Session 4) — Revenue Share billing path:** Stripe Connect
+(Express) + per-invoice payment link generation is NOT built. This is the
+Revenue Share billing path — the Beta launch billing mechanic — and is the top
+remaining build (Session 4). Platform-side Stripe (subscriber billing, customer
+creation, Checkout) is done; the Connect/Rev-Share side is not.
+
 | # | Item | Blocks |
 |---|---|---|
+| 0 | Stripe Connect (Express) onboarding + per-invoice payment link generation | Revenue Share — Beta launch billing mechanic |
 | 9 | AI agent subscriber scoping (replace `'demo'` hardcode) | Agents safe for real subscribers |
 | 10 | Twilio account + phone number | SMS agent live |
 | 11 | MailerSend inbound routing | Email agent live |
@@ -191,7 +198,7 @@ Sourced from `.ai/CONSTITUTION.md`. Authoritative copy lives there.
 | `VAPI_ASSISTANT_ID` | Vercel | ✅ Set |
 | `VAPI_PHONE_NUMBER_ID` | Vercel | ✅ Set |
 | `STRIPE_SECRET_KEY` | Vercel (all envs) + `.env.local` | ✅ Set (Prod/Preview/Dev) |
-| `STRIPE_WEBHOOK_SECRET` | To be set | ❌ Pending (webhook endpoint registration in Stripe dashboard) |
+| `STRIPE_WEBHOOK_SECRET` | Vercel (all envs) | ✓ Done — confirmed present in Vercel (All Environments) |
 | `TWILIO_ACCOUNT_SID` | To be set | ❌ Pending |
 | `TWILIO_AUTH_TOKEN` | To be set | ❌ Pending |
 | `TWILIO_PHONE_NUMBER` | To be set | ❌ Pending |
