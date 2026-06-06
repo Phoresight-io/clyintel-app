@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { C } from "@/lib/theme";
 import { createSupabaseBrowser } from "@/lib/supabase-browser";
 
@@ -20,6 +20,19 @@ const CHECKOUT_TIERS = new Set(["starter", "plus", "pro"]);
 // tier later, add it back to this set.
 const BETA_VISIBLE_TIERS = new Set(["free", "starter", "plus"]);
 
+// Stripe processing fees are a fixed Stripe schedule, surfaced in the disclosure
+// alongside the plan-derived Clyintel rev-share rate (PRD v2.2 §8).
+const STRIPE_FEE_LABEL = "2.9% + $0.30";
+
+type OnboardingStatus = "not_started" | "pending" | "complete" | "restricted";
+
+interface ConnectStatus {
+  connected: boolean;
+  charges_enabled: boolean;
+  payouts_enabled: boolean;
+  onboarding_status: OnboardingStatus;
+}
+
 function priceLabel(plan: PlanRow): string {
   if (plan.tier === "free") return "$0 / mo";
   if (plan.tier === "enterprise") return "Custom";
@@ -34,6 +47,14 @@ export default function BillingTab() {
   const [checkoutPlan, setCheckoutPlan] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [banner, setBanner] = useState<"success" | "cancelled" | null>(null);
+
+  // Stripe Connect (Express) — revenue-recovery onboarding state.
+  // revShareRate is the subscriber's PLAN-DERIVED rate, stored as a fraction
+  // (e.g. 0.12), surfaced as a percentage in the disclosure. Never hardcoded.
+  const [connect, setConnect] = useState<ConnectStatus | null>(null);
+  const [connectLoading, setConnectLoading] = useState(true);
+  const [connecting, setConnecting] = useState(false);
+  const [revShareRate, setRevShareRate] = useState<number | null>(null);
 
   useEffect(() => {
     const u = new URLSearchParams(window.location.search).get("upgrade");
@@ -53,7 +74,7 @@ export default function BillingTab() {
         user
           ? supabase
               .from("subscribers")
-              .select("subscription_status, plan:plans(tier)")
+              .select("subscription_status, plan:plans(tier, revenue_share_rate)")
               .eq("id", user.id)
               .maybeSingle()
           : Promise.resolve({ data: null }),
@@ -67,10 +88,16 @@ export default function BillingTab() {
             .sort((a, b) => (TIER_ORDER[a.tier] ?? 99) - (TIER_ORDER[b.tier] ?? 99))
         );
       }
-      const sub = subResult.data as { subscription_status?: string; plan?: { tier?: string } } | null;
+      const sub = subResult.data as {
+        subscription_status?: string;
+        plan?: { tier?: string; revenue_share_rate?: number };
+      } | null;
       if (sub) {
         setCurrentTier(sub.plan?.tier ?? null);
         setStatus(sub.subscription_status ?? null);
+        setRevShareRate(
+          typeof sub.plan?.revenue_share_rate === "number" ? sub.plan.revenue_share_rate : null
+        );
       }
       setLoading(false);
     })();
@@ -78,6 +105,41 @@ export default function BillingTab() {
       active = false;
     };
   }, []);
+
+  // Connect status is the server-of-truth (GET /api/connect/status re-reads
+  // Stripe). Refresh on mount and again when returning from onboarding
+  // (?connect=complete), since the return redirect alone isn't authoritative.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/connect/status", { cache: "no-store" });
+        const json = (await res.json()) as ConnectStatus;
+        if (active && res.ok) setConnect(json);
+      } catch {
+        // Leave connect null; the section renders a neutral retry CTA.
+      } finally {
+        if (active) setConnectLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function handleConnect() {
+    setError("");
+    setConnecting(true);
+    try {
+      const res = await fetch("/api/connect/onboard", { method: "POST" });
+      const json = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || !json.url) throw new Error(json.error || "Could not start onboarding");
+      window.location.href = json.url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start onboarding");
+      setConnecting(false);
+    }
+  }
 
   async function handleUpgrade(planId: string) {
     setError("");
@@ -147,6 +209,14 @@ export default function BillingTab() {
           {error}
         </div>
       )}
+
+      <ConnectCard
+        connectLoading={connectLoading}
+        connect={connect}
+        connecting={connecting}
+        revShareRate={revShareRate}
+        onConnect={handleConnect}
+      />
 
       {loading ? (
         <div style={{ fontSize: 14, color: C.textMid, fontWeight: 500 }}>Loading plans…</div>
@@ -240,5 +310,138 @@ export default function BillingTab() {
         </div>
       )}
     </section>
+  );
+}
+
+// Plan-derived rev-share rate (stored as a fraction, e.g. 0.12) → percentage
+// string without trailing zeros, e.g. "12". Returns null when unresolved so the
+// disclosure never shows a hardcoded number.
+function formatRate(rate: number | null): string | null {
+  if (rate == null) return null;
+  return String(Number((rate * 100).toFixed(2)));
+}
+
+interface ConnectCardProps {
+  connectLoading: boolean;
+  connect: ConnectStatus | null;
+  connecting: boolean;
+  revShareRate: number | null;
+  onConnect: () => void;
+}
+
+function ConnectCard({ connectLoading, connect, connecting, revShareRate, onConnect }: ConnectCardProps) {
+  const ratePct = formatRate(revShareRate);
+  const disclosure = ratePct
+    ? `Clyintel charges ${ratePct}% per recovered payment, plus Stripe processing fees (${STRIPE_FEE_LABEL}).`
+    : `Clyintel charges a revenue-share fee per recovered payment, plus Stripe processing fees (${STRIPE_FEE_LABEL}).`;
+
+  const cta = (label: string, primary: boolean) => (
+    <button
+      onClick={onConnect}
+      disabled={connecting}
+      style={{
+        padding: "9px 18px",
+        fontSize: 14,
+        fontWeight: 600,
+        color: primary ? "#fff" : C.navy,
+        background: connecting ? C.textDim : primary ? C.blue : C.surface,
+        border: primary ? "none" : `1px solid ${C.navy}`,
+        borderRadius: 6,
+        cursor: connecting ? "not-allowed" : "pointer",
+        alignSelf: "flex-start",
+      }}
+    >
+      {connecting ? "Redirecting…" : label}
+    </button>
+  );
+
+  const note = (text: string, kind: "info" | "good" | "warn" | "bad") => {
+    const map = {
+      info: { bg: C.blueBg, border: C.blue, color: C.blue },
+      good: { bg: C.greenBg, border: C.green, color: C.green },
+      warn: { bg: C.amberBg, border: C.amber, color: C.amber },
+      bad: { bg: C.redBg, border: C.red, color: C.red },
+    }[kind];
+    return (
+      <div
+        style={{
+          padding: "8px 12px",
+          borderRadius: 8,
+          fontSize: 13,
+          fontWeight: 600,
+          background: map.bg,
+          border: `1px solid ${map.border}`,
+          color: map.color,
+          alignSelf: "flex-start",
+        }}
+      >
+        {text}
+      </div>
+    );
+  };
+
+  const onboardingStatus = connect?.onboarding_status ?? "not_started";
+
+  let body: ReactNode;
+  if (connectLoading) {
+    body = <div style={{ fontSize: 14, color: C.textMid, fontWeight: 500 }}>Checking connection…</div>;
+  } else if (onboardingStatus === "complete" && connect?.charges_enabled) {
+    body = (
+      <>
+        {note("Connected ✓", "good")}
+        <div style={{ fontSize: 13, color: C.textDim, fontWeight: 500 }}>
+          Your Stripe account is connected and ready to accept recovered payments
+          {connect?.payouts_enabled ? " and receive payouts" : ""}. {disclosure}
+        </div>
+      </>
+    );
+  } else if (onboardingStatus === "restricted") {
+    body = (
+      <>
+        {note("Action needed — Stripe has restricted this account", "bad")}
+        <div style={{ fontSize: 13, color: C.textMid, fontWeight: 500 }}>{disclosure}</div>
+        {cta("Continue setup", true)}
+      </>
+    );
+  } else if (onboardingStatus === "pending") {
+    body = (
+      <>
+        {note("Setup incomplete", "warn")}
+        <div style={{ fontSize: 13, color: C.textMid, fontWeight: 500 }}>{disclosure}</div>
+        {cta("Finish setup", true)}
+      </>
+    );
+  } else {
+    body = (
+      <>
+        <div style={{ fontSize: 13, color: C.textMid, fontWeight: 500 }}>{disclosure}</div>
+        {cta("Connect Stripe to enable Revenue Recovery", true)}
+      </>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        background: C.card,
+        border: `1px solid ${C.border}`,
+        borderRadius: 12,
+        padding: "20px 24px",
+        marginBottom: 20,
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+      }}
+    >
+      <div>
+        <div style={{ fontSize: 15, fontWeight: 600, color: C.text, marginBottom: 3 }}>
+          Revenue Recovery
+        </div>
+        <div style={{ fontSize: 13, color: C.textDim, fontWeight: 500 }}>
+          Connect Stripe so Clyintel can recover overdue payments on your behalf.
+        </div>
+      </div>
+      {body}
+    </div>
   );
 }

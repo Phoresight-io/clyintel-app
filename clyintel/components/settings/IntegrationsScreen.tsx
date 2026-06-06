@@ -81,6 +81,19 @@ export default function IntegrationsScreen() {
   const [disconnectConfirm, setDisconnectConfirm] = useState<string | null>(null);
   const [isDemoReset, setIsDemoReset] = useState(false);
 
+  // Honor ?tab= deep links (e.g. the Stripe Connect onboarding return_url lands
+  // on ?tab=billing&connect=complete). Falls back to the billing tab when only
+  // the connect flag is present so the user sees their connection result.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    if (tab && SETTING_TABS.some((t) => t.id === tab && !t.disabled)) {
+      setActiveTab(tab);
+    } else if (params.get("connect")) {
+      setActiveTab("billing");
+    }
+  }, []);
+
   // Mount priority: reset → [] | saved localStorage (non-empty) → parse | fallback to INITIAL
   useEffect(() => {
     const reset = localStorage.getItem(DEMO_RESET_KEY) === 'true';

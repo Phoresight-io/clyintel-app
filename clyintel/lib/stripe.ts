@@ -96,3 +96,61 @@ export async function createCheckoutSession(opts: {
   if (!session.url) throw new Error("Stripe did not return a Checkout URL");
   return session.url;
 }
+
+// ── Stripe Connect (Express) ────────────────────────────────────────────────
+// Revenue-share onboarding: each subscriber connects their own Express account
+// so recovered funds settle to them and Clyintel takes its share via destination
+// charges (built in later prompts). These helpers cover account creation, the
+// hosted onboarding link, and a status refresh.
+
+// Shape of the subset of the Stripe Account object we rely on.
+export interface StripeConnectAccount {
+  id: string;
+  charges_enabled: boolean;
+  payouts_enabled: boolean;
+  details_submitted: boolean;
+  requirements?: { disabled_reason?: string | null } | null;
+}
+
+// Create an Express connected account for a subscriber. `transfers` is required
+// in addition to `card_payments` because revenue-share uses destination charges,
+// which move funds to the connected account. `subscriber_id` is stored in
+// metadata so webhooks (Prompt 4) can map the account back without a lookup.
+export async function createExpressAccount(
+  email: string,
+  subscriberId: string
+): Promise<StripeConnectAccount> {
+  return stripeRequest<StripeConnectAccount>("/accounts", "POST", {
+    type: "express",
+    email,
+    capabilities: {
+      card_payments: { requested: true },
+      transfers: { requested: true },
+    },
+    metadata: { subscriber_id: subscriberId },
+  });
+}
+
+// Create an `account_onboarding` Account Link and return its hosted URL. Account
+// Links are single-use and short-lived; refresh_url should point back at the
+// route that mints them so an expired/visited link regenerates seamlessly.
+export async function createAccountOnboardingLink(opts: {
+  accountId: string;
+  returnUrl: string;
+  refreshUrl: string;
+}): Promise<string> {
+  const link = await stripeRequest<{ url: string | null }>("/account_links", "POST", {
+    account: opts.accountId,
+    type: "account_onboarding",
+    return_url: opts.returnUrl,
+    refresh_url: opts.refreshUrl,
+  });
+  if (!link.url) throw new Error("Stripe did not return an Account Link URL");
+  return link.url;
+}
+
+// Retrieve the current state of a connected account (source of truth for the
+// status route — never trust the onboarding return_url redirect alone).
+export async function retrieveAccount(accountId: string): Promise<StripeConnectAccount> {
+  return stripeRequest<StripeConnectAccount>(`/accounts/${accountId}`, "GET");
+}
