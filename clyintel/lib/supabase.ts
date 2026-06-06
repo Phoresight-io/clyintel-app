@@ -21,11 +21,20 @@ export interface DemoSession {
 
 // Server-side client (service-role key). Initialised per-request so that
 // module evaluation during `next build` never throws when env vars are absent.
+//
+// Throws at construction if the service-role key is missing: a service-role
+// client must NEVER silently degrade to the anon role, or privileged writes get
+// rejected by RLS with no obvious cause (see the Connect onboarding bug). All
+// call sites invoke this inside a request handler, so the throw surfaces a clear
+// 500 at request time without breaking the build.
 export function getSupabase() {
-  return createClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) {
+    throw new Error(
+      "SUPABASE_SERVICE_ROLE_KEY is not set — service-role client cannot be created"
+    );
+  }
+  return createClient<Database>(process.env.NEXT_PUBLIC_SUPABASE_URL!, key);
 }
 
 // Public (anon-key) client for client-side use. Also lazily initialised
