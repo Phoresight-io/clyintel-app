@@ -522,3 +522,52 @@ webhook endpoint registration in the Stripe dashboard (Entry 010/011). Left as
 - **#0 (new top priority)** Stripe Connect (Express) onboarding + per-invoice
   payment links — Revenue Share billing path.
 - #9 AI agent subscriber scoping · #10 Twilio · #11 MailerSend inbound.
+
+---
+
+## Entry 014 — 2026-06-12
+**Phase:** Sync — Production incident + follow-ups
+**Scope:** Live subscription webhook 401'd on a stale SSO-protected endpoint URL
+
+### Title
+Live billing webhook 401'd on a stale, SSO-protected endpoint URL — repointed to production host
+
+### Incident
+- Subscriber `charly413@gmail.com` (`subscriber_id 290affb2-6235-4eb0-a151-15dc64036af4`,
+  `cus_Ue7inuHp3Q4qjq`) completed a LIVE Starter checkout ($29,
+  `ch_3ThJWNP2aVnfVhOw0GODRlxU`, `sub_1ThJWPP2aVnfVhOwI79cn2yT`,
+  `price_1THZIpP2aVnfVhOwFNehmiV6`) from production (`clyintel.vercel.app`),
+  but the `subscribers` row stayed Free/trialing.
+- Root cause: the Stripe webhook endpoint `clyintel-subscription-webhook` was
+  registered to
+  `https://clyintel-app-git-main-phoresight-ios-projects.vercel.app/api/stripe-webhook`
+  — a git-branch preview host under the OLD team slug (`phoresight-ios-projects`),
+  which sits behind Vercel Deployment Protection (SSO). Every event returned 401
+  (Vercel auth wall); the app code never executed. **Not a code bug, not the
+  `getSupabase()`/RLS silent-write bug** — the request never reached the route.
+- Fix: EDITED the existing endpoint (preserves signing secret — no
+  `STRIPE_WEBHOOK_SECRET` change, no redeploy) to
+  `https://clyintel.vercel.app/api/stripe-webhook`. Resent the failed
+  `customer.subscription.created` (`evt_1ThJWRP2aVnfVhOwlcPzYW5U`) → 200
+  `{"received":true}`. DB reconciled to Starter/active automatically (webhook reads
+  `metadata.subscriber_id`, maps price→plan, sets status). No manual DB patch needed.
+
+### Lessons / standing guardrails
+- The Stripe webhook must ALWAYS point at the UNPROTECTED production host
+  (`clyintel.vercel.app`), never a `-git-<branch>-` preview host (those have Vercel
+  Authentication on by default).
+- After ANY production domain change or Deployment-Protection change, re-verify the
+  webhook still 200s: `curl -I https://clyintel.vercel.app/api/stripe-webhook`
+  should return 405/400 (route reachable), NOT 401 (Vercel SSO page).
+- EDIT the existing Stripe endpoint when changing its URL — do NOT delete+recreate,
+  or Stripe issues a new signing secret and `STRIPE_WEBHOOK_SECRET` in Vercel must
+  be updated + redeployed.
+- The TEST-mode webhook is a SEPARATE endpoint with its own signing secret. Before
+  testing Connect onboarding on the preview deploy with the `sk_test_` key, a
+  test-mode endpoint must be registered (Prompt 4 territory).
+
+### Open follow-up (promoted to backlog)
+- **Lifecycle notification emails** — send transactional email on signup, on
+  upgrade, and on downgrade. Net-new (MailerSend outbound-transactional not yet
+  built). Natural home: the same `stripe-webhook` route (already the plan-change
+  choke point) plus the signup path. To be specced as its own prompt.

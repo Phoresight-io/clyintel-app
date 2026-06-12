@@ -197,9 +197,23 @@ Sourced from `.ai/CONSTITUTION.md`. Authoritative copy lives there.
 | `VAPI_API_KEY` | Vercel | ✅ Set |
 | `VAPI_ASSISTANT_ID` | Vercel | ✅ Set |
 | `VAPI_PHONE_NUMBER_ID` | Vercel | ✅ Set |
-| `STRIPE_SECRET_KEY` | Vercel (all envs) + `.env.local` | ✅ Set (Prod/Preview/Dev) |
+| `STRIPE_SECRET_KEY` | Vercel (all envs) + `.env.local` | ✅ Set — **scoped per-environment**: Production = `sk_live_…`, Preview = `sk_test_…`. Live key **rotated** during the 2026-06-12 session; Production redeployed on the new live key. Post-rotation smoke test: confirm the Billing tab renders. |
 | `STRIPE_WEBHOOK_SECRET` | Vercel (all envs) | ✓ Done — confirmed present in Vercel (All Environments) |
 | `TWILIO_ACCOUNT_SID` | To be set | ❌ Pending |
 | `TWILIO_AUTH_TOKEN` | To be set | ❌ Pending |
 | `TWILIO_PHONE_NUMBER` | To be set | ❌ Pending |
 | Google OAuth (client ID + secret) | Supabase provider config | ✅ Configured in Supabase — Google sign-in works end-to-end. Not Vercel env vars; Supabase manages the OAuth exchange. |
+
+---
+
+## Stripe webhook endpoints
+
+| Endpoint | URL | Mode | Status |
+|---|---|---|---|
+| `clyintel-subscription-webhook` | `https://clyintel.vercel.app/api/stripe-webhook` | **live** | ✅ Canonical production endpoint. Repointed here on 2026-06-12 from a stale `-git-main-phoresight-ios-projects` preview host that sat behind Vercel Deployment Protection (SSO) and 401'd every event. See FEEDBACK_LOOP Entry 014. |
+| Test-mode webhook | — | test | ❌ **Not yet registered.** A SEPARATE endpoint with its own signing secret is REQUIRED before Connect onboarding / preview testing with the `sk_test_` key (Prompt 4 territory). |
+
+**Guardrails (from Entry 014):**
+- The webhook must always point at the UNPROTECTED production host (`clyintel.vercel.app`), never a `-git-<branch>-` preview host (Vercel Authentication is on by default for those).
+- After any production domain or Deployment-Protection change, re-verify: `curl -I https://clyintel.vercel.app/api/stripe-webhook` should return 405/400 (route reachable), NOT 401 (Vercel SSO page).
+- EDIT the existing endpoint when changing its URL — do not delete+recreate, or Stripe issues a new signing secret and `STRIPE_WEBHOOK_SECRET` must be updated + redeployed.
