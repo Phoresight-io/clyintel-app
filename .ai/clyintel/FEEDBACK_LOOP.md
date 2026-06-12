@@ -571,3 +571,15 @@ Live billing webhook 401'd on a stale, SSO-protected endpoint URL — repointed 
   upgrade, and on downgrade. Net-new (MailerSend outbound-transactional not yet
   built). Natural home: the same `stripe-webhook` route (already the plan-change
   choke point) plus the signup path. To be specced as its own prompt.
+
+### Additional finding (same incident) — payments capture gap
+- The `stripe-webhook` route handles `customer.subscription.created` (writes
+  subscriber plan/status + `audit_log`) but `invoice.payment_succeeded` is a
+  SILENT NO-OP — returns 200, writes nothing. Verified: 0 rows in
+  `public.payments` for the subscriber after a successful live $29 Starter charge;
+  no `invoice.payment_succeeded` action in `audit_log`. Subscription state is
+  correct; there is simply no internal record of the payment itself.
+- Backlog: wire `invoice.payment_succeeded` → `payments` (idempotent on Stripe
+  event id, reconcile via `invoice_payments`). This is SUBSCRIPTION-billing
+  capture (subscriber→Clyintel), distinct from the Revenue Recovery / Connect
+  payment path (client→subscriber) built in Prompts 3–5. Not a Beta blocker.
