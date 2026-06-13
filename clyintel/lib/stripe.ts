@@ -154,3 +154,72 @@ export async function createAccountOnboardingLink(opts: {
 export async function retrieveAccount(accountId: string): Promise<StripeConnectAccount> {
   return stripeRequest<StripeConnectAccount>(`/accounts/${accountId}`, "GET");
 }
+
+// ── Recovery payment links ──────────────────────────────────────────────────
+// Create a one-time Checkout Session (mode=payment) on the platform account with
+// a DESTINATION CHARGE to the subscriber's Express account. The session is minted
+// at click-time so the amount always reflects the live balance (live-resolve).
+//
+// application_fee_amount = round(balance × plan_rev_share_rate) — billed on the
+// gross charge amount in the same currency minor units.
+//
+// Metadata is placed on both the Session and the PaymentIntent so the Prompt 4
+// webhook can reconcile the payment back to the recovery_link regardless of which
+// object the event carries.
+
+export interface RecoveryCheckoutOpts {
+  token: string;
+  invoiceId: string;
+  subscriberId: string;
+  providerAccountId: string;   // connected Express account (acct_…)
+  revShareRate: number;        // fraction, e.g. 0.12 for 12 %
+  balanceCents: number;        // authoritative remaining balance in minor units
+  currency: string;            // ISO 4217 lowercase, e.g. "usd"
+  invoiceNumber: string | null;
+  successUrl: string;
+  cancelUrl: string;
+}
+
+export async function createRecoveryCheckoutSession(
+  opts: RecoveryCheckoutOpts
+): Promise<string> {
+  const fee = Math.round(opts.balanceCents * opts.revShareRate);
+  const lineItemName = opts.invoiceNumber
+    ? `Invoice #${opts.invoiceNumber} — outstanding balance`
+    : "Outstanding invoice balance";
+
+  const sessionMeta = {
+    recovery_link_token: opts.token,
+    invoice_id: opts.invoiceId,
+    subscriber_id: opts.subscriberId,
+  };
+
+  const session = await stripeRequest<{ url: string | null }>("/checkout/sessions", "POST", {
+    mode: "payment",
+    line_items: [
+      {
+        price_data: {
+          currency: opts.currency,
+          unit_amount: opts.balanceCents,
+          product_data: {
+            name: lineItemName,
+          },
+        },
+        quantity: 1,
+      },
+    ],
+    payment_intent_data: {
+      transfer_data: {
+        destination: opts.providerAccountId,
+      },
+      application_fee_amount: fee,
+      metadata: sessionMeta,
+    },
+    metadata: sessionMeta,
+    success_url: opts.successUrl,
+    cancel_url: opts.cancelUrl,
+  });
+
+  if (!session.url) throw new Error("Stripe did not return a Checkout Session URL");
+  return session.url;
+}
