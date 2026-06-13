@@ -11,13 +11,10 @@ interface PlanRow {
   stripe_product_id: string | null;
 }
 
-// Display order and the subset of tiers that are self-serve checkout-able.
 const TIER_ORDER: Record<string, number> = { free: 0, starter: 1, plus: 2, pro: 3, enterprise: 4 };
 const CHECKOUT_TIERS = new Set(["starter", "plus", "pro"]);
-// Tiers shown in the Billing tab during Beta. Pro and Enterprise are defined in
-// the DB but not actively sold yet, so they are excluded here (presentation-layer
-// only — their plan records and Stripe products are untouched). To re-enable a
-// tier later, add it back to this set.
+// Tiers shown during Beta. Pro and Enterprise are excluded here (presentation-layer
+// only — their plan records and Stripe products are untouched).
 const BETA_VISIBLE_TIERS = new Set(["free", "starter", "plus"]);
 
 function priceLabel(plan: PlanRow): string {
@@ -37,7 +34,7 @@ export default function BillingTab() {
 
   useEffect(() => {
     const u = new URLSearchParams(window.location.search).get("upgrade");
-    if (u === "success" || u === "cancelled") setBanner(u);
+    if (u === "success" || u === "cancelled") setBanner(u as "success" | "cancelled");
   }, []);
 
   useEffect(() => {
@@ -49,7 +46,9 @@ export default function BillingTab() {
       } = await supabase.auth.getUser();
 
       const [{ data: planRows }, subResult] = await Promise.all([
-        supabase.from("plans").select("id, tier, display_name, monthly_price_cents, stripe_product_id"),
+        supabase
+          .from("plans")
+          .select("id, tier, display_name, monthly_price_cents, stripe_product_id"),
         user
           ? supabase
               .from("subscribers")
@@ -67,7 +66,10 @@ export default function BillingTab() {
             .sort((a, b) => (TIER_ORDER[a.tier] ?? 99) - (TIER_ORDER[b.tier] ?? 99))
         );
       }
-      const sub = subResult.data as { subscription_status?: string; plan?: { tier?: string } } | null;
+      const sub = subResult.data as {
+        subscription_status?: string;
+        plan?: { tier?: string };
+      } | null;
       if (sub) {
         setCurrentTier(sub.plan?.tier ?? null);
         setStatus(sub.subscription_status ?? null);
@@ -89,7 +91,7 @@ export default function BillingTab() {
         body: JSON.stringify({ planId }),
       });
       const json = (await res.json()) as { url?: string; error?: string };
-      if (!res.ok || !json.url) throw new Error(json.error || "Could not start checkout");
+      if (!res.ok || !json.url) throw new Error(json.error ?? "Could not start checkout");
       window.location.href = json.url;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start checkout");
@@ -102,12 +104,12 @@ export default function BillingTab() {
   return (
     <section style={{ animation: "fadeUp 0.2s ease" }}>
       <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 16, fontWeight: 600, color: C.text, marginBottom: 4 }}>Billing &amp; Plan</div>
+        <div style={{ fontSize: 16, fontWeight: 600, color: C.text, marginBottom: 4 }}>
+          Subscription
+        </div>
         <div style={{ fontSize: 13, color: C.textDim, fontWeight: 500 }}>
           {currentTier
-            ? `You're on the ${currentTier.charAt(0).toUpperCase() + currentTier.slice(1)} plan${
-                status ? ` · ${status}` : ""
-              }.`
+            ? `You're on the ${currentTier.charAt(0).toUpperCase() + currentTier.slice(1)} plan${status ? ` · ${status}` : ""}.`
             : "Choose a plan to get started."}
         </div>
       </div>
