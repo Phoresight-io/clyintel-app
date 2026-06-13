@@ -123,7 +123,14 @@ export default async function PayPage({ params, searchParams }: PageProps) {
     if (!payout?.provider_account_id) return <DeadEnd reason="error" />;
 
     const revShareRate =
-      (sub.plan as { revenue_share_rate?: number } | null)?.revenue_share_rate ?? 0.18;
+      (sub.plan as { revenue_share_rate?: number } | null)?.revenue_share_rate ?? null;
+    if (revShareRate === null) {
+      console.error(
+        `pay/${token}: unresolvable revenue_share_rate — invoice_id=${link.invoice_id} subscriber_id=${link.subscriber_id}`
+      );
+      return <DeadEnd reason="error" />;
+    }
+
     const origin = getAppUrl();
 
     let sessionUrl: string;
@@ -233,7 +240,14 @@ export default async function PayPage({ params, searchParams }: PageProps) {
     if (!po?.provider_account_id) redirect(`/pay/${token}?error=1`);
 
     const rate =
-      (subData.plan as { revenue_share_rate?: number } | null)?.revenue_share_rate ?? 0.18;
+      (subData.plan as { revenue_share_rate?: number } | null)?.revenue_share_rate ?? null;
+    if (rate === null) {
+      console.error(
+        `pay/${token} verifyChallenge: unresolvable revenue_share_rate — invoice_id=${lnk.invoice_id} subscriber_id=${lnk.subscriber_id}`
+      );
+      redirect(`/pay/${token}?error=1`);
+    }
+
     const appUrl = getAppUrl();
 
     let sUrl: string;
