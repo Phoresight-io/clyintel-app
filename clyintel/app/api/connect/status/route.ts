@@ -26,9 +26,10 @@ export async function GET() {
 
   // Cookie-bound read — RLS scopes to the subscriber's own row.
   const { data: row, error: lookupError } = await authClient
-    .from("stripe_connect_accounts")
-    .select("stripe_account_id, charges_enabled, payouts_enabled, onboarding_status")
+    .from("payout_accounts")
+    .select("provider_account_id, charges_enabled, payouts_enabled, onboarding_status")
     .eq("subscriber_id", user.id)
+    .eq("provider", "stripe")
     .maybeSingle();
 
   if (lookupError) {
@@ -36,7 +37,7 @@ export async function GET() {
     return NextResponse.json({ error: "Could not load connect account" }, { status: 500 });
   }
 
-  if (!row || !row.stripe_account_id) {
+  if (!row || !row.provider_account_id) {
     return NextResponse.json({
       connected: false,
       charges_enabled: false,
@@ -47,7 +48,7 @@ export async function GET() {
 
   let account;
   try {
-    account = await retrieveAccount(row.stripe_account_id);
+    account = await retrieveAccount(row.provider_account_id);
   } catch (err) {
     console.error("connect/status: Stripe account retrieve failed", err);
     return NextResponse.json({ error: "Could not retrieve Stripe account" }, { status: 502 });
@@ -76,13 +77,14 @@ export async function GET() {
   if (changed) {
     const service = getSupabase();
     const { error: updateError } = await service
-      .from("stripe_connect_accounts")
+      .from("payout_accounts")
       .update({
         charges_enabled: chargesEnabled,
         payouts_enabled: payoutsEnabled,
         onboarding_status: onboardingStatus,
       })
-      .eq("subscriber_id", user.id);
+      .eq("subscriber_id", user.id)
+      .eq("provider", "stripe");
 
     if (updateError) {
       console.error("connect/status: failed to persist refreshed status", updateError);
@@ -93,8 +95,8 @@ export async function GET() {
         actor: "system",
         actor_detail: "connect-status-refresh",
         action: "update_connect_status",
-        entity_type: "stripe_connect_account",
-        entity_id: row.stripe_account_id,
+        entity_type: "payout_account",
+        entity_id: row.provider_account_id,
         payload: {
           from: {
             charges_enabled: row.charges_enabled,

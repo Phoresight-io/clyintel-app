@@ -35,9 +35,10 @@ async function startOnboarding(req: NextRequest): Promise<
 
   // Cookie-bound client: RLS scopes this read to the subscriber's own row.
   const { data: existing, error: lookupError } = await authClient
-    .from("stripe_connect_accounts")
-    .select("id, stripe_account_id, onboarding_status")
+    .from("payout_accounts")
+    .select("id, provider_account_id, onboarding_status")
     .eq("subscriber_id", user.id)
+    .eq("provider", "stripe")
     .maybeSingle();
 
   if (lookupError) {
@@ -46,10 +47,10 @@ async function startOnboarding(req: NextRequest): Promise<
   }
 
   const service = getSupabase();
-  let accountId = existing?.stripe_account_id ?? null;
+  let accountId = existing?.provider_account_id ?? null;
 
   // Create the Express account only when we don't already have one. If a row
-  // exists with a stripe_account_id but onboarding isn't complete, we skip
+  // exists with a provider_account_id but onboarding isn't complete, we skip
   // creation and go straight to a fresh Account Link.
   if (!accountId) {
     try {
@@ -64,15 +65,16 @@ async function startOnboarding(req: NextRequest): Promise<
     // account id if a bare row somehow already exists. Service-role client,
     // explicitly scoped to user.id.
     const { error: upsertError } = await service
-      .from("stripe_connect_accounts")
+      .from("payout_accounts")
       .upsert(
         {
           subscriber_id: user.id,
-          stripe_account_id: accountId,
+          provider: "stripe",
+          provider_account_id: accountId,
           account_type: "express",
           onboarding_status: "pending",
         },
-        { onConflict: "subscriber_id" }
+        { onConflict: "subscriber_id,provider" }
       );
 
     if (upsertError) {
@@ -87,9 +89,13 @@ async function startOnboarding(req: NextRequest): Promise<
       actor: "subscriber",
       actor_detail: user.email ?? null,
       action: "create_connect_account",
-      entity_type: "stripe_connect_account",
+      entity_type: "payout_account",
       entity_id: accountId,
-      payload: { stripe_account_id: accountId, account_type: "express" } as never,
+      payload: {
+        provider: "stripe",
+        provider_account_id: accountId,
+        account_type: "express",
+      } as never,
     });
   }
 

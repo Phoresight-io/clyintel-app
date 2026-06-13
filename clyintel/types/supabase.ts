@@ -858,7 +858,7 @@ export type Database = {
           },
         ]
       }
-      stripe_connect_accounts: {
+      payout_accounts: {
         Row: {
           account_type: string
           charges_enabled: boolean
@@ -866,7 +866,8 @@ export type Database = {
           id: string
           onboarding_status: string
           payouts_enabled: boolean
-          stripe_account_id: string | null
+          provider: string
+          provider_account_id: string | null
           subscriber_id: string
           updated_at: string
         }
@@ -877,7 +878,8 @@ export type Database = {
           id?: string
           onboarding_status?: string
           payouts_enabled?: boolean
-          stripe_account_id?: string | null
+          provider?: string
+          provider_account_id?: string | null
           subscriber_id: string
           updated_at?: string
         }
@@ -888,15 +890,16 @@ export type Database = {
           id?: string
           onboarding_status?: string
           payouts_enabled?: boolean
-          stripe_account_id?: string | null
+          provider?: string
+          provider_account_id?: string | null
           subscriber_id?: string
           updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "stripe_connect_accounts_subscriber_id_fkey"
+            foreignKeyName: "payout_accounts_subscriber_id_fkey"
             columns: ["subscriber_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "subscribers"
             referencedColumns: ["id"]
           },

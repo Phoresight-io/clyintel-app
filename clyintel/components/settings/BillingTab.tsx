@@ -2,6 +2,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { C } from "@/lib/theme";
 import { createSupabaseBrowser } from "@/lib/supabase-browser";
+import { getProvider } from "@/lib/providers";
 
 interface PlanRow {
   id: string;
@@ -20,9 +21,10 @@ const CHECKOUT_TIERS = new Set(["starter", "plus", "pro"]);
 // tier later, add it back to this set.
 const BETA_VISIBLE_TIERS = new Set(["free", "starter", "plus"]);
 
-// Stripe processing fees are a fixed Stripe schedule, surfaced in the disclosure
-// alongside the plan-derived Clyintel rev-share rate (PRD v2.2 §8).
-const STRIPE_FEE_LABEL = "2.9% + $0.30";
+// The active payout rail at beta. UI copy, fee disclosure, and onboarding/status
+// entry points come from the provider registry rather than inline Stripe literals
+// (PRD v2.2 §8), so a second rail (PayPal) can drop in without touching this view.
+const STRIPE = getProvider("stripe");
 
 type OnboardingStatus = "not_started" | "pending" | "complete" | "restricted";
 
@@ -113,7 +115,7 @@ export default function BillingTab() {
     let active = true;
     (async () => {
       try {
-        const res = await fetch("/api/connect/status", { cache: "no-store" });
+        const res = await fetch(STRIPE.routes.status, { cache: "no-store" });
         const json = (await res.json()) as ConnectStatus;
         if (active && res.ok) setConnect(json);
       } catch {
@@ -131,7 +133,7 @@ export default function BillingTab() {
     setError("");
     setConnecting(true);
     try {
-      const res = await fetch("/api/connect/onboard", { method: "POST" });
+      const res = await fetch(STRIPE.routes.onboard, { method: "POST" });
       const json = (await res.json()) as { url?: string; error?: string };
       if (!res.ok || !json.url) throw new Error(json.error || "Could not start onboarding");
       window.location.href = json.url;
@@ -331,9 +333,7 @@ interface ConnectCardProps {
 
 function ConnectCard({ connectLoading, connect, connecting, revShareRate, onConnect }: ConnectCardProps) {
   const ratePct = formatRate(revShareRate);
-  const disclosure = ratePct
-    ? `Clyintel charges ${ratePct}% per recovered payment, plus Stripe processing fees (${STRIPE_FEE_LABEL}).`
-    : `Clyintel charges a revenue-share fee per recovered payment, plus Stripe processing fees (${STRIPE_FEE_LABEL}).`;
+  const disclosure = STRIPE.feeDisclosure(ratePct);
 
   const cta = (label: string, primary: boolean) => (
     <button
@@ -400,7 +400,7 @@ function ConnectCard({ connectLoading, connect, connecting, revShareRate, onConn
       <>
         {note("Action needed — Stripe has restricted this account", "bad")}
         <div style={{ fontSize: 13, color: C.textMid, fontWeight: 500 }}>{disclosure}</div>
-        {cta("Continue setup", true)}
+        {cta(STRIPE.copy.continueCta, true)}
       </>
     );
   } else if (onboardingStatus === "pending") {
@@ -408,14 +408,14 @@ function ConnectCard({ connectLoading, connect, connecting, revShareRate, onConn
       <>
         {note("Setup incomplete", "warn")}
         <div style={{ fontSize: 13, color: C.textMid, fontWeight: 500 }}>{disclosure}</div>
-        {cta("Finish setup", true)}
+        {cta(STRIPE.copy.finishCta, true)}
       </>
     );
   } else {
     body = (
       <>
         <div style={{ fontSize: 13, color: C.textMid, fontWeight: 500 }}>{disclosure}</div>
-        {cta("Connect Stripe to enable Revenue Recovery", true)}
+        {cta(STRIPE.copy.connectCta, true)}
       </>
     );
   }
@@ -435,10 +435,10 @@ function ConnectCard({ connectLoading, connect, connecting, revShareRate, onConn
     >
       <div>
         <div style={{ fontSize: 15, fontWeight: 600, color: C.text, marginBottom: 3 }}>
-          Revenue Recovery
+          {STRIPE.copy.cardTitle}
         </div>
         <div style={{ fontSize: 13, color: C.textDim, fontWeight: 500 }}>
-          Connect Stripe so Clyintel can recover overdue payments on your behalf.
+          {STRIPE.copy.cardSubtitle}
         </div>
       </div>
       {body}
