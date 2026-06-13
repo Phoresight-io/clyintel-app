@@ -17,11 +17,12 @@ export const stripeProvider: PaymentProvider = {
     status: "/api/connect/status",
   },
   copy: {
-    cardTitle: "Revenue Recovery",
-    cardSubtitle: "Connect Stripe so Clyintel can recover overdue payments on your behalf.",
-    connectCta: "Connect Stripe to enable Revenue Recovery",
-    finishCta: "Finish setup",
-    continueCta: "Continue setup",
+    cardTitle: "Stripe Express",
+    cardSubtitle: "Powered by Stripe — collect on overdue invoices via payment links.",
+    connectCta: "Connect Stripe",
+    finishCta: "Finish Setup",
+    continueCta: "Resolve with Stripe",
+    reconnectCta: "Reconnect Stripe",
   },
   // Stripe account ids (acct_…) are shown as-is.
   formatAccountId: (accountId) => accountId,

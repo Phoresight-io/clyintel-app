@@ -31,6 +31,7 @@ export interface PaymentProvider {
     connectCta: string;
     finishCta: string;
     continueCta: string;
+    reconnectCta: string;
   };
   /** Format a provider account id for display (e.g. mask/abbreviate). */
   formatAccountId: (accountId: string) => string;

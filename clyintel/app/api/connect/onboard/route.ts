@@ -49,6 +49,17 @@ async function startOnboarding(req: NextRequest): Promise<
   const service = getSupabase();
   let accountId = existing?.provider_account_id ?? null;
 
+  // On reconnect from disconnected state, reset status to pending so the UI
+  // shows "Finish Setup" while the user completes the Stripe flow. We do NOT
+  // clear last_link_disposition here — it drives the reconnect warning on return.
+  if (existing?.onboarding_status === "disconnected") {
+    await service
+      .from("payout_accounts")
+      .update({ onboarding_status: "pending" })
+      .eq("subscriber_id", user.id)
+      .eq("provider", "stripe");
+  }
+
   // Create the Express account only when we don't already have one. If a row
   // exists with a provider_account_id but onboarding isn't complete, we skip
   // creation and go straight to a fresh Account Link.
@@ -106,7 +117,7 @@ async function startOnboarding(req: NextRequest): Promise<
   try {
     const url = await createAccountOnboardingLink({
       accountId,
-      returnUrl: `${origin}/settings?tab=billing&connect=complete`,
+      returnUrl: `${origin}/settings?tab=integrations&connect=complete`,
       refreshUrl: `${origin}/api/connect/onboard`,
     });
     return { ok: true, url };

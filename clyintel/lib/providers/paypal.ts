@@ -23,6 +23,7 @@ export const paypalProvider: PaymentProvider = {
     connectCta: "Coming soon",
     finishCta: "Coming soon",
     continueCta: "Coming soon",
+    reconnectCta: "Coming soon",
   },
   formatAccountId: (accountId) => accountId,
   feeDisclosure: () => "PayPal revenue recovery is coming soon.",

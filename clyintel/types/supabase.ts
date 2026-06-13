@@ -864,6 +864,7 @@ export type Database = {
           charges_enabled: boolean
           created_at: string
           id: string
+          last_link_disposition: string | null
           onboarding_status: string
           payouts_enabled: boolean
           provider: string
@@ -876,6 +877,7 @@ export type Database = {
           charges_enabled?: boolean
           created_at?: string
           id?: string
+          last_link_disposition?: string | null
           onboarding_status?: string
           payouts_enabled?: boolean
           provider?: string
@@ -888,6 +890,7 @@ export type Database = {
           charges_enabled?: boolean
           created_at?: string
           id?: string
+          last_link_disposition?: string | null
           onboarding_status?: string
           payouts_enabled?: boolean
           provider?: string

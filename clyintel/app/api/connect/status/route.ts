@@ -6,12 +6,16 @@ import { retrieveAccount } from "@/lib/stripe";
 // Source-of-truth refresh for a subscriber's Stripe Connect (Express) state.
 // Never trust the onboarding return_url redirect alone: this re-reads the live
 // account from Stripe, persists the derived status, and returns it. Called by the
-// Billing UI on mount and after the ?connect=complete return.
+// Integrations UI on mount and after the ?connect=complete return.
+//
+// Disconnected accounts skip the Stripe API call — status is already authoritative
+// from the disconnect action and there is no active account to query.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type OnboardingStatus = "not_started" | "pending" | "complete" | "restricted";
+type OnboardingStatus = "not_started" | "pending" | "complete" | "restricted" | "disconnected";
+type LinkDisposition = "void" | "keep";
 
 export async function GET() {
   const authClient = await createSupabaseServer();
@@ -27,7 +31,7 @@ export async function GET() {
   // Cookie-bound read — RLS scopes to the subscriber's own row.
   const { data: row, error: lookupError } = await authClient
     .from("payout_accounts")
-    .select("provider_account_id, charges_enabled, payouts_enabled, onboarding_status")
+    .select("provider_account_id, charges_enabled, payouts_enabled, onboarding_status, last_link_disposition")
     .eq("subscriber_id", user.id)
     .eq("provider", "stripe")
     .maybeSingle();
@@ -43,6 +47,20 @@ export async function GET() {
       charges_enabled: false,
       payouts_enabled: false,
       onboarding_status: "not_started" as OnboardingStatus,
+      last_link_disposition: null,
+    });
+  }
+
+  // Disconnected accounts are authoritative from the disconnect action — don't
+  // call Stripe (the account may still be active there; the subscriber chose to
+  // detach it from ClyIntel).
+  if (row.onboarding_status === "disconnected") {
+    return NextResponse.json({
+      connected: false,
+      charges_enabled: false,
+      payouts_enabled: false,
+      onboarding_status: "disconnected" as OnboardingStatus,
+      last_link_disposition: (row.last_link_disposition as LinkDisposition | null) ?? null,
     });
   }
 
@@ -114,9 +132,10 @@ export async function GET() {
   }
 
   return NextResponse.json({
-    connected: true,
+    connected: chargesEnabled && payoutsEnabled,
     charges_enabled: chargesEnabled,
     payouts_enabled: payoutsEnabled,
     onboarding_status: onboardingStatus,
+    last_link_disposition: (row.last_link_disposition as LinkDisposition | null) ?? null,
   });
 }
