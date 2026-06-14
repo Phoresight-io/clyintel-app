@@ -284,17 +284,68 @@ export default async function PayPage({ params, searchParams }: PageProps) {
 
 // ── UI components ────────────────────────────────────────────────────────────
 
+// Minimal branded header — no nav links, no avatar, no routes into the app.
+// The audience is an unauthenticated stranger (the subscriber's client).
+function PayBrand() {
+  return (
+    <header
+      style={{
+        height: 56,
+        borderBottom: "1px solid #e2e8f0",
+        background: "#ffffff",
+        display: "flex",
+        alignItems: "center",
+        padding: "0 24px",
+        gap: 12,
+      }}
+    >
+      <img
+        src="https://raw.githubusercontent.com/Phoresight-io/Brand-Kit/main/FullLogo_Transparent_NoBuffer.jpg"
+        alt="Phoresight"
+        style={{ height: 28, objectFit: "contain" }}
+      />
+      <div style={{ width: 1, height: 18, background: "#e2e8f0" }} />
+      <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a", letterSpacing: "-0.3px" }}>
+        Clyintel
+      </span>
+      <div style={{ flex: 1 }} />
+      <span style={{ fontSize: 12, fontWeight: 500, color: "#64748b" }}>
+        🔒 Secure payment
+      </span>
+    </header>
+  );
+}
+
+// Outer shell for all /pay/* states: branded header + vertically centred content.
+function PayLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        fontFamily: "system-ui, -apple-system, sans-serif",
+        background: "#f8fafb",
+      }}
+    >
+      <PayBrand />
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "32px 24px",
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 const styles = {
-  page: {
-    display: "flex",
-    flexDirection: "column" as const,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "100vh",
-    fontFamily: "system-ui, -apple-system, sans-serif",
-    background: "#f8fafb",
-    padding: "24px",
-  },
   card: {
     maxWidth: 440,
     width: "100%",
@@ -376,18 +427,18 @@ function DeadEnd({ reason }: { reason: "invalid" | "expired" | "error" }) {
   };
   const { title, body } = messages[reason];
   return (
-    <main style={styles.page}>
+    <PayLayout>
       <div style={styles.card}>
         <h1 style={styles.h1}>{title}</h1>
         <p style={styles.body}>{body}</p>
       </div>
-    </main>
+    </PayLayout>
   );
 }
 
 function AlreadyPaid() {
   return (
-    <main style={styles.page}>
+    <PayLayout>
       <div style={styles.card}>
         <h1 style={styles.h1}>Already paid</h1>
         <p style={styles.body}>
@@ -395,7 +446,7 @@ function AlreadyPaid() {
           this page.
         </p>
       </div>
-    </main>
+    </PayLayout>
   );
 }
 
@@ -413,7 +464,7 @@ function ChallengeForm({
   canceled: boolean;
 }) {
   return (
-    <main style={styles.page}>
+    <PayLayout>
       <div style={styles.card}>
         <h1 style={styles.h1}>Verify your identity</h1>
         <p style={styles.body}>
@@ -480,6 +531,6 @@ function ChallengeForm({
           </button>
         </form>
       </div>
-    </main>
+    </PayLayout>
   );
 }

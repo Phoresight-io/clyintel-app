@@ -45,8 +45,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Auth routes render without shell chrome
-  if (pathname === '/login' || pathname.startsWith('/auth/')) {
+  // Auth and public pay routes render without shell chrome
+  if (pathname === '/login' || pathname.startsWith('/auth/') || pathname.startsWith('/pay/')) {
     return <>{children}</>;
   }
 
