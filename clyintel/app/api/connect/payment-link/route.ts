@@ -112,9 +112,8 @@ export async function POST(req: NextRequest) {
       invoice_id: invoiceId,
       subscriber_id: user.id,
       provider: "stripe",
-      link_type: "stripe_checkout",
+      link_type: "standard",   // full-balance live-resolve link; 'settlement' reserved for negotiated payoffs
       link_status: "active",
-      settlement_amount_cents: balanceCents,   // informational snapshot
       link_expires_at: expiresAt,
     })
     .select("id")
