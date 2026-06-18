@@ -810,9 +810,11 @@ export type Database = {
           link_status: string
           link_type: string
           payment_link_url: string | null
+          provider: string
           settlement_amount_cents: number | null
           stripe_checkout_session_id: string | null
           subscriber_id: string
+          token: string
           updated_at: string
         }
         Insert: {
@@ -823,9 +825,11 @@ export type Database = {
           link_status?: string
           link_type: string
           payment_link_url?: string | null
+          provider?: string
           settlement_amount_cents?: number | null
           stripe_checkout_session_id?: string | null
           subscriber_id: string
+          token: string
           updated_at?: string
         }
         Update: {
@@ -836,9 +840,11 @@ export type Database = {
           link_status?: string
           link_type?: string
           payment_link_url?: string | null
+          provider?: string
           settlement_amount_cents?: number | null
           stripe_checkout_session_id?: string | null
           subscriber_id?: string
+          token?: string
           updated_at?: string
         }
         Relationships: [
@@ -923,6 +929,8 @@ export type Database = {
           flag_predictive_insights: boolean
           flag_white_label: boolean
           id: string
+          pay_gate_require_invoice_number: boolean
+          pay_gate_require_zip: boolean
           phone: string | null
           plan_id: string
           qbo_access_token: string | null
@@ -951,6 +959,8 @@ export type Database = {
           flag_predictive_insights?: boolean
           flag_white_label?: boolean
           id?: string
+          pay_gate_require_invoice_number?: boolean
+          pay_gate_require_zip?: boolean
           phone?: string | null
           plan_id: string
           qbo_access_token?: string | null
@@ -979,6 +989,8 @@ export type Database = {
           flag_predictive_insights?: boolean
           flag_white_label?: boolean
           id?: string
+          pay_gate_require_invoice_number?: boolean
+          pay_gate_require_zip?: boolean
           phone?: string | null
           plan_id?: string
           qbo_access_token?: string | null
