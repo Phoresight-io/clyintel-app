@@ -89,16 +89,19 @@ export async function POST(req: NextRequest) {
   const token = randomBytes(32).toString("base64url");
   const service = getSupabase();
 
-  // Void existing active links for this invoice (idempotent — may void none).
+  // Supersede existing active links for this invoice (idempotent — may touch none).
+  // 'expired' is the table's terminal-unpaid state; the CHECK constraint allows
+  // only ('active','expired','paid'), so we must NOT write 'void'/'voided'.
+  // WHERE targets only this invoice's still-active rows — 'paid' rows are untouched.
   const { error: voidErr } = await service
     .from("recovery_links")
-    .update({ link_status: "void", updated_at: new Date().toISOString() })
+    .update({ link_status: "expired", updated_at: new Date().toISOString() })
     .eq("invoice_id", invoiceId)
     .eq("subscriber_id", user.id)
     .eq("link_status", "active");
 
   if (voidErr) {
-    console.error("payment-link: failed to void existing active links", voidErr);
+    console.error("payment-link: failed to supersede existing active links", voidErr);
     return NextResponse.json({ error: "Could not void existing link" }, { status: 500 });
   }
 
