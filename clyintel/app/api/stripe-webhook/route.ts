@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import crypto from "crypto";
 import { getSupabase } from "@/lib/supabase";
+import { sendEmail } from "@/lib/email";
+
+// Free plan: the canonical downgrade target on cancellation. Only the id is
+// hardcoded — the plan's entitlements are read at runtime so this never drifts
+// from the plans row.
+const FREE_PLAN_ID = "db2ec96b-8fa2-4784-8f84-c6fc178641ee";
 
 // Stripe webhook → Supabase subscriber sync.
 //
@@ -126,6 +132,166 @@ async function updateSubscriberStatus(
   });
 }
 
+// Reconcile a canceled subscription: downgrade the subscriber to Free and send
+// a cancellation email. Idempotent and signature-verified (caller verifies the
+// signature). On an unresolvable subscriber we FAIL LOUD via the error log but
+// still return normally so Stripe doesn't retry forever (caller returns 200).
+async function handleSubscriptionDeleted(
+  subscription: Record<string, unknown>,
+  eventId: string
+) {
+  const supabase = getSupabase();
+
+  const metadata = (subscription["metadata"] as Record<string, unknown> | undefined) ?? {};
+  const metaSubscriberId =
+    typeof metadata["subscriber_id"] === "string" ? (metadata["subscriber_id"] as string) : null;
+  const subscriptionId =
+    typeof subscription["id"] === "string" ? (subscription["id"] as string) : null;
+  const customerId =
+    typeof subscription["customer"] === "string" ? (subscription["customer"] as string) : null;
+
+  // ── Resolve subscriber: metadata.subscriber_id > stripe_subscription_id > stripe_customer_id.
+  let subscriberId: string | null = null;
+  let resolvedVia: string | null = null;
+
+  if (metaSubscriberId) {
+    const { data } = await supabase
+      .from("subscribers")
+      .select("id")
+      .eq("id", metaSubscriberId)
+      .maybeSingle();
+    if (data) {
+      subscriberId = data.id;
+      resolvedVia = "metadata";
+    }
+  }
+  if (!subscriberId && subscriptionId) {
+    const { data } = await supabase
+      .from("subscribers")
+      .select("id")
+      .eq("stripe_subscription_id", subscriptionId)
+      .maybeSingle();
+    if (data) {
+      subscriberId = data.id;
+      resolvedVia = "subscription_id";
+    }
+  }
+  if (!subscriberId && customerId) {
+    const { data } = await supabase
+      .from("subscribers")
+      .select("id")
+      .eq("stripe_customer_id", customerId)
+      .maybeSingle();
+    if (data) {
+      subscriberId = data.id;
+      resolvedVia = "customer_id";
+    }
+  }
+
+  if (!subscriberId) {
+    // Fail loud, but don't 500 — Stripe would retry indefinitely. Logged as an
+    // error for manual follow-up; never guessed or silently skipped.
+    console.error(
+      "stripe-webhook: UNRESOLVED subscriber for customer.subscription.deleted " +
+        `(event=${eventId} customer=${customerId} subscription=${subscriptionId} ` +
+        `metadata.subscriber_id=${metaSubscriberId})`
+    );
+    return;
+  }
+
+  // ── Idempotency: if this exact event was already reconciled for this
+  // subscriber, stop. The downgrade itself is naturally idempotent (same
+  // canonical end state), but the cancellation email is NOT — this guard keeps
+  // Stripe duplicate deliveries from sending a second email.
+  const { data: priorRows } = await supabase
+    .from("audit_log")
+    .select("payload")
+    .eq("subscriber_id", subscriberId)
+    .eq("action", "subscription_canceled");
+
+  const alreadyProcessed = (priorRows ?? []).some(
+    (row) => (row.payload as { stripe_event_id?: string } | null)?.stripe_event_id === eventId
+  );
+  if (alreadyProcessed) {
+    console.log(`stripe-webhook: event ${eventId} already reconciled for ${subscriberId}, skipping`);
+    return;
+  }
+
+  // ── Read Free plan entitlements at runtime (don't hardcode the flags inline).
+  const { data: freePlan, error: planError } = await supabase
+    .from("plans")
+    .select(
+      "predictive_insights, multi_channel_recovery, api_access, white_label_reports, advanced_negotiation"
+    )
+    .eq("id", FREE_PLAN_ID)
+    .maybeSingle();
+
+  if (planError || !freePlan) {
+    console.error(`stripe-webhook: Free plan ${FREE_PLAN_ID} not found`, planError);
+    return;
+  }
+
+  // Field-name remap: plans.<entitlement> -> subscribers.flag_<entitlement>.
+  // Limits (monthly_*_limit) stay sourced from plans; usage counters
+  // (*_used_this_month) are intentionally NOT reset on cancel.
+  const { error: updateError } = await supabase
+    .from("subscribers")
+    .update({
+      subscription_status: "canceled",
+      plan_id: FREE_PLAN_ID,
+      flag_predictive_insights: freePlan.predictive_insights,
+      flag_multi_channel: freePlan.multi_channel_recovery,
+      flag_api_access: freePlan.api_access,
+      flag_white_label: freePlan.white_label_reports,
+      flag_advanced_negotiation: freePlan.advanced_negotiation,
+      stripe_subscription_id: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", subscriberId);
+
+  if (updateError) {
+    console.error("stripe-webhook: subscriber downgrade failed", updateError);
+    return;
+  }
+
+  // Audit BEFORE sending the email so the idempotency guard is armed even if the
+  // email path throws — we never re-run the downgrade-and-email for this event.
+  await writeAudit(subscriberId, "subscription_canceled", subscriberId, {
+    stripe_event_id: eventId,
+    stripe_customer_id: customerId,
+    stripe_subscription_id: subscriptionId,
+    downgraded_to_plan: FREE_PLAN_ID,
+    resolved_via: resolvedVia,
+  });
+
+  // ── Cancellation email. Failure must NOT fail the webhook — log separately.
+  const { data: sub } = await supabase
+    .from("subscribers")
+    .select("email, business_name")
+    .eq("id", subscriberId)
+    .maybeSingle();
+
+  if (sub?.email) {
+    try {
+      await sendEmail({
+        to: sub.email,
+        toName: sub.business_name ?? undefined,
+        subject: "Your Clyintel subscription has been canceled",
+        text:
+          `Hi${sub.business_name ? ` ${sub.business_name}` : ""},\n\n` +
+          "Your Clyintel subscription has been canceled and your account has been moved to the Free plan. " +
+          "You'll keep access to Free plan features at no charge.\n\n" +
+          "If this was a mistake or you'd like to resubscribe, you can upgrade again anytime from your account settings.\n\n" +
+          "Thanks,\nThe Clyintel Team",
+      });
+    } catch (err) {
+      console.error(`stripe-webhook: cancellation email failed for ${subscriberId}`, err);
+    }
+  } else {
+    console.error(`stripe-webhook: no email on subscriber ${subscriberId}; cancellation email skipped`);
+  }
+}
+
 async function processEvent(event: StripeEvent) {
   const object = event.data.object;
 
@@ -139,10 +305,7 @@ async function processEvent(event: StripeEvent) {
       break;
     }
     case "customer.subscription.deleted": {
-      const customerId = object["customer"] as string;
-      if (customerId) {
-        await updateSubscriberStatus(customerId, "canceled", null, event.type, event.id);
-      }
+      await handleSubscriptionDeleted(object, event.id);
       break;
     }
     case "invoice.payment_succeeded": {
