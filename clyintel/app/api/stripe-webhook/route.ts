@@ -448,6 +448,146 @@ async function handlePaymentSucceeded(
   });
 }
 
+// Format integer cents as a USD dollar string (e.g. 128000 -> "$1,280.00").
+function formatDollars(cents: number): string {
+  return `$${(cents / 100).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+// Reconcile a refunded charge: mark the payments ledger row refunded (full or
+// partial) and email the subscriber. Idempotent and signature-verified (caller
+// verifies). Unresolvable payments row → fail loud via log, return normally so
+// Stripe doesn't retry forever (caller returns 200).
+async function handleChargeRefunded(charge: Record<string, unknown>, eventId: string) {
+  const supabase = getSupabase();
+
+  const chargeId = typeof charge["id"] === "string" ? (charge["id"] as string) : null;
+  const paymentIntent =
+    typeof charge["payment_intent"] === "string" ? (charge["payment_intent"] as string) : null;
+  const amountRefunded =
+    typeof charge["amount_refunded"] === "number" ? (charge["amount_refunded"] as number) : null;
+  const pmDetails = charge["payment_method_details"] as { card?: { last4?: unknown } } | undefined;
+  const last4 = typeof pmDetails?.card?.last4 === "string" ? (pmDetails.card.last4 as string) : null;
+
+  // ── Resolve the payments row: stripe_payment_intent FIRST (the backfill row
+  // has stripe_charge_id NULL), then fall back to stripe_charge_id.
+  let payment: { id: string; subscriber_id: string } | null = null;
+
+  if (paymentIntent) {
+    const { data } = await supabase
+      .from("payments")
+      .select("id, subscriber_id")
+      .eq("stripe_payment_intent", paymentIntent)
+      .maybeSingle();
+    if (data) payment = data;
+  }
+  if (!payment && chargeId) {
+    const { data } = await supabase
+      .from("payments")
+      .select("id, subscriber_id")
+      .eq("stripe_charge_id", chargeId)
+      .maybeSingle();
+    if (data) payment = data;
+  }
+
+  if (!payment) {
+    // Fail loud, but don't 500 — Stripe would retry indefinitely. Never guessed.
+    console.error(
+      "stripe-webhook: UNRESOLVED payments row for charge.refunded " +
+        `(event=${eventId} payment_intent=${paymentIntent} charge=${chargeId})`
+    );
+    return;
+  }
+
+  if (amountRefunded === null) {
+    console.error(
+      `stripe-webhook: charge.refunded missing amount_refunded (event=${eventId} payment=${payment.id})`
+    );
+    return;
+  }
+
+  // ── Idempotency: skip if this exact refund event was already processed for
+  // this subscriber. A partial-then-full refund yields two DISTINCT events on
+  // the same row (both must update); the event-id guard only blocks re-processing
+  // the SAME event, so we don't rely on a payments-row uniqueness here.
+  const { data: priorRows } = await supabase
+    .from("audit_log")
+    .select("payload")
+    .eq("subscriber_id", payment.subscriber_id)
+    .eq("action", "refund_processed");
+
+  const alreadyProcessed = (priorRows ?? []).some(
+    (row) => (row.payload as { stripe_event_id?: string } | null)?.stripe_event_id === eventId
+  );
+  if (alreadyProcessed) {
+    console.log(`stripe-webhook: refund event ${eventId} already processed for ${payment.subscriber_id}, skipping`);
+    return;
+  }
+
+  // ── Update the ledger row. A partial refund still sets status='refunded'
+  // (there is no partial enum) — refunded_amount_cents vs amount_cents carries
+  // the full-vs-partial distinction (derived later). Opportunistically backfill
+  // stripe_charge_id when the row was created without it.
+  const { error: updateError } = await supabase
+    .from("payments")
+    .update({
+      status: "refunded",
+      refunded_amount_cents: amountRefunded,
+      stripe_charge_id: chargeId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", payment.id);
+
+  if (updateError) {
+    console.error(
+      `stripe-webhook: payments refund update failed for ${payment.id} (event=${eventId})`,
+      updateError
+    );
+    return;
+  }
+
+  // Audit BEFORE email so the idempotency guard is armed even if email throws.
+  await writeAudit(payment.subscriber_id, "refund_processed", payment.id, {
+    stripe_event_id: eventId,
+    subscriber_id: payment.subscriber_id,
+    payments_id: payment.id,
+    amount_refunded: amountRefunded,
+    stripe_payment_intent: paymentIntent,
+  });
+
+  // ── Refund email. Failure must NOT fail the webhook — log separately. Amount
+  // comes from amount_refunded so the copy reads correctly for full or partial
+  // with no branching; the card clause degrades gracefully if last4 is absent.
+  const { data: sub } = await supabase
+    .from("subscribers")
+    .select("email, contact_name")
+    .eq("id", payment.subscriber_id)
+    .maybeSingle();
+
+  if (sub?.email) {
+    const greeting = sub.contact_name ? ` ${sub.contact_name}` : "";
+    const cardClause = last4 ? ` to your card ending ${last4}` : "";
+    try {
+      await sendEmail({
+        to: sub.email,
+        toName: sub.contact_name ?? undefined,
+        subject: "Your Clyintel refund has been processed",
+        text:
+          `Hi${greeting},\n\n` +
+          `We've refunded ${formatDollars(amountRefunded)}${cardClause}. ` +
+          "You should see the amount returned to your original payment method within 5–10 business days.\n\n" +
+          "Thanks,\nThe Clyintel Team",
+      });
+    } catch (err) {
+      console.error(`stripe-webhook: refund email failed for ${payment.subscriber_id}`, err);
+    }
+  } else {
+    console.error(`stripe-webhook: no email on subscriber ${payment.subscriber_id}; refund email skipped`);
+  }
+}
+
 async function processEvent(event: StripeEvent) {
   const object = event.data.object;
 
@@ -476,6 +616,10 @@ async function processEvent(event: StripeEvent) {
       if (customerId) {
         await updateSubscriberStatus(customerId, "past_due", null, event.type, event.id);
       }
+      break;
+    }
+    case "charge.refunded": {
+      await handleChargeRefunded(object, event.id);
       break;
     }
     default:
