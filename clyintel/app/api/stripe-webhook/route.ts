@@ -394,36 +394,15 @@ async function handlePaymentSucceeded(
     return;
   }
 
-  // ── Idempotency: skip if this exact event was already captured for this
-  // subscriber. Inserting a payments row is NOT idempotent, so guard before it.
-  const { data: priorRows } = await supabase
-    .from("audit_log")
-    .select("payload")
-    .eq("subscriber_id", subscriberId)
-    .eq("action", "payment_recorded");
-
-  const alreadyProcessed = (priorRows ?? []).some(
-    (row) => (row.payload as { stripe_event_id?: string } | null)?.stripe_event_id === eventId
-  );
-  if (alreadyProcessed) {
-    console.log(`stripe-webhook: payment event ${eventId} already recorded for ${subscriberId}, skipping`);
-    return;
-  }
-
   const paidAt = eventCreated
     ? new Date(eventCreated * 1000).toISOString()
     : new Date().toISOString();
 
-  // Audit BEFORE the insert side effect, arming the idempotency guard so a
-  // duplicate delivery can never write a second payments row.
-  await writeAudit(subscriberId, "payment_recorded", subscriberId, {
-    stripe_event_id: eventId,
-    subscriber_id: subscriberId,
-    amount_cents: amountPaid,
-    stripe_payment_intent: paymentIntent,
-    resolved_via: resolvedVia,
-  });
-
+  // ── Insert FIRST; idempotency is DB-enforced by the UNIQUE constraint on
+  // payments.stripe_event_id. A duplicate Stripe delivery hits 23505 and is
+  // treated as already-processed. This avoids any premature-marker failure
+  // mode: a failed insert records nothing, so Stripe's retry re-attempts
+  // cleanly instead of being blocked.
   const { error: insertError } = await supabase.from("payments").insert({
     subscriber_id: subscriberId,
     client_id: null,
@@ -440,13 +419,33 @@ async function handlePaymentSucceeded(
   });
 
   if (insertError) {
-    // The idempotency audit is already written; surface loudly for manual
-    // reconciliation rather than risk a duplicate on Stripe re-delivery.
+    // 23505 = unique_violation. The stripe_event_id (or its payment_intent)
+    // is already captured → duplicate delivery. Swallow and return cleanly.
+    if (insertError.code === "23505") {
+      console.log(
+        `stripe-webhook: duplicate event, skipping (event=${eventId} subscriber=${subscriberId} constraint=${insertError.message})`
+      );
+      return;
+    }
+    // Any other failure: log loudly and return. Nothing was recorded, so
+    // Stripe's retry will re-attempt the capture.
     console.error(
       `stripe-webhook: payments insert failed for ${subscriberId} (event=${eventId})`,
       insertError
     );
+    return;
   }
+
+  // Audit AFTER a successful insert. No longer the idempotency guard (the DB
+  // is). If this write fails, the payment is already captured — log loudly,
+  // never roll back the captured row.
+  await writeAudit(subscriberId, "payment_recorded", subscriberId, {
+    stripe_event_id: eventId,
+    subscriber_id: subscriberId,
+    amount_cents: amountPaid,
+    stripe_payment_intent: paymentIntent,
+    resolved_via: resolvedVia,
+  });
 }
 
 async function processEvent(event: StripeEvent) {
