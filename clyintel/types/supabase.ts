@@ -512,6 +512,7 @@ export type Database = {
           meta: Json | null
           paid_at: string | null
           payment_method: string | null
+          refunded_amount_cents: number | null
           status: Database["public"]["Enums"]["payment_status"]
           stripe_charge_id: string | null
           stripe_event_id: string | null
@@ -529,6 +530,7 @@ export type Database = {
           meta?: Json | null
           paid_at?: string | null
           payment_method?: string | null
+          refunded_amount_cents?: number | null
           status?: Database["public"]["Enums"]["payment_status"]
           stripe_charge_id?: string | null
           stripe_event_id?: string | null
@@ -546,6 +548,7 @@ export type Database = {
           meta?: Json | null
           paid_at?: string | null
           payment_method?: string | null
+          refunded_amount_cents?: number | null
           status?: Database["public"]["Enums"]["payment_status"]
           stripe_charge_id?: string | null
           stripe_event_id?: string | null
@@ -564,6 +567,56 @@ export type Database = {
           },
           {
             foreignKeyName: "payments_subscriber_id_fkey"
+            columns: ["subscriber_id"]
+            isOneToOne: false
+            referencedRelation: "subscribers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payout_accounts: {
+        Row: {
+          account_type: string
+          charges_enabled: boolean
+          created_at: string
+          id: string
+          last_link_disposition: string | null
+          onboarding_status: string
+          payouts_enabled: boolean
+          provider: string
+          provider_account_id: string | null
+          subscriber_id: string
+          updated_at: string
+        }
+        Insert: {
+          account_type?: string
+          charges_enabled?: boolean
+          created_at?: string
+          id?: string
+          last_link_disposition?: string | null
+          onboarding_status?: string
+          payouts_enabled?: boolean
+          provider?: string
+          provider_account_id?: string | null
+          subscriber_id: string
+          updated_at?: string
+        }
+        Update: {
+          account_type?: string
+          charges_enabled?: boolean
+          created_at?: string
+          id?: string
+          last_link_disposition?: string | null
+          onboarding_status?: string
+          payouts_enabled?: boolean
+          provider?: string
+          provider_account_id?: string | null
+          subscriber_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payout_accounts_subscriber_id_fkey"
             columns: ["subscriber_id"]
             isOneToOne: false
             referencedRelation: "subscribers"
@@ -857,56 +910,6 @@ export type Database = {
           },
           {
             foreignKeyName: "recovery_links_subscriber_id_fkey"
-            columns: ["subscriber_id"]
-            isOneToOne: false
-            referencedRelation: "subscribers"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      payout_accounts: {
-        Row: {
-          account_type: string
-          charges_enabled: boolean
-          created_at: string
-          id: string
-          last_link_disposition: string | null
-          onboarding_status: string
-          payouts_enabled: boolean
-          provider: string
-          provider_account_id: string | null
-          subscriber_id: string
-          updated_at: string
-        }
-        Insert: {
-          account_type?: string
-          charges_enabled?: boolean
-          created_at?: string
-          id?: string
-          last_link_disposition?: string | null
-          onboarding_status?: string
-          payouts_enabled?: boolean
-          provider?: string
-          provider_account_id?: string | null
-          subscriber_id: string
-          updated_at?: string
-        }
-        Update: {
-          account_type?: string
-          charges_enabled?: boolean
-          created_at?: string
-          id?: string
-          last_link_disposition?: string | null
-          onboarding_status?: string
-          payouts_enabled?: boolean
-          provider?: string
-          provider_account_id?: string | null
-          subscriber_id?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "payout_accounts_subscriber_id_fkey"
             columns: ["subscriber_id"]
             isOneToOne: false
             referencedRelation: "subscribers"

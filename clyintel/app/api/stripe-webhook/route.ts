@@ -53,6 +53,7 @@ function verifyStripeSignature(payload: string, header: string | null, secret: s
 interface StripeEvent {
   id: string;
   type: string;
+  created?: number;
   data: { object: Record<string, unknown> };
 }
 
@@ -292,6 +293,161 @@ async function handleSubscriptionDeleted(
   }
 }
 
+// Capture a successful SUBSCRIPTION payment as a `payments` ledger row. This
+// records the platform-billing charge only — it never writes invoice_payments
+// (there is no overdue invoice to allocate against; that bridge belongs to the
+// recovery flow) and never sets client_id. Idempotent and signature-verified
+// (caller verifies). Unresolvable subscriber → fail loud via log, return
+// normally so Stripe doesn't retry forever (caller returns 200).
+async function handlePaymentSucceeded(
+  invoice: Record<string, unknown>,
+  eventId: string,
+  eventCreated: number | undefined
+) {
+  const supabase = getSupabase();
+
+  // Subscription metadata rides on the invoice's subscription_details in current
+  // API versions; fall back to invoice-level metadata.
+  const subscriptionDetails = invoice["subscription_details"] as
+    | { metadata?: Record<string, unknown> }
+    | undefined;
+  const invoiceMetadata = (invoice["metadata"] as Record<string, unknown> | undefined) ?? {};
+  const metaFromSub =
+    typeof subscriptionDetails?.metadata?.["subscriber_id"] === "string"
+      ? (subscriptionDetails.metadata["subscriber_id"] as string)
+      : null;
+  const metaFromInvoice =
+    typeof invoiceMetadata["subscriber_id"] === "string"
+      ? (invoiceMetadata["subscriber_id"] as string)
+      : null;
+  const metaSubscriberId = metaFromSub ?? metaFromInvoice;
+
+  const subscriptionId =
+    typeof invoice["subscription"] === "string" ? (invoice["subscription"] as string) : null;
+  const customerId =
+    typeof invoice["customer"] === "string" ? (invoice["customer"] as string) : null;
+  const paymentIntent =
+    typeof invoice["payment_intent"] === "string" ? (invoice["payment_intent"] as string) : null;
+  const chargeId = typeof invoice["charge"] === "string" ? (invoice["charge"] as string) : null;
+  const amountPaid =
+    typeof invoice["amount_paid"] === "number" ? (invoice["amount_paid"] as number) : null;
+  const currency =
+    typeof invoice["currency"] === "string"
+      ? (invoice["currency"] as string).toUpperCase()
+      : "USD";
+
+  // ── Resolve subscriber: metadata.subscriber_id > stripe_subscription_id > stripe_customer_id.
+  let subscriberId: string | null = null;
+  let resolvedVia: string | null = null;
+
+  if (metaSubscriberId) {
+    const { data } = await supabase
+      .from("subscribers")
+      .select("id")
+      .eq("id", metaSubscriberId)
+      .maybeSingle();
+    if (data) {
+      subscriberId = data.id;
+      resolvedVia = "metadata";
+    }
+  }
+  if (!subscriberId && subscriptionId) {
+    const { data } = await supabase
+      .from("subscribers")
+      .select("id")
+      .eq("stripe_subscription_id", subscriptionId)
+      .maybeSingle();
+    if (data) {
+      subscriberId = data.id;
+      resolvedVia = "subscription_id";
+    }
+  }
+  if (!subscriberId && customerId) {
+    const { data } = await supabase
+      .from("subscribers")
+      .select("id")
+      .eq("stripe_customer_id", customerId)
+      .maybeSingle();
+    if (data) {
+      subscriberId = data.id;
+      resolvedVia = "customer_id";
+    }
+  }
+
+  if (!subscriberId) {
+    // Fail loud, but don't 500 — Stripe would retry indefinitely. Never guessed.
+    console.error(
+      "stripe-webhook: UNRESOLVED subscriber for invoice.payment_succeeded " +
+        `(event=${eventId} customer=${customerId} subscription=${subscriptionId} ` +
+        `metadata.subscriber_id=${metaSubscriberId})`
+    );
+    return;
+  }
+
+  // A successful payment must carry an amount. A missing amount_paid is a
+  // malformed event — log and bail rather than record a bogus $0 row. (A
+  // legitimate $0 invoice, e.g. a 100%-off coupon, still passes this guard.)
+  if (amountPaid === null) {
+    console.error(
+      `stripe-webhook: invoice.payment_succeeded missing amount_paid (event=${eventId} subscriber=${subscriberId})`
+    );
+    return;
+  }
+
+  const paidAt = eventCreated
+    ? new Date(eventCreated * 1000).toISOString()
+    : new Date().toISOString();
+
+  // ── Insert FIRST; idempotency is DB-enforced by the UNIQUE constraint on
+  // payments.stripe_event_id. A duplicate Stripe delivery hits 23505 and is
+  // treated as already-processed. This avoids any premature-marker failure
+  // mode: a failed insert records nothing, so Stripe's retry re-attempts
+  // cleanly instead of being blocked.
+  const { error: insertError } = await supabase.from("payments").insert({
+    subscriber_id: subscriberId,
+    client_id: null,
+    stripe_payment_intent: paymentIntent,
+    stripe_charge_id: chargeId,
+    amount_cents: amountPaid,
+    currency,
+    status: "succeeded",
+    payment_method: null,
+    paid_at: paidAt,
+    stripe_event_id: eventId,
+    stripe_event_type: "invoice.payment_succeeded",
+    refunded_amount_cents: null,
+  });
+
+  if (insertError) {
+    // 23505 = unique_violation. The stripe_event_id (or its payment_intent)
+    // is already captured → duplicate delivery. Swallow and return cleanly.
+    if (insertError.code === "23505") {
+      console.log(
+        `stripe-webhook: duplicate event, skipping (event=${eventId} subscriber=${subscriberId} constraint=${insertError.message})`
+      );
+      return;
+    }
+    // Any other failure: log loudly and return. Nothing was recorded, so
+    // Stripe's retry will re-attempt the capture.
+    console.error(
+      `stripe-webhook: payments insert failed for ${subscriberId} (event=${eventId})`,
+      insertError
+    );
+    return;
+  }
+
+  // Audit AFTER a successful insert. No longer the idempotency guard (the DB
+  // is). If this write fails, the payment is already captured — log loudly,
+  // never roll back the captured row.
+  await writeAudit(subscriberId, "payment_recorded", subscriberId, {
+    stripe_event_id: eventId,
+    subscriber_id: subscriberId,
+    amount_cents: amountPaid,
+    stripe_payment_intent: paymentIntent,
+    resolved_via: resolvedVia,
+  });
+}
+
 async function processEvent(event: StripeEvent) {
   const object = event.data.object;
 
@@ -309,10 +465,10 @@ async function processEvent(event: StripeEvent) {
       break;
     }
     case "invoice.payment_succeeded": {
-      const customerId = object["customer"] as string;
-      if (customerId) {
-        await updateSubscriberStatus(customerId, "active", null, event.type, event.id);
-      }
+      // Capture the subscription payment into the payments ledger. (Subscription
+      // status is reconciled separately by customer.subscription.created/updated,
+      // which fire alongside renewals and past_due->active recovery.)
+      await handlePaymentSucceeded(object, event.id, event.created);
       break;
     }
     case "invoice.payment_failed": {
