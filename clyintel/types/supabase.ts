@@ -76,6 +76,33 @@ export type Database = {
           },
         ]
       }
+      capture_sources: {
+        Row: {
+          active: boolean
+          config: Json
+          created_at: string
+          display_name: string
+          id: string
+          kind: string
+        }
+        Insert: {
+          active?: boolean
+          config?: Json
+          created_at?: string
+          display_name: string
+          id: string
+          kind: string
+        }
+        Update: {
+          active?: boolean
+          config?: Json
+          created_at?: string
+          display_name?: string
+          id?: string
+          kind?: string
+        }
+        Relationships: []
+      }
       clients: {
         Row: {
           avg_days_to_pay: number | null
@@ -930,6 +957,9 @@ export type Database = {
           invoice_face_value: number
           invoice_ref: string
           rate: number
+          source: string | null
+          source_invoice_id: string | null
+          source_payment_id: string | null
           subscriber_id: string
         }
         Insert: {
@@ -944,6 +974,9 @@ export type Database = {
           invoice_face_value: number
           invoice_ref: string
           rate: number
+          source?: string | null
+          source_invoice_id?: string | null
+          source_payment_id?: string | null
           subscriber_id: string
         }
         Update: {
@@ -958,9 +991,19 @@ export type Database = {
           invoice_face_value?: number
           invoice_ref?: string
           rate?: number
+          source?: string | null
+          source_invoice_id?: string | null
+          source_payment_id?: string | null
           subscriber_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "rev_share_ledger_source_fkey"
+            columns: ["source"]
+            isOneToOne: false
+            referencedRelation: "capture_sources"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "rev_share_ledger_subscriber_id_fkey"
             columns: ["subscriber_id"]
