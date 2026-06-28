@@ -917,6 +917,59 @@ export type Database = {
           },
         ]
       }
+      rev_share_ledger: {
+        Row: {
+          band: string
+          captured_at: string
+          created_at: string
+          cycle_close: string
+          dollars_recovered: number
+          engine_version: string | null
+          fee_amount: number
+          id: string
+          invoice_face_value: number
+          invoice_ref: string
+          rate: number
+          subscriber_id: string
+        }
+        Insert: {
+          band: string
+          captured_at: string
+          created_at?: string
+          cycle_close: string
+          dollars_recovered: number
+          engine_version?: string | null
+          fee_amount: number
+          id?: string
+          invoice_face_value: number
+          invoice_ref: string
+          rate: number
+          subscriber_id: string
+        }
+        Update: {
+          band?: string
+          captured_at?: string
+          created_at?: string
+          cycle_close?: string
+          dollars_recovered?: number
+          engine_version?: string | null
+          fee_amount?: number
+          id?: string
+          invoice_face_value?: number
+          invoice_ref?: string
+          rate?: number
+          subscriber_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rev_share_ledger_subscriber_id_fkey"
+            columns: ["subscriber_id"]
+            isOneToOne: false
+            referencedRelation: "subscribers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       subscribers: {
         Row: {
           billing_path: Database["public"]["Enums"]["billing_path"]
