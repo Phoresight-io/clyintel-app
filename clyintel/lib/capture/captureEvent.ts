@@ -18,6 +18,11 @@ export interface CaptureEvent {
   sourcePaymentId: string;
   /** Platform's invoice id. Written to ledger.source_invoice_id AND invoice_ref. */
   sourceInvoiceId: string;
+  /** Past-due verdict, resolved BY THE ADAPTER from the source system —
+   *  either read from a source status field or derived from the source's
+   *  due date, depending on what the platform exposes. The core trusts
+   *  this boolean and never computes past-due itself. */
+  invoicePastDue: boolean;
   /** Full invoice face value (DOLLARS), resolved by adapter, frozen onto the row. */
   invoiceFaceValue: number;
   /** This captured payment's amount (DOLLARS). Fee = rate × this. */

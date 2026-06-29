@@ -1,5 +1,10 @@
 import { REV_SHARE_BANDS, MIN_QUALIFYING_FACE } from './bands';
 
+// Version of the fee engine + band calibration. Frozen onto each ledger row
+// (rev_share_ledger.engine_version) so a recomputation can be traced back to
+// the exact rate config that produced the fee. Bump when bands or fee logic change.
+export const ENGINE_VERSION = 'revshare-v1';
+
 export interface RevShareInput {
   invoiceFaceValue: number;
   dollarsRecovered: number;
