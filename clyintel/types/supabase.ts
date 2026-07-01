@@ -1170,6 +1170,45 @@ export type Database = {
           },
         ]
       }
+      webhook_events: {
+        Row: {
+          attempts: number
+          id: string
+          last_error: string | null
+          processed_at: string | null
+          raw_payload: Json
+          received_at: string
+          result: string | null
+          signature: string | null
+          source: string
+          status: string
+        }
+        Insert: {
+          attempts?: number
+          id?: string
+          last_error?: string | null
+          processed_at?: string | null
+          raw_payload: Json
+          received_at?: string
+          result?: string | null
+          signature?: string | null
+          source: string
+          status?: string
+        }
+        Update: {
+          attempts?: number
+          id?: string
+          last_error?: string | null
+          processed_at?: string | null
+          raw_payload?: Json
+          received_at?: string
+          result?: string | null
+          signature?: string | null
+          source?: string
+          status?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
