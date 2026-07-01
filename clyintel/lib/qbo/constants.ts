@@ -7,6 +7,22 @@ export const INTUIT_TOKEN_URL =
   "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 export const QBO_SCOPE = "com.intuit.quickbooks.accounting";
 
+/**
+ * Base host for the QBO Accounting API (`/v3/company/...`). Unlike the OAuth
+ * hosts above, this IS environment-specific (sandbox vs production), so it is
+ * env-derived via `QBO_BASE_URL` — never hardcoded. Set to
+ * `https://quickbooks.api.intuit.com` in production and
+ * `https://sandbox-quickbooks.api.intuit.com` in sandbox. Throws if unset (a
+ * missing base must surface, not silently default to the wrong environment).
+ */
+export function qboApiBaseUrl(): string {
+  const base = process.env.QBO_BASE_URL;
+  if (!base) {
+    throw new Error("QBO_BASE_URL is not set");
+  }
+  return base.replace(/\/+$/, ""); // tolerate a trailing slash
+}
+
 export interface QboTokenResponse {
   access_token: string;
   refresh_token: string;
