@@ -1,5 +1,4 @@
 {
-  "framework": "nextjs",
   "crons": [
     { "path": "/api/qbo/worker", "schedule": "* * * * *" }
   ]
