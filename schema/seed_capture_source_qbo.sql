@@ -6,5 +6,5 @@
 -- leaves any existing row (e.g. from capture_detection_phase1) untouched.
 
 INSERT INTO capture_sources (id, display_name, kind, active)
-VALUES ('qbo', 'QuickBooks Online', 'native', true)
+VALUES ('qbo', 'QuickBooks Online', 'native_adapter', true)
 ON CONFLICT (id) DO NOTHING;
