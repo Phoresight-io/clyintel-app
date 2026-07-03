@@ -124,6 +124,12 @@ export default function ConnectionsScreen() {
   const [manualError, setManualError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile]     = useState<{ name: string; rows: number; size: string } | null>(null);
 
+  // QuickBooks "Sync now" (D3): POST /api/qbo/sync, then refresh server data so
+  // the newly synced clients/invoices render on the dashboard/portfolio.
+  const [syncing, setSyncing]       = useState(false);
+  const [syncResult, setSyncResult] = useState<{ customersUpserted: number; invoicesUpserted: number; invoicesSkipped: number } | null>(null);
+  const [syncError, setSyncError]   = useState<string | null>(null);
+
   const handleServiceClick = (svc: InvoiceService) => {
     if (svc.id === "manual") { setStage("manual"); return; }
     if (svc.id === "csv")    { setStage("csv_upload"); return; }
@@ -195,6 +201,37 @@ export default function ConnectionsScreen() {
     }
   };
 
+  // Only meaningful when QuickBooks is connected (button is gated on that).
+  // Mirrors handleManualSubmit: POST, loading flag, inline result/error.
+  const handleSyncNow = async () => {
+    if (syncing) return;
+    setSyncError(null);
+    setSyncResult(null);
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/qbo/sync", { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setSyncError(body.error || "Sync failed.");
+        setSyncing(false);
+        return;
+      }
+      const data = await res.json();
+      setSyncResult({
+        customersUpserted: data.customersUpserted ?? 0,
+        invoicesUpserted: data.invoicesUpserted ?? 0,
+        invoicesSkipped: data.invoicesSkipped ?? 0,
+      });
+      setSyncing(false);
+      // Re-fetch the server components (dashboard/portfolio read real rows via
+      // getUIPortfolio) so the just-synced data shows without a manual reload.
+      router.refresh();
+    } catch {
+      setSyncError("Network error — please try again.");
+      setSyncing(false);
+    }
+  };
+
   const integrations = INVOICE_SERVICES.filter(s => ["qb","fb","stripe","xero"].includes(s.id));
   const bottomRow    = ["gdrive","csv","manual"].map(id => INVOICE_SERVICES.find(s => s.id === id)!);
 
@@ -233,6 +270,36 @@ export default function ConnectionsScreen() {
         Not connected
       </span>
     )
+  );
+
+  // QB tile footer: connection pill + (only when connected) the "Sync now"
+  // control with inline counts/error. stopPropagation so clicks don't bubble to
+  // the tile's onClick.
+  const qbTileFooter = () => (
+    <>
+      {qbStatusPill()}
+      {qboStatus?.connected && (
+        <div style={{ marginTop: 10 }} onClick={e => e.stopPropagation()}>
+          <button
+            onClick={handleSyncNow}
+            disabled={syncing}
+            style={{ padding: "7px 14px", fontSize: 13, fontWeight: 600, color: "#FFFFFF", background: C.blue, border: "none", borderRadius: 6, cursor: syncing ? "not-allowed" : "pointer", opacity: syncing ? 0.7 : 1 }}
+            onMouseEnter={e => { if (!syncing) e.currentTarget.style.opacity = "0.88"; }}
+            onMouseLeave={e => { if (!syncing) e.currentTarget.style.opacity = "1"; }}
+          >
+            {syncing ? "Syncing…" : "Sync now"}
+          </button>
+          {syncResult && (
+            <div style={{ marginTop: 8, fontSize: 12, fontWeight: 500, color: C.green }}>
+              ✓ Synced {syncResult.customersUpserted} customers · {syncResult.invoicesUpserted} invoices · {syncResult.invoicesSkipped} skipped
+            </div>
+          )}
+          {syncError && (
+            <div style={{ marginTop: 8, fontSize: 12, fontWeight: 500, color: C.red }}>{syncError}</div>
+          )}
+        </div>
+      )}
+    </>
   );
 
   const backBtn = (onClick: () => void, label = "Back") => (
@@ -281,7 +348,7 @@ export default function ConnectionsScreen() {
                       <div>
                         <div style={{ fontSize: 16, fontWeight: 600, color: C.text }}>{svc.name}</div>
                         <div style={{ fontSize: 13, color: C.textDim, fontWeight: 500, marginTop: 4 }}>{svc.subtitle}</div>
-                        {isQb ? qbStatusPill() : disabled ? comingSoonPill : null}
+                        {isQb ? qbTileFooter() : disabled ? comingSoonPill : null}
                       </div>
                     </div>
                   );
