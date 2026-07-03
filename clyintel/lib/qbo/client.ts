@@ -121,3 +121,120 @@ export async function getInvoice(
 ): Promise<QboInvoice> {
   return qboGetEntity<QboInvoice>(realmId, "invoice", "Invoice", invoiceId, accessToken);
 }
+
+// ===========================================================================
+// LIST / QUERY path (appended) — the QBO query API, used by the sync layer to
+// pull the full Customer / Invoice lists. Separate from the single-entity GET
+// path above (getPayment/getInvoice/qboGetEntity) because the query API uses a
+// different envelope ({ QueryResponse: { <Entity>: [...] } }) and returns
+// arrays. Everything above this line is frozen (the D2 payment path depends on
+// it) and is NOT modified here. Still a dumb transport: no Supabase, no upsert,
+// no filtering, no cents conversion — the sync layer decides what to keep.
+// ===========================================================================
+
+// --- Narrow list return types (distinct from the frozen QboInvoice on purpose) ---
+
+export interface QboCustomerListItem {
+  Id: string;
+  DisplayName?: string;
+  Active?: boolean;
+  raw?: unknown;
+}
+
+export interface QboInvoiceListItem {
+  Id: string;
+  TotalAmt: number;
+  DueDate?: string;
+  Balance?: number;
+  DocNumber?: string;
+  CustomerRef?: { value: string; name?: string };
+  raw?: unknown;
+}
+
+/**
+ * Run a QBO SQL-ish query and unwrap the `{ QueryResponse: { <Entity>: [...] } }`
+ * envelope the query API uses (different from the single-entity GET envelope, so
+ * this is a separate helper from qboGetEntity). Throws on non-2xx
+ * (auth-flavored on 401). QBO omits the entity key entirely when there are zero
+ * matching rows, so a missing key is treated as an empty list, not an error.
+ */
+async function qboQuery<T>(
+  realmId: string,
+  query: string,
+  entityKey: "Invoice" | "Customer",
+  accessToken: string,
+): Promise<T[]> {
+  const url = `${qboApiBaseUrl()}/v3/company/${realmId}/query?query=${encodeURIComponent(query)}`;
+
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    // NEVER include the access token in the thrown message.
+    if (res.status === 401) {
+      throw new Error(
+        `QBO ${entityKey} query failed: 401 Unauthorized — ` +
+          `access token rejected (may be revoked or expired; the caller must ` +
+          `refresh via getValidAccessToken)`,
+      );
+    }
+    throw new Error(`QBO ${entityKey} query failed: HTTP ${res.status}`);
+  }
+
+  const body = (await res.json()) as { QueryResponse?: Record<string, unknown> };
+  const qr = body.QueryResponse ?? {};
+  const rows = (qr[entityKey] as object[] | undefined) ?? [];
+  return rows.map((item) => ({ ...item, raw: item })) as T[];
+}
+
+/** Safety cap: refuse to loop forever if a malformed response never shrinks a page. */
+const QBO_MAX_PAGES = 100;
+/** QBO caps a query page at 1000 rows; a short page means we've reached the end. */
+const QBO_PAGE_SIZE = 1000;
+
+/**
+ * Fetch every Customer for the realm, paging through the QBO query API. No
+ * server-side filtering — returns the full list; the sync layer decides what to
+ * keep.
+ */
+export async function listCustomers(
+  realmId: string,
+  accessToken: string,
+): Promise<QboCustomerListItem[]> {
+  const all: QboCustomerListItem[] = [];
+  let pos = 1;
+  for (let page = 0; page < QBO_MAX_PAGES; page++) {
+    const query = `SELECT * FROM Customer STARTPOSITION ${pos} MAXRESULTS ${QBO_PAGE_SIZE}`;
+    const rows = await qboQuery<QboCustomerListItem>(realmId, query, "Customer", accessToken);
+    all.push(...rows);
+    if (rows.length < QBO_PAGE_SIZE) return all;
+    pos += rows.length;
+  }
+  throw new Error("QBO Customer query exceeded pagination cap");
+}
+
+/**
+ * Fetch every Invoice for the realm, paging through the QBO query API. No
+ * server-side filtering — returns the full list; the sync layer decides what to
+ * keep.
+ */
+export async function listInvoices(
+  realmId: string,
+  accessToken: string,
+): Promise<QboInvoiceListItem[]> {
+  const all: QboInvoiceListItem[] = [];
+  let pos = 1;
+  for (let page = 0; page < QBO_MAX_PAGES; page++) {
+    const query = `SELECT * FROM Invoice STARTPOSITION ${pos} MAXRESULTS ${QBO_PAGE_SIZE}`;
+    const rows = await qboQuery<QboInvoiceListItem>(realmId, query, "Invoice", accessToken);
+    all.push(...rows);
+    if (rows.length < QBO_PAGE_SIZE) return all;
+    pos += rows.length;
+  }
+  throw new Error("QBO Invoice query exceeded pagination cap");
+}
