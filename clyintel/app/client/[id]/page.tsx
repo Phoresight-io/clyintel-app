@@ -1,6 +1,5 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
-import { clients as mockClients } from "@/lib/mock-data";
 import { createSupabaseServer } from "@/lib/supabase-server";
 import { getClient, getInvoicesByClient, getPtrScores } from "@/lib/data";
 import { toUIClient, toUIClientInvoiceSet } from "@/lib/adapters";
@@ -39,12 +38,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     );
   }
 
-  // Demo path: mock client by numeric id.
-  const client = mockClients.find((c) => c.id.toString() === id);
-  if (!client) notFound();
-  return (
-    <Suspense fallback={null}>
-      <ClientDetailWrapper client={client} />
-    </Suspense>
-  );
+  // Mock/demo clients were flushed (D2 closeout): numeric (non-UUID) ids no
+  // longer resolve to a client.
+  notFound();
 }

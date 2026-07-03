@@ -2,7 +2,6 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
-import * as mockRaw from "@/lib/mock-data";
 import type { Client, ClientInvoiceSet } from "@/lib/mock-data";
 import { isDemoReset, CLIENTS_KEY, INTEGRATIONS_KEY } from "@/lib/demo-mode";
 
@@ -14,14 +13,13 @@ interface ClientListScreenProps {
 export default function ClientListScreen({ initialClients, initialClientInvoices }: ClientListScreenProps = {}) {
   const isReset = isDemoReset();
   const isCustomMode = !!localStorage.getItem(INTEGRATIONS_KEY);
-  const demoActive = isReset || isCustomMode;
   const storedClients: Client[] = (() => {
     if (isReset) return [];
     try { return JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]') as Client[]; } catch { return []; }
   })();
-  // Default path = real subscriber data. Mock data is used only for demo mode.
+  // Default path = real subscriber data. Mock data flushed (D2 closeout).
   const clients = isReset ? [] : isCustomMode ? storedClients : (initialClients ?? []);
-  const clientInvoices = demoActive ? mockRaw.clientInvoices : (initialClientInvoices ?? ({} as Record<string | number, ClientInvoiceSet>));
+  const clientInvoices = initialClientInvoices ?? ({} as Record<string | number, ClientInvoiceSet>);
 
   const router = useRouter();
   const [showBack, setShowBack] = useState(false);
@@ -32,8 +30,8 @@ export default function ClientListScreen({ initialClients, initialClientInvoices
     sessionStorage.removeItem('clyintel_nav_direct');
   }, []);
 
-  const getRecoveryYTD = (id: string | number): number =>
-    demoActive ? (({ 4: 15800, 1: 3200, 2: 8400, 3: 12400, 5: 2800 } as Record<string | number, number>)[id] || 0) : 0;
+  // Recovery YTD has no real source yet (D3); hardcoded mock amounts flushed (D2 closeout).
+  const getRecoveryYTD = (_id: string | number): number => 0;
 
   return (
     <div style={{ padding: "28px 36px", minHeight: 520, fontFamily: C.sans }}>

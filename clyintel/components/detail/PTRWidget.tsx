@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { C } from "@/lib/theme";
-import { Client, ptrRecommendations } from "@/lib/mock-data";
+import type { Client, PTRRecommendation } from "@/lib/mock-data";
 
 type PTRState = "idle" | "generating" | "result";
 
@@ -29,7 +29,9 @@ export default function PTRWidget({ client }: Props) {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const rec = ptrRecommendations[client.id];
+  // Mock data flushed (D2 closeout); no real PTR-recommendation source yet (D3).
+  // Sourced via a typed call so the union survives narrowing and the empty state renders.
+  const rec = ((): PTRRecommendation | undefined => undefined)();
   const scoreColor = client.score >= 80 ? C.green : client.score >= 60 ? C.amber : C.red;
   const scoreLabel = client.score >= 80 ? "Low risk" : client.score >= 60 ? "Medium risk" : "High risk";
 

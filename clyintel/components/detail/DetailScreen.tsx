@@ -2,9 +2,7 @@
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { C } from "@/lib/theme";
-import * as mockRaw from "@/lib/mock-data";
 import type { Client, NegotiationRec, ClientInvoiceSet } from "@/lib/mock-data";
-import { isDemoReset } from "@/lib/demo-mode";
 import ExchangeDrawer from "@/components/shared/ExchangeDrawer";
 import PTRWidget from "./PTRWidget";
 import NegotiationActions from "@/components/dashboard/NegotiationActions";
@@ -18,10 +16,11 @@ interface Props {
 }
 
 export default function DetailScreen({ client, invoiceSet }: Props) {
-  const isReset = isDemoReset();
   const realMode = invoiceSet !== undefined;
-  const negotiationRecs = realMode ? ([] as NegotiationRec[]) : isReset ? ([] as NegotiationRec[]) : mockRaw.negotiationRecs;
-  const invoices = realMode ? invoiceSet : isReset ? undefined : mockRaw.clientInvoices[client.id];
+  // Mock data flushed (D2 closeout): real invoice set when present, else empty.
+  // negotiationRecs has no real source yet — stays empty until D3.
+  const negotiationRecs = [] as NegotiationRec[];
+  const invoices = realMode ? invoiceSet : undefined;
 
   const router = useRouter();
   const searchParams = useSearchParams();

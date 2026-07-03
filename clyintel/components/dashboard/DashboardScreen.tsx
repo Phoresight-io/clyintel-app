@@ -2,7 +2,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
-import * as mockRaw from "@/lib/mock-data";
 import type { Invoice, Client, NegotiationRec, ClientInvoiceSet, Exchange } from "@/lib/mock-data";
 import { isDemoReset, CLIENTS_KEY, INTEGRATIONS_KEY } from "@/lib/demo-mode";
 import ExchangeDrawer from "@/components/shared/ExchangeDrawer";
@@ -34,16 +33,16 @@ interface DashboardScreenProps {
 export default function DashboardScreen({ initialClients, initialClientInvoices }: DashboardScreenProps = {}) {
   const isReset = isDemoReset();
   const isCustomMode = !!localStorage.getItem(INTEGRATIONS_KEY);
-  const demoActive = isReset || isCustomMode;
   const storedClients: Client[] = (() => {
     if (isReset) return [];
     try { return JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]') as Client[]; } catch { return []; }
   })();
-  // Default path = real subscriber data. Mock data is used only for demo mode.
+  // Default path = real subscriber data. Mock data has been flushed (D2 closeout);
+  // exchanges/negotiations stay empty until D3 wires their real sources.
   const clients = isReset ? [] : isCustomMode ? storedClients : (initialClients ?? []);
-  const clientInvoices = demoActive ? mockRaw.clientInvoices : (initialClientInvoices ?? ({} as Record<string | number, ClientInvoiceSet>));
-  const invoiceExchanges = demoActive ? mockRaw.invoiceExchanges : ({} as Record<string, Exchange[]>);
-  const negotiationRecs = demoActive ? mockRaw.negotiationRecs : ([] as NegotiationRec[]);
+  const clientInvoices = initialClientInvoices ?? ({} as Record<string | number, ClientInvoiceSet>);
+  const invoiceExchanges = {} as Record<string, Exchange[]>;
+  const negotiationRecs = [] as NegotiationRec[];
 
   const router = useRouter();
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({ status: [], dueDate: [], customer: [], invoiceNumber: [] });
@@ -114,7 +113,7 @@ export default function DashboardScreen({ initialClients, initialClientInvoices 
   const totalFilterCount = Object.values(activeFilters).reduce((s, a) => s + a.length, 0);
 
   const kpis = [
-    { label: "Recovery YTD", value: demoActive ? (isReset ? "$0" : "$42,150") : "$0", color: C.green },
+    { label: "Recovery YTD", value: "$0", color: C.green },
     { label: "Total Outstanding", value: `$${totalOutstanding.toLocaleString()}`, color: C.text },
     { label: "Past Due", value: `$${totalPastDue.toLocaleString()}`, color: C.red },
     { label: "Active Invoices", value: String(activeInvoices), color: C.text },
