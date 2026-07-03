@@ -120,6 +120,7 @@ export type Database = {
           preferred_channel:
             | Database["public"]["Enums"]["communication_channel"]
             | null
+          source: string
           subscriber_id: string
           total_invoiced_cents: number
           total_overdue_cents: number
@@ -142,6 +143,7 @@ export type Database = {
           preferred_channel?:
             | Database["public"]["Enums"]["communication_channel"]
             | null
+          source?: string
           subscriber_id: string
           total_invoiced_cents?: number
           total_overdue_cents?: number
@@ -164,6 +166,7 @@ export type Database = {
           preferred_channel?:
             | Database["public"]["Enums"]["communication_channel"]
             | null
+          source?: string
           subscriber_id?: string
           total_invoiced_cents?: number
           total_overdue_cents?: number
