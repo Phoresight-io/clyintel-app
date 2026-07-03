@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { C } from "@/lib/theme";
-import { invoiceExchanges, negotiationRecs, NegotiationRec } from "@/lib/mock-data";
+import type { Exchange, NegotiationRec } from "@/lib/mock-data";
 import RecoveryRecModal, { RecCard } from "@/components/dashboard/RecoveryRecModal";
 
 interface Props {
@@ -10,8 +10,9 @@ interface Props {
 }
 
 export default function ExchangeDrawer({ invoiceId, onClose }: Props) {
-  const exchanges = invoiceExchanges[invoiceId] || [];
-  const rec = negotiationRecs.find((r: NegotiationRec) => r.id === invoiceId);
+  // Mock data flushed (D2 closeout); no real communications/negotiation source yet (D3).
+  const exchanges: Exchange[] = [];
+  const rec = ((): NegotiationRec | undefined => undefined)();
   const [activeRec, setActiveRec] = useState<RecCard | null>(null);
   const channelIcons: Record<string, string> = { "Voice": "📞", "Email": "📧", "Text": "💬" };
   const channelColors: Record<string, string> = { "Voice": C.blue, "Email": C.blue, "Text": C.green };
