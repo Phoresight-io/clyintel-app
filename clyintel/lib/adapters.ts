@@ -26,14 +26,32 @@ function daysFromToday(due: string | null): number | null {
   return Math.round((d.getTime() - today.getTime()) / MS_PER_DAY);
 }
 
-function uiStatus(status: InvoiceRow["status"]): "past_due" | "current" | "paid" {
-  if (status === "paid") return "paid";
-  if (status === "overdue" || status === "in_recovery" || status === "written_off") return "past_due";
+// Whether an invoice is fully settled. amount_outstanding_cents is a generated
+// column (amount_cents - amount_paid_cents); fall back to the components if the
+// embed ever returns it null.
+function isFullyPaid(row: InvoiceRow): boolean {
+  const outstanding = row.amount_outstanding_cents ?? (row.amount_cents - row.amount_paid_cents);
+  return outstanding <= 0;
+}
+
+// Display status is DERIVED from due date + payment state, not read from the
+// stored enum (a synced QBO invoice sits at 'draft' regardless of whether it's
+// overdue, so the stored value can't be trusted for display). Terminal stored
+// states are honored: 'paid' and 'written_off' are never re-derived to
+// 'past_due'. Everything else ('draft'/'sent'/'overdue'/'partial') is derived.
+// Date comparison reuses daysFromToday — the same local-date delta used
+// elsewhere in this module.
+function uiStatus(row: InvoiceRow): "past_due" | "current" | "paid" {
+  if (row.status === "paid") return "paid";
+  if (row.status === "written_off") return "current"; // terminal — not past_due, not paid
+  if (isFullyPaid(row)) return "paid";
+  const delta = daysFromToday(row.due_date);
+  if (delta !== null && delta < 0) return "past_due";
   return "current";
 }
 
 export function toUIInvoice(row: InvoiceRow): Invoice {
-  const ui = uiStatus(row.status);
+  const ui = uiStatus(row);
   const dayDelta = daysFromToday(row.due_date);
   const invoice: Invoice = {
     id: row.invoice_number || row.id,
@@ -64,13 +82,13 @@ export function toUIClientInvoiceSet(rows: InvoiceRow[]): ClientInvoiceSet {
 }
 
 function deriveStatus(rows: InvoiceRow[]): ClientStatus {
-  const statuses = rows.map((r) => uiStatus(r.status));
+  const statuses = rows.map((r) => uiStatus(r));
   if (statuses.some((s) => s === "past_due")) return "past_due";
   const hasOpen = statuses.some((s) => s === "current");
   if (hasOpen) {
     // "due" if anything is due within 7 days, else "current"
     const dueSoon = rows.some((r) => {
-      if (uiStatus(r.status) !== "current") return false;
+      if (uiStatus(r) !== "current") return false;
       const delta = daysFromToday(r.due_date);
       return delta !== null && delta <= 7;
     });
@@ -81,11 +99,11 @@ function deriveStatus(rows: InvoiceRow[]): ClientStatus {
 
 export function toUIClient(client: ClientRow, ptr: PtrScoreRow | null, invoices: InvoiceRow[]): Client {
   const outstandingCents = invoices.reduce(
-    (sum, inv) => (uiStatus(inv.status) === "past_due" ? sum + (inv.amount_outstanding_cents ?? inv.amount_cents) : sum),
+    (sum, inv) => (uiStatus(inv) === "past_due" ? sum + (inv.amount_outstanding_cents ?? inv.amount_cents) : sum),
     0
   );
   const maxOverdue = invoices.reduce((max, inv) => {
-    if (uiStatus(inv.status) !== "past_due") return max;
+    if (uiStatus(inv) !== "past_due") return max;
     const delta = daysFromToday(inv.due_date);
     const overdue = delta !== null && delta < 0 ? Math.abs(delta) : 0;
     return Math.max(max, overdue);
