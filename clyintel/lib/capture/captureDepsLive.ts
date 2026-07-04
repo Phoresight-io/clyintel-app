@@ -12,6 +12,23 @@ import type { CaptureDeps, LedgerInsert } from "./captureDeps";
 // Namespacing: connected_accounts.provider is the enum value 'quickbooks';
 // the capture source slug is 'qbo'. resolveSubscriber filters provider =
 // 'quickbooks'; the invoice bridge filters invoices.source = 'qbo'.
+//
+// PAYMENT source vs INVOICE source: a recovery payment can arrive on the Stripe
+// rail (CaptureEvent.source = 'stripe_recovery'), but the invoice it settles is
+// still a QuickBooks invoice reached through the subscriber's QBO connection.
+// Subscriber + invoice resolution therefore stay source-INDEPENDENT — always the
+// QBO connection below — while only the ledger's `source` and the invoice_number
+// enrichment key off the payment source.
+
+// Invoice/connection namespace — resolution routes through the QBO connection
+// regardless of which rail took the payment. Values are unchanged from the
+// previous inline literals, so the 'qbo' path behaves identically.
+const INVOICE_CONNECTION_PROVIDER = "quickbooks"; // connected_accounts.provider
+const INVOICE_SOURCE = "qbo"; // invoices.source
+
+// Payment-source registry slug for Stripe-mediated recovery captures. Only the
+// insert path keys off this (ledger.source + invoice_number enrichment).
+const STRIPE_RECOVERY_SOURCE = "stripe_recovery";
 
 export function createLiveCaptureDeps(): CaptureDeps {
   const service = getSupabase();
@@ -24,7 +41,7 @@ export function createLiveCaptureDeps(): CaptureDeps {
       const { data, error } = await service
         .from("connected_accounts")
         .select("subscriber_id")
-        .eq("provider", "quickbooks")
+        .eq("provider", INVOICE_CONNECTION_PROVIDER)
         .eq("external_id", ref);
 
       if (error) {
@@ -61,7 +78,7 @@ export function createLiveCaptureDeps(): CaptureDeps {
         .from("invoices")
         .select("id")
         .eq("external_id", sourceInvoiceId)
-        .eq("source", "qbo")
+        .eq("source", INVOICE_SOURCE)
         .eq("subscriber_id", subscriberId);
 
       if (invErr) {
@@ -128,9 +145,35 @@ export function createLiveCaptureDeps(): CaptureDeps {
     },
 
     async insertLedgerRow(row: LedgerInsert) {
+      // Enrichment seam (deps-owned — the frozen core builds `row` without an
+      // invoice_number field; this layer owns the actual write and may add
+      // columns). GATED to the Stripe recovery rail: for source ===
+      // 'stripe_recovery' we stamp the human invoice_number onto the ledger row.
+      // The QBO path is left byte-identical (no invoice_number key → column stays
+      // null), so it is unaffected before or after the pending migration.
+      let payload: LedgerInsert & { invoice_number?: string | null } = row;
+      if (row.source === STRIPE_RECOVERY_SOURCE) {
+        // Re-resolve the local invoice the same way getInvoiceAttribution does
+        // (external_id + invoice source + subscriber). Stateless — no reliance on
+        // an earlier call. 0 or >1 matches → leave null (never guess).
+        const { data: inv, error: invErr } = await service
+          .from("invoices")
+          .select("invoice_number")
+          .eq("external_id", row.source_invoice_id)
+          .eq("source", INVOICE_SOURCE)
+          .eq("subscriber_id", row.subscriber_id);
+        if (invErr) {
+          throw new Error(
+            `insertLedgerRow invoice_number lookup failed (${row.source_invoice_id}): ${invErr.message}`,
+          );
+        }
+        const invoiceNumber = inv && inv.length === 1 ? (inv[0].invoice_number ?? null) : null;
+        payload = { ...row, invoice_number: invoiceNumber };
+      }
+
       const { data, error } = await service
         .from("rev_share_ledger")
-        .insert(row)
+        .insert(payload)
         .select("id")
         .single();
 

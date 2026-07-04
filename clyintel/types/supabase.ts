@@ -958,6 +958,7 @@ export type Database = {
           fee_amount: number
           id: string
           invoice_face_value: number
+          invoice_number: string | null
           invoice_ref: string
           rate: number
           source: string | null
@@ -975,6 +976,7 @@ export type Database = {
           fee_amount: number
           id?: string
           invoice_face_value: number
+          invoice_number?: string | null
           invoice_ref: string
           rate: number
           source?: string | null
@@ -992,6 +994,7 @@ export type Database = {
           fee_amount?: number
           id?: string
           invoice_face_value?: number
+          invoice_number?: string | null
           invoice_ref?: string
           rate?: number
           source?: string | null
