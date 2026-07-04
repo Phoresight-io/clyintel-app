@@ -5,6 +5,9 @@
 // the same convention the webhook route established. Server-only — never import
 // from client components, as it reads STRIPE_SECRET_KEY.
 
+import { getSupabase } from "@/lib/supabase";
+import { computeRevShareFee } from "@/lib/revshare/computeRevShareFee";
+
 const STRIPE_API = "https://api.stripe.com/v1";
 
 function getKey(): string {
@@ -160,30 +163,61 @@ export async function retrieveAccount(accountId: string): Promise<StripeConnectA
 // a DESTINATION CHARGE to the subscriber's Express account. The session is minted
 // at click-time so the amount always reflects the live balance (live-resolve).
 //
-// application_fee_amount = round(balance × plan_rev_share_rate) — billed on the
-// gross charge amount in the same currency minor units.
+// application_fee_amount comes from the REV-SHARE BAND ENGINE (computeRevShareFee),
+// NOT plans.revenue_share_rate: the band is selected from the invoice FACE VALUE
+// and the fee is rate × dollars recovered. An invoice whose face value is below
+// the qualifying floor earns no rev share and MUST NOT be charged here — the
+// function returns { ok: false, reason: "below_minimum" } rather than minting a
+// zero-fee destination charge. The engine's band schedule is the single source of
+// truth; this module imports it and never reimplements the bands.
 //
-// Metadata is placed on both the Session and the PaymentIntent so the Prompt 4
-// webhook can reconcile the payment back to the recovery_link regardless of which
-// object the event carries.
+// On success the minted Checkout Session id + hosted URL are persisted back onto
+// the recovery_links row (matched by token) so later reconciliation (the webhook
+// PR) can locate them. link_status is intentionally left untouched here.
+//
+// Metadata is placed on both the Session and the PaymentIntent so the webhook can
+// reconcile the payment back to the recovery_link regardless of which object the
+// event carries.
 
 export interface RecoveryCheckoutOpts {
   token: string;
   invoiceId: string;
   subscriberId: string;
-  providerAccountId: string;   // connected Express account (acct_…)
-  revShareRate: number;        // fraction, e.g. 0.12 for 12 %
-  balanceCents: number;        // authoritative remaining balance in minor units
-  currency: string;            // ISO 4217 lowercase, e.g. "usd"
+  providerAccountId: string;     // connected Express account (acct_…)
+  invoiceFaceValueCents: number; // full invoice face value in minor units — the band selector
+  balanceCents: number;          // authoritative remaining balance in minor units — dollars recovered
+  currency: string;              // ISO 4217 lowercase, e.g. "usd"
   invoiceNumber: string | null;
   successUrl: string;
   cancelUrl: string;
 }
 
+export type RecoveryCheckoutResult =
+  | { ok: true; url: string; sessionId: string }
+  | { ok: false; reason: "below_minimum" };
+
 export async function createRecoveryCheckoutSession(
   opts: RecoveryCheckoutOpts
-): Promise<string> {
-  const fee = Math.round(opts.balanceCents * opts.revShareRate);
+): Promise<RecoveryCheckoutResult> {
+  // Fee from the band engine. Inputs are DOLLARS (the engine's native unit), so
+  // convert the *_cents columns at this boundary. Never recompute bands here.
+  const fee = computeRevShareFee({
+    invoiceFaceValue: opts.invoiceFaceValueCents / 100,
+    dollarsRecovered: opts.balanceCents / 100,
+  });
+
+  // Below the qualifying floor (face value < MIN_QUALIFYING_FACE) → no rev share
+  // is due. Refuse rather than create a zero-fee charge; the caller decides how
+  // to surface this.
+  if (!fee.qualifies) {
+    return { ok: false, reason: "below_minimum" };
+  }
+
+  // feeAmount is dollars already floored to whole cents by the engine; ×100 then
+  // round yields the integer minor-unit amount Stripe expects (round absorbs any
+  // binary-float drift from the multiply).
+  const applicationFeeAmount = Math.round(fee.feeAmount * 100);
+
   const lineItemName = opts.invoiceNumber
     ? `Invoice #${opts.invoiceNumber} — outstanding balance`
     : "Outstanding invoice balance";
@@ -194,32 +228,59 @@ export async function createRecoveryCheckoutSession(
     subscriber_id: opts.subscriberId,
   };
 
-  const session = await stripeRequest<{ url: string | null }>("/checkout/sessions", "POST", {
-    mode: "payment",
-    line_items: [
-      {
-        price_data: {
-          currency: opts.currency,
-          unit_amount: opts.balanceCents,
-          product_data: {
-            name: lineItemName,
+  const session = await stripeRequest<{ id: string; url: string | null }>(
+    "/checkout/sessions",
+    "POST",
+    {
+      mode: "payment",
+      line_items: [
+        {
+          price_data: {
+            currency: opts.currency,
+            unit_amount: opts.balanceCents,
+            product_data: {
+              name: lineItemName,
+            },
           },
+          quantity: 1,
         },
-        quantity: 1,
+      ],
+      payment_intent_data: {
+        transfer_data: {
+          destination: opts.providerAccountId,
+        },
+        application_fee_amount: applicationFeeAmount,
+        metadata: sessionMeta,
       },
-    ],
-    payment_intent_data: {
-      transfer_data: {
-        destination: opts.providerAccountId,
-      },
-      application_fee_amount: fee,
       metadata: sessionMeta,
-    },
-    metadata: sessionMeta,
-    success_url: opts.successUrl,
-    cancel_url: opts.cancelUrl,
-  });
+      success_url: opts.successUrl,
+      cancel_url: opts.cancelUrl,
+    }
+  );
 
   if (!session.url) throw new Error("Stripe did not return a Checkout Session URL");
-  return session.url;
+
+  // Persist the session back onto the recovery_links row so reconciliation can
+  // find it by stripe_checkout_session_id. Non-fatal: the charge is already live,
+  // so a bookkeeping-write failure must not blank out the URL the client needs —
+  // log loudly and return the URL anyway. link_status is NOT touched (that's the
+  // webhook's job).
+  const supabase = getSupabase();
+  const { error: writebackError } = await supabase
+    .from("recovery_links")
+    .update({
+      stripe_checkout_session_id: session.id,
+      payment_link_url: session.url,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("token", opts.token);
+
+  if (writebackError) {
+    console.error(
+      `createRecoveryCheckoutSession: failed to persist session for token ${opts.token.slice(0, 8)}…`,
+      writebackError
+    );
+  }
+
+  return { ok: true, url: session.url, sessionId: session.id };
 }
