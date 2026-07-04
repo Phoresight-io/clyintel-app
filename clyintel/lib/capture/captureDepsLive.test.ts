@@ -199,3 +199,92 @@ describe("insertLedgerRow", () => {
     await expect(deps.insertLedgerRow(LEDGER_ROW)).rejects.toThrow(/insertLedgerRow failed/);
   });
 });
+
+// A Supabase stub that additionally records the payload handed to
+// rev_share_ledger.insert(), so we can assert the invoice_number enrichment gate.
+function makeRecordingSupabase(
+  queues: Record<string, Result[]>,
+  captured: { payload?: Record<string, unknown> },
+) {
+  const from = vi.fn((table: string) => {
+    const builder: Record<string, unknown> = {};
+    const chain = () => builder;
+    for (const m of ["select", "eq", "not", "limit", "maybeSingle", "single"]) {
+      builder[m] = vi.fn(chain);
+    }
+    builder.insert = vi.fn((payload: Record<string, unknown>) => {
+      if (table === "rev_share_ledger") captured.payload = payload;
+      return builder;
+    });
+    builder.then = (onF: (v: Result) => unknown, onR?: (e: unknown) => unknown) => {
+      const q = queues[table];
+      if (!q || q.length === 0) {
+        return Promise.reject(new Error(`no queued result for table ${table}`)).then(onF, onR);
+      }
+      return Promise.resolve(q.shift() as Result).then(onF, onR);
+    };
+    return builder;
+  });
+  return { from };
+}
+
+function recordingDeps(queues: Record<string, Result[]>, captured: { payload?: Record<string, unknown> }) {
+  vi.mocked(getSupabase).mockReturnValue(makeRecordingSupabase(queues, captured) as never);
+  return createLiveCaptureDeps();
+}
+
+describe("insertLedgerRow invoice_number enrichment gate", () => {
+  it("stripe_recovery source → re-queries the invoice and stamps invoice_number", async () => {
+    const captured: { payload?: Record<string, unknown> } = {};
+    const deps = recordingDeps(
+      {
+        invoices: [{ data: [{ invoice_number: "1038" }], error: null }],
+        rev_share_ledger: [{ data: { id: "led_sr" }, error: null }],
+      },
+      captured,
+    );
+
+    const row: LedgerInsert = {
+      ...LEDGER_ROW,
+      source: "stripe_recovery",
+      source_payment_id: "pi_x",
+      source_invoice_id: "145",
+    };
+    expect(await deps.insertLedgerRow(row)).toEqual({ inserted: true, id: "led_sr" });
+    expect(captured.payload?.invoice_number).toBe("1038");
+  });
+
+  it("stripe_recovery source, 0 or ambiguous invoice matches → invoice_number null (never guesses)", async () => {
+    const captured: { payload?: Record<string, unknown> } = {};
+    const deps = recordingDeps(
+      {
+        invoices: [{ data: [{ invoice_number: "a" }, { invoice_number: "b" }], error: null }],
+        rev_share_ledger: [{ data: { id: "led_sr2" }, error: null }],
+      },
+      captured,
+    );
+
+    const row: LedgerInsert = {
+      ...LEDGER_ROW,
+      source: "stripe_recovery",
+      source_payment_id: "pi_y",
+      source_invoice_id: "145",
+    };
+    expect(await deps.insertLedgerRow(row)).toEqual({ inserted: true, id: "led_sr2" });
+    expect(captured.payload?.invoice_number).toBeNull();
+  });
+
+  it("qbo source → no invoice re-query, payload carries no invoice_number key", async () => {
+    const captured: { payload?: Record<string, unknown> } = {};
+    // No `invoices` queue on purpose: if the gate leaked and re-queried, the stub
+    // would reject with "no queued result for table invoices".
+    const deps = recordingDeps(
+      { rev_share_ledger: [{ data: { id: "led_q" }, error: null }] },
+      captured,
+    );
+
+    expect(await deps.insertLedgerRow(LEDGER_ROW)).toEqual({ inserted: true, id: "led_q" });
+    expect(captured.payload).toBeDefined();
+    expect("invoice_number" in (captured.payload as object)).toBe(false);
+  });
+});
