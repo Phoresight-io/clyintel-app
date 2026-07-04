@@ -17,7 +17,7 @@
 import { redirect } from "next/navigation";
 import { getSupabase } from "@/lib/supabase";
 import { getRemainingBalance } from "@/lib/recovery/balance";
-import { createRecoveryCheckoutSession } from "@/lib/stripe";
+import { createRecoveryCheckoutSession, type RecoveryCheckoutResult } from "@/lib/stripe";
 
 function getAppUrl(): string {
   if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL;
@@ -78,12 +78,12 @@ export default async function PayPage({ params, searchParams }: PageProps) {
   const [subResult, invoiceResult] = await Promise.all([
     service
       .from("subscribers")
-      .select("pay_gate_require_invoice_number, pay_gate_require_zip, plan:plans(revenue_share_rate)")
+      .select("pay_gate_require_invoice_number, pay_gate_require_zip")
       .eq("id", link.subscriber_id)
       .single(),
     service
       .from("invoices")
-      .select("invoice_number, currency, client_id")
+      .select("invoice_number, currency, client_id, amount_cents")
       .eq("id", link.invoice_id)
       .single(),
   ]);
@@ -122,25 +122,16 @@ export default async function PayPage({ params, searchParams }: PageProps) {
 
     if (!payout?.provider_account_id) return <DeadEnd reason="error" />;
 
-    const revShareRate =
-      (sub.plan as { revenue_share_rate?: number } | null)?.revenue_share_rate ?? null;
-    if (revShareRate === null) {
-      console.error(
-        `pay/${token}: unresolvable revenue_share_rate — invoice_id=${link.invoice_id} subscriber_id=${link.subscriber_id}`
-      );
-      return <DeadEnd reason="error" />;
-    }
-
     const origin = getAppUrl();
 
-    let sessionUrl: string;
+    let result: RecoveryCheckoutResult;
     try {
-      sessionUrl = await createRecoveryCheckoutSession({
+      result = await createRecoveryCheckoutSession({
         token,
         invoiceId: link.invoice_id,
         subscriberId: link.subscriber_id,
         providerAccountId: payout.provider_account_id,
-        revShareRate,
+        invoiceFaceValueCents: invoice.amount_cents,
         balanceCents,
         currency: invoice.currency,
         invoiceNumber: invoice.invoice_number,
@@ -151,7 +142,17 @@ export default async function PayPage({ params, searchParams }: PageProps) {
       return <DeadEnd reason="error" />;
     }
 
-    redirect(sessionUrl);
+    // Face value below the rev-share floor — no fee is due, so no session was
+    // minted. A recovery link should not have been issued for such an invoice;
+    // treat it as an error dead-end rather than charging with a zero fee.
+    if (!result.ok) {
+      console.error(
+        `pay/${token}: invoice below rev-share minimum, refusing to create session — invoice_id=${link.invoice_id}`
+      );
+      return <DeadEnd reason="error" />;
+    }
+
+    redirect(result.url);
   }
 
   // ── 5. Gate required → challenge form ───────────────────────────────────────
@@ -186,12 +187,12 @@ export default async function PayPage({ params, searchParams }: PageProps) {
     const [subRes, invRes] = await Promise.all([
       svc
         .from("subscribers")
-        .select("pay_gate_require_invoice_number, pay_gate_require_zip, plan:plans(revenue_share_rate)")
+        .select("pay_gate_require_invoice_number, pay_gate_require_zip")
         .eq("id", lnk.subscriber_id)
         .single(),
       svc
         .from("invoices")
-        .select("invoice_number, currency, client_id")
+        .select("invoice_number, currency, client_id, amount_cents")
         .eq("id", lnk.invoice_id)
         .single(),
     ]);
@@ -239,25 +240,16 @@ export default async function PayPage({ params, searchParams }: PageProps) {
 
     if (!po?.provider_account_id) redirect(`/pay/${token}?error=1`);
 
-    const rate =
-      (subData.plan as { revenue_share_rate?: number } | null)?.revenue_share_rate ?? null;
-    if (rate === null) {
-      console.error(
-        `pay/${token} verifyChallenge: unresolvable revenue_share_rate — invoice_id=${lnk.invoice_id} subscriber_id=${lnk.subscriber_id}`
-      );
-      redirect(`/pay/${token}?error=1`);
-    }
-
     const appUrl = getAppUrl();
 
-    let sUrl: string;
+    let result: RecoveryCheckoutResult;
     try {
-      sUrl = await createRecoveryCheckoutSession({
+      result = await createRecoveryCheckoutSession({
         token,
         invoiceId: lnk.invoice_id,
         subscriberId: lnk.subscriber_id,
         providerAccountId: po!.provider_account_id!,
-        revShareRate: rate,
+        invoiceFaceValueCents: invData.amount_cents,
         balanceCents: balance,
         currency: invData.currency,
         invoiceNumber: invData.invoice_number,
@@ -268,7 +260,15 @@ export default async function PayPage({ params, searchParams }: PageProps) {
       redirect(`/pay/${token}?error=1`);
     }
 
-    redirect(sUrl!);
+    // Face value below the rev-share floor — no fee due, no session minted.
+    if (!result.ok) {
+      console.error(
+        `pay/${token} verifyChallenge: invoice below rev-share minimum, refusing to create session — invoice_id=${lnk.invoice_id}`
+      );
+      redirect(`/pay/${token}?error=1`);
+    }
+
+    redirect(result.url);
   }
 
   return (
