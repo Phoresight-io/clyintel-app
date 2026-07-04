@@ -138,6 +138,10 @@ export interface QboCustomerListItem {
   Id: string;
   DisplayName?: string;
   Active?: boolean;
+  /** Primary email — optional; a customer may carry none. Path: PrimaryEmailAddr.Address. */
+  PrimaryEmailAddr?: { Address?: string };
+  /** Primary phone — optional; a customer may carry none. Path: PrimaryPhone.FreeFormNumber. */
+  PrimaryPhone?: { FreeFormNumber?: string };
   raw?: unknown;
 }
 

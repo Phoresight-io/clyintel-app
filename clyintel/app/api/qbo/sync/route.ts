@@ -3,6 +3,7 @@ import { createSupabaseServer } from "@/lib/supabase-server";
 import { getSupabase } from "@/lib/supabase";
 import { getValidAccessToken } from "@/lib/qbo/tokens";
 import { listCustomers, listInvoices } from "@/lib/qbo/client";
+import { mergeClientContact } from "@/lib/qbo/mergeClientContact";
 
 // QuickBooks Online full intake sync. On POST, for the authenticated subscriber:
 // pull every Customer + Invoice from QBO and upsert them into clients / invoices.
@@ -54,12 +55,37 @@ export async function POST() {
     const clientIdByQboId = new Map<string, string>(); // QBO Customer Id → clients.id
 
     if (customers.length > 0) {
-      const clientRows = customers.map((c) => ({
-        subscriber_id: subscriberId,
-        source: "qbo",
-        external_id: c.Id,
-        name: c.DisplayName ?? c.Id,
-      }));
+      // Pre-read existing contact values so a re-sync where QBO omits email/phone
+      // coalesces against what we already have (never clobber a non-null with
+      // null — supabase-js .upsert writes every payload column). Keyed by the QBO
+      // Customer Id (= clients.external_id for source='qbo').
+      const existingContactByQboId = new Map<string, { email: string | null; phone: string | null }>();
+      const { data: existingClients, error: existingError } = await service
+        .from("clients")
+        .select("external_id, email, phone")
+        .eq("subscriber_id", subscriberId)
+        .eq("source", "qbo");
+
+      if (existingError) {
+        throw new Error(`QBO sync: existing clients read failed: ${existingError.message}`);
+      }
+      for (const row of existingClients ?? []) {
+        if (row.external_id) {
+          existingContactByQboId.set(row.external_id, { email: row.email, phone: row.phone });
+        }
+      }
+
+      const clientRows = customers.map((c) => {
+        const contact = mergeClientContact(c, existingContactByQboId.get(c.Id));
+        return {
+          subscriber_id: subscriberId,
+          source: "qbo",
+          external_id: c.Id,
+          name: c.DisplayName ?? c.Id,
+          email: contact.email,
+          phone: contact.phone,
+        };
+      });
 
       const { data: upsertedClients, error: clientError } = await service
         .from("clients")
