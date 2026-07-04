@@ -3,6 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import crypto from "crypto";
 import { getSupabase } from "@/lib/supabase";
 import { sendEmail } from "@/lib/email";
+import { handleRecoveryCheckoutCompleted } from "@/lib/recovery/handleCheckoutCompleted";
 
 // Free plan: the canonical downgrade target on cancellation. Only the id is
 // hardcoded — the plan's entitlements are read at runtime so this never drifts
@@ -620,6 +621,12 @@ async function processEvent(event: StripeEvent) {
     }
     case "charge.refunded": {
       await handleChargeRefunded(object, event.id);
+      break;
+    }
+    case "checkout.session.completed": {
+      // Recovery-payment capture bridge. Only sessions that match a recovery_links
+      // row are acted on; subscription/other sessions fall through as a no-op.
+      await handleRecoveryCheckoutCompleted(object, event.id, event.created);
       break;
     }
     default:
