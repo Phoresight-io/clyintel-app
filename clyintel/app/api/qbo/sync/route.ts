@@ -4,6 +4,7 @@ import { getSupabase } from "@/lib/supabase";
 import { getValidAccessToken } from "@/lib/qbo/tokens";
 import { listCustomers, listInvoices } from "@/lib/qbo/client";
 import { mergeClientContact } from "@/lib/qbo/mergeClientContact";
+import { evaluateOutreachEligibility } from "@/lib/outreach/eligibility";
 
 // QuickBooks Online full intake sync. On POST, for the authenticated subscriber:
 // pull every Customer + Invoice from QBO and upsert them into clients / invoices.
@@ -153,7 +154,69 @@ export async function POST() {
       invoicesUpserted = upsertedInvoices?.length ?? 0;
     }
 
-    return NextResponse.json({ customersUpserted, invoicesUpserted, invoicesSkipped });
+    // --- Outreach eligibility (Brick A) ----------------------------------
+    // Post-invoice seam. For each eligible past-due, contactable invoice with no
+    // prior attempt, record ONE simulated recovery_attempts row (sent_at set) so
+    // the capture gate's outreach attribution is satisfied. Option B stub — no
+    // real send; rows are marked SIMULATION and carry communication_id = null.
+    // Does not alter the invoice/client sync above; failure throws → 500 like the
+    // rest of the sync. Read subscriber-scoped source='qbo'; evaluate in the pure
+    // engine; bulk-insert new rows via the existing service client.
+    let outreachAttemptsCreated = 0;
+    {
+      const [invoicesRes, clientsRes, attemptsRes] = await Promise.all([
+        service
+          .from("invoices")
+          .select("id, subscriber_id, client_id, due_date")
+          .eq("subscriber_id", subscriberId)
+          .eq("source", "qbo"),
+        service
+          .from("clients")
+          .select("id, email, phone")
+          .eq("subscriber_id", subscriberId)
+          .eq("source", "qbo"),
+        // Idempotency skip-set: any invoice with an existing attempt (any source).
+        service
+          .from("recovery_attempts")
+          .select("invoice_id")
+          .eq("subscriber_id", subscriberId),
+      ]);
+
+      if (invoicesRes.error) {
+        throw new Error(`QBO sync: eligibility invoices read failed: ${invoicesRes.error.message}`);
+      }
+      if (clientsRes.error) {
+        throw new Error(`QBO sync: eligibility clients read failed: ${clientsRes.error.message}`);
+      }
+      if (attemptsRes.error) {
+        throw new Error(`QBO sync: eligibility attempts read failed: ${attemptsRes.error.message}`);
+      }
+
+      const existingAttemptInvoiceIds = new Set(
+        (attemptsRes.data ?? []).map((r) => r.invoice_id),
+      );
+      const rows = evaluateOutreachEligibility(
+        invoicesRes.data ?? [],
+        clientsRes.data ?? [],
+        existingAttemptInvoiceIds,
+        new Date(),
+      );
+
+      if (rows.length > 0) {
+        const { error: insertError } = await service.from("recovery_attempts").insert(rows);
+        if (insertError) {
+          throw new Error(`QBO sync: recovery_attempts insert failed: ${insertError.message}`);
+        }
+        outreachAttemptsCreated = rows.length;
+      }
+    }
+
+    return NextResponse.json({
+      customersUpserted,
+      invoicesUpserted,
+      invoicesSkipped,
+      outreachAttemptsCreated,
+    });
   } catch (err) {
     // The QBO client strips access tokens from its error messages, so echoing
     // the message here is safe. Any throw (token lookup, QBO fetch, upsert) → 500.
