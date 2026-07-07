@@ -3,7 +3,6 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 import type { Invoice, Client, NegotiationRec, ClientInvoiceSet, Exchange } from "@/lib/mock-data";
-import { isDemoReset, CLIENTS_KEY, INTEGRATIONS_KEY } from "@/lib/demo-mode";
 import ExchangeDrawer from "@/components/shared/ExchangeDrawer";
 import NegotiationActions from "./NegotiationActions";
 import { RecCard } from "./RecoveryRecModal";
@@ -25,21 +24,14 @@ interface FlatInvoice extends Invoice {
 
 interface DashboardScreenProps {
   // Real Supabase-backed data, scoped to the authenticated subscriber.
-  // When demo mode is active these are ignored in favour of mock data.
   initialClients?: Client[];
   initialClientInvoices?: Record<string | number, ClientInvoiceSet>;
 }
 
 export default function DashboardScreen({ initialClients, initialClientInvoices }: DashboardScreenProps = {}) {
-  const isReset = isDemoReset();
-  const isCustomMode = !!localStorage.getItem(INTEGRATIONS_KEY);
-  const storedClients: Client[] = (() => {
-    if (isReset) return [];
-    try { return JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]') as Client[]; } catch { return []; }
-  })();
-  // Default path = real subscriber data. Mock data has been flushed (D2 closeout);
-  // exchanges/negotiations stay empty until D3 wires their real sources.
-  const clients = isReset ? [] : isCustomMode ? storedClients : (initialClients ?? []);
+  // Real subscriber data is the only source (demo mode removed);
+  // exchanges/negotiations stay empty until their real sources are wired.
+  const clients = initialClients ?? [];
   const clientInvoices = initialClientInvoices ?? ({} as Record<string | number, ClientInvoiceSet>);
   const invoiceExchanges = {} as Record<string, Exchange[]>;
   const negotiationRecs = [] as NegotiationRec[];

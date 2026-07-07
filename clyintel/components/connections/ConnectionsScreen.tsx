@@ -1,9 +1,8 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
-import type { InvoiceService, ManualField, Client, ClientStatus } from "@/lib/mock-data";
-import { CLIENTS_KEY, DEMO_RESET_KEY } from "@/lib/demo-mode";
+import type { InvoiceService, ManualField } from "@/lib/mock-data";
 
 // static UI config, not mock data — the Add-Client tiles (labels/colors/logos).
 const INVOICE_SERVICES: InvoiceService[] = [
@@ -11,9 +10,8 @@ const INVOICE_SERVICES: InvoiceService[] = [
   { id: "fb",     name: "FreshBooks",   color: "#1068e0", initial: "FB",  logo: "https://cdn.simpleicons.org/freshbooks/FFFFFF",  subtitle: "Sync invoices from FreshBooks" },
   { id: "stripe", name: "Stripe",       color: "#635BFF", initial: "ST",  logo: "https://cdn.simpleicons.org/stripe/FFFFFF",      subtitle: "Sync invoices from Stripe" },
   { id: "xero",   name: "Xero",         color: "#13B5EA", initial: "XR",  logo: "https://cdn.simpleicons.org/xero/FFFFFF",        subtitle: "Sync invoices from Xero" },
-  { id: "gdrive", name: "Google Drive", color: "#1FA463", initial: "GD",  logo: "https://cdn.simpleicons.org/googledrive/FFFFFF", subtitle: "Pick a CSV from your Drive" },
-  { id: "csv",    name: "Upload CSV",   color: "#475569", initial: "CSV",                                                          subtitle: "Upload a CSV file from your computer" },
-  { id: "manual", name: "Manual Entry", color: "#64748B", initial: "ME",                                                           subtitle: "Create an invoice manually" },
+  { id: "gdrive", name: "Google Drive", color: "#1FA463", initial: "GD",  logo: "https://cdn.simpleicons.org/googledrive/FFFFFF", subtitle: "Import from a spreadsheet in Drive" },
+  { id: "manual", name: "Manual Entry", color: "#64748B", initial: "ME",                                                          subtitle: "Create an invoice manually" },
 ];
 
 // static UI config, not mock data — fields for the real manual-invoice form.
@@ -26,79 +24,17 @@ const MANUAL_FIELDS: ManualField[] = [
   { id: "notes", label: "Notes", type: "textarea", placeholder: "Any additional context..." },
 ];
 
-// Integrations without a live sync path yet — shown but disabled until D3.
+// Integrations without a live sync path yet — shown but disabled ("coming soon").
 // (QuickBooks is NOT here: its tile shows real connection state via /api/qbo/status.)
 const COMING_SOON = new Set(["fb", "stripe", "xero", "gdrive"]);
 
-function parseCSVToClients(text: string, startId: number): Client[] {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) return [];
-
-  const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase());
-  const col = (row: string[], name: string) => {
-    const idx = headers.indexOf(name);
-    return idx >= 0 ? (row[idx] ?? '').trim().replace(/^["']|["']$/g, '') : '';
-  };
-
-  const clients: Client[] = [];
-  let nextId = startId;
-
-  for (let i = 1; i < lines.length; i++) {
-    const row = lines[i].split(',');
-    const name = col(row, 'name') || col(row, 'client_name') || col(row, 'client');
-    if (!name) continue;
-
-    const rawBalance = parseFloat((col(row, 'balance') || col(row, 'amount') || '0').replace(/[$,]/g, ''));
-    const balance = isNaN(rawBalance) ? 0 : rawBalance;
-
-    const rawStatus = (col(row, 'status') || '').toLowerCase();
-    const status: ClientStatus =
-      rawStatus === 'past_due' || rawStatus === 'overdue' || rawStatus === 'late' ? 'past_due' :
-      rawStatus === 'due' || rawStatus === 'pending' ? 'due' : 'current';
-
-    const score = status === 'past_due' ? 48 + (i % 5) * 2 :
-                  status === 'due'      ? 67 + (i % 4) * 2 : 80 + (i % 3) * 2;
-    const daysOverdue = status === 'past_due' ? 15 + (i % 3) * 10 : 0;
-
-    clients.push({
-      id: nextId++,
-      name,
-      industry: col(row, 'industry') || 'Other',
-      score,
-      prevScore: score + 4,
-      status,
-      balance,
-      daysOverdue,
-      invoices: 1 + (i % 4),
-      lastActivity: status === 'current' ? 'Today' : `${daysOverdue} days ago`,
-      nextAction: status === 'past_due' ? 'Send overdue notice' : status === 'due' ? 'Monitor invoice' : 'No action needed',
-      scoreSummary: status === 'past_due' ? [`Payment overdue ${daysOverdue} days`] : [],
-      scoreFactors: [],
-      riskDrivers: status === 'past_due' ? [`${daysOverdue} days overdue`] : [],
-    });
-  }
-
-  return clients;
-}
-
-function writeClientsToStorage(newClients: Client[]) {
-  try {
-    const existing: Client[] = JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]');
-    const newIds = new Set(newClients.map(c => c.id));
-    const merged = [...existing.filter(c => !newIds.has(c.id)), ...newClients];
-    localStorage.setItem(CLIENTS_KEY, JSON.stringify(merged));
-    localStorage.removeItem(DEMO_RESET_KEY);
-  } catch { /* ignore */ }
-}
-
-type Stage = "connect" | "csv_upload" | "csv_uploading" | "csv_done" | "manual";
+type Stage = "connect" | "manual";
 type ManualForm = Record<string, string>;
 type QboStatus = { connected: boolean; external_id: string | null } | null;
 
 export default function ConnectionsScreen() {
   const router = useRouter();
   const [showBack, setShowBack] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const isDirect = sessionStorage.getItem('clyintel_nav_direct') === 'true';
@@ -122,7 +58,6 @@ export default function ConnectionsScreen() {
   const [manualSubmitted, setManualSubmitted] = useState(false);
   const [manualSaving, setManualSaving] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
-  const [selectedFile, setSelectedFile]     = useState<{ name: string; rows: number; size: string } | null>(null);
 
   // QuickBooks "Sync now" (D3): POST /api/qbo/sync, then refresh server data so
   // the newly synced clients/invoices render on the dashboard/portfolio.
@@ -132,48 +67,12 @@ export default function ConnectionsScreen() {
 
   const handleServiceClick = (svc: InvoiceService) => {
     if (svc.id === "manual") { setStage("manual"); return; }
-    if (svc.id === "csv")    { setStage("csv_upload"); return; }
     if (svc.id === "qb") {
       // Real QuickBooks OAuth (D1). Sync itself is D3; this only starts connect.
       if (!qboStatus?.connected) window.location.href = "/api/qbo/connect";
       return;
     }
     // fb / stripe / xero / gdrive → Coming soon, no action.
-  };
-
-  const handleUploadMore = () => { setSelectedFile(null); setStage("csv_upload"); };
-
-  const processFile = (file: File) => {
-    setStage("csv_uploading");
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      const existing: Client[] = (() => { try { return JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]') as Client[]; } catch { return []; } })();
-      const startId = Math.max(200, ...existing.map(c => typeof c.id === "number" ? c.id : 0)) + 1;
-      const parsed = parseCSVToClients(text, startId);
-      writeClientsToStorage(parsed);
-      setSelectedFile({ name: file.name, rows: parsed.length, size: `${Math.max(1, Math.round(file.size / 1024))} KB` });
-      setTimeout(() => setStage("csv_done"), 1800);
-    };
-    reader.onerror = () => {
-      setSelectedFile({ name: file.name, rows: 0, size: "0 KB" });
-      setTimeout(() => setStage("csv_done"), 1800);
-    };
-    reader.readAsText(file);
-  };
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) processFile(file);
-    e.target.value = '';
-  };
-
-  const handleFileUpload = () => { fileInputRef.current?.click(); };
-
-  const handleFileDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (file) processFile(file);
   };
 
   const handleManualSubmit = async () => {
@@ -233,7 +132,7 @@ export default function ConnectionsScreen() {
   };
 
   const integrations = INVOICE_SERVICES.filter(s => ["qb","fb","stripe","xero"].includes(s.id));
-  const bottomRow    = ["gdrive","csv","manual"].map(id => INVOICE_SERVICES.find(s => s.id === id)!);
+  const bottomRow    = ["gdrive","manual"].map(id => INVOICE_SERVICES.find(s => s.id === id)!);
 
   const svcIcon = (svc: InvoiceService, size = 32) => (
     <>
@@ -312,7 +211,6 @@ export default function ConnectionsScreen() {
     <div style={{ padding: "36px 48px", minHeight: 520, fontFamily: C.sans }}>
       <style>{`
         @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-        @keyframes bar{from{width:0%}to{width:100%}}
         button:focus-visible{outline:2px solid #2B6CB0;outline-offset:2px}
       `}</style>
 
@@ -323,7 +221,7 @@ export default function ConnectionsScreen() {
           <div style={{ maxWidth: 860, margin: "0 auto", textAlign: "center" }}>
             <div style={{ marginBottom: 40 }}>
               <div style={{ fontSize: 28, fontWeight: 700, color: C.navy, marginBottom: 8 }}>Add Client</div>
-              <div style={{ fontSize: 16, color: C.textMid, fontWeight: 500 }}>Connect your invoice source, import a file, or enter an invoice manually.</div>
+              <div style={{ fontSize: 16, color: C.textMid, fontWeight: 500 }}>Connect your invoice source or enter an invoice manually.</div>
             </div>
 
             {/* 4 integration tiles */}
@@ -363,8 +261,8 @@ export default function ConnectionsScreen() {
               <div style={{ flex: 1, height: 1, background: C.border }} />
             </div>
 
-            {/* Bottom 3: Google Drive | Upload CSV | Manual Entry */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+            {/* Bottom: Google Drive (coming soon) | Manual Entry */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
               {bottomRow.map(svc => {
                 const disabled = COMING_SOON.has(svc.id);
                 return (
@@ -377,11 +275,7 @@ export default function ConnectionsScreen() {
                     onMouseLeave={disabled ? undefined : e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.boxShadow = "none"; }}
                   >
                     <div style={{ width: 52, height: 52, borderRadius: 12, background: svc.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      {svc.id === "csv" ? (
-                        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 3v12" /><path d="M7 8l5-5 5 5" /><path d="M5 21h14" />
-                        </svg>
-                      ) : svc.id === "manual" ? (
+                      {svc.id === "manual" ? (
                         <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
                         </svg>
@@ -398,78 +292,6 @@ export default function ConnectionsScreen() {
             </div>
           </div>
         </>
-      )}
-
-      {/* ── CSV UPLOAD (drag-and-drop zone) ── */}
-      {stage === "csv_upload" && (
-        <>
-          {backBtn(() => setStage("connect"))}
-          <div style={{ maxWidth: 640, margin: "0 auto" }}>
-            <div style={{ marginBottom: 24 }}>
-              <div style={{ fontSize: 22, fontWeight: 600, color: C.text, marginBottom: 6 }}>Upload a CSV file</div>
-              <div style={{ fontSize: 14, color: C.textMid, fontWeight: 500 }}>Drag-and-drop a CSV from your computer, or browse to select one.</div>
-            </div>
-            <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" style={{ display: "none" }} onChange={handleFileSelect} />
-        <div onClick={handleFileUpload} onDrop={handleFileDrop} onDragOver={e => e.preventDefault()} onDragEnter={e => { e.preventDefault(); e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.background = C.blueBg; }} onDragLeave={e => { e.currentTarget.style.borderColor = C.borderLight ?? C.border; e.currentTarget.style.background = C.card; }} style={{ background: C.card, border: `2px dashed ${C.borderLight ?? C.border}`, borderRadius: 12, padding: "48px 32px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 14, marginBottom: 20, transition: "all 0.15s" }} onMouseEnter={e => { e.currentTarget.style.borderColor = C.blue; e.currentTarget.style.background = C.blueBg; }} onMouseLeave={e => { e.currentTarget.style.borderColor = C.borderLight ?? C.border; e.currentTarget.style.background = C.card; }}>
-              <div style={{ width: 56, height: 56, borderRadius: 14, background: C.surface, border: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke={C.blue} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 3v12" /><path d="M7 8l5-5 5 5" /><path d="M5 21h14" />
-                </svg>
-              </div>
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 16, fontWeight: 600, color: C.text, marginBottom: 4 }}>Drop your CSV here, or click to browse</div>
-                <div style={{ fontSize: 13, color: C.textDim, fontWeight: 500 }}>Up to 10 MB · UTF-8 encoded</div>
-              </div>
-            </div>
-            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: "14px 18px" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>Expected columns</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {["client_name","invoice_id","amount","due_date","issue_date","status","terms"].map(c => (
-                  <span key={c} style={{ fontSize: 11, fontFamily: C.mono, padding: "3px 8px", background: C.card, border: `1px solid ${C.border}`, borderRadius: 4, color: C.textMid, fontWeight: 500 }}>{c}</span>
-                ))}
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* ── CSV UPLOADING ── */}
-      {stage === "csv_uploading" && (
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 360 }}>
-          <div style={{ fontSize: 14, color: C.textDim, fontWeight: 500, fontFamily: C.mono, marginBottom: 6 }}>{selectedFile?.name || "invoices.csv"}</div>
-          <div style={{ fontSize: 16, fontWeight: 500, color: C.text, marginBottom: 6 }}>Uploading and processing...</div>
-          <div style={{ fontSize: 14, color: C.textMid, fontWeight: 500, marginBottom: 24 }}>Parsing rows · matching clients · scoring history</div>
-          <div style={{ width: 320, height: 4, background: C.border, borderRadius: 2, overflow: "hidden" }}>
-            <div style={{ height: "100%", background: C.blue, borderRadius: 2, animation: "bar 1.8s ease forwards" }} />
-          </div>
-        </div>
-      )}
-
-      {/* ── CSV DONE ── */}
-      {stage === "csv_done" && (
-        <div style={{ maxWidth: 560, margin: "40px auto 0", textAlign: "center" }}>
-          <div style={{ width: 56, height: 56, borderRadius: "50%", background: C.greenBg ?? "#DCFCE7", border: `2px solid ${C.green}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
-            <span style={{ fontSize: 28, color: C.green, lineHeight: 1 }}>✓</span>
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 600, color: C.text, marginBottom: 6 }}>Import complete</div>
-          <div style={{ fontSize: 15, color: C.textMid, fontWeight: 500, marginBottom: 4 }}>
-            <span style={{ fontFamily: C.mono, color: C.text, fontWeight: 500 }}>{selectedFile?.name}</span>
-          </div>
-          <div style={{ fontSize: 14, color: C.textMid, fontWeight: 500, marginBottom: 28 }}>
-            {selectedFile?.rows ?? 0} rows imported · {selectedFile?.size ?? "0 KB"}
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <button onClick={handleUploadMore} style={{ padding: "12px 20px", fontSize: 15, fontWeight: 600, color: "#FFFFFF", background: C.blue, border: "none", borderRadius: 8, cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.opacity = "0.88"} onMouseLeave={e => e.currentTarget.style.opacity = "1"}>
-              Upload more files
-            </button>
-            <button onClick={() => { setSelectedFile(null); setStage("connect"); }} style={{ padding: "12px 20px", fontSize: 15, fontWeight: 600, color: C.text, background: "#FFFFFF", border: `1px solid ${C.border}`, borderRadius: 8, cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.borderColor = C.blue} onMouseLeave={e => e.currentTarget.style.borderColor = C.border}>
-              Back to Add Client
-            </button>
-            <button onClick={() => { sessionStorage.removeItem('clyintel_nav_direct'); router.push("/"); }} style={{ padding: "12px 20px", fontSize: 15, fontWeight: 600, color: C.text, background: "#FFFFFF", border: `1px solid ${C.border}`, borderRadius: 8, cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.borderColor = C.blue} onMouseLeave={e => e.currentTarget.style.borderColor = C.border}>
-              Go to Recovery Dashboard →
-            </button>
-          </div>
-        </div>
       )}
 
       {/* ── MANUAL ENTRY ── */}

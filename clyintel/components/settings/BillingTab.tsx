@@ -5,7 +5,6 @@ import { createSupabaseBrowser } from "@/lib/supabase-browser";
 import { REV_SHARE_BANDS, MIN_QUALIFYING_FACE } from "@/lib/revshare/bands";
 import {
   groupIntoCurrentCycle,
-  LedgerSeedRow,
   CurrentCycle,
 } from "@/lib/revshare/accrualLedger";
 
@@ -23,15 +22,6 @@ const CHECKOUT_TIERS = new Set(["starter", "plus", "pro"]);
 // only — their plan records and Stripe products are untouched).
 const BETA_VISIBLE_TIERS = new Set(["free", "starter", "plus"]);
 
-// Prototype ledger seed. A real `rev_share_ledger` table drops in behind this
-// later; for now the tab renders this global mock array as-is (the existing
-// subscriber resolution below is left untouched — no new auth wiring).
-const MOCK_LEDGER: LedgerSeedRow[] = [
-  { invoiceRef: "INV-1042", faceValue: 1200, dollarsRecovered: 1200, detectedAt: "2026-06-02" },
-  { invoiceRef: "INV-1043", faceValue: 8500, dollarsRecovered: 6000, detectedAt: "2026-06-05" },
-  { invoiceRef: "INV-1044", faceValue: 30000, dollarsRecovered: 30000, detectedAt: "2026-06-09" },
-  { invoiceRef: "INV-1045", faceValue: 62000, dollarsRecovered: 45000, detectedAt: "2026-06-11" },
-];
 
 const fmtWhole = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 const fmtCents = (n: number) =>
@@ -67,7 +57,10 @@ export default function BillingTab() {
 
   // Resolve the current cycle client-side (avoids any SSR/client clock mismatch).
   useEffect(() => {
-    setCycle(groupIntoCurrentCycle(MOCK_LEDGER, new Date()));
+    // Real rev_share_ledger has 0 rows and isn't wired to this component yet, so
+    // the Accrual Ledger renders empty ("No accruals yet this cycle"). Passing an
+    // empty seed keeps the real cycle-close date while showing no fabricated rows.
+    setCycle(groupIntoCurrentCycle([], new Date()));
   }, []);
 
   useEffect(() => {
@@ -180,7 +173,7 @@ export default function BillingTab() {
         </div>
       </div>
 
-      {/* ── Accrual Ledger (prototype mock data grouped under the cycle close date) ── */}
+      {/* ── Accrual Ledger (empty until real rev_share_ledger is wired; renders "No accruals yet") ── */}
       <div style={{ marginBottom: 28 }}>
         {sectionHeader("Accrual Ledger", "Rev share accrued this cycle from off-platform recoveries.")}
         {!cycle ? (

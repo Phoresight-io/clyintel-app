@@ -3,7 +3,6 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 import type { Client, ClientInvoiceSet } from "@/lib/mock-data";
-import { isDemoReset, CLIENTS_KEY, INTEGRATIONS_KEY } from "@/lib/demo-mode";
 
 interface ClientListScreenProps {
   initialClients?: Client[];
@@ -11,14 +10,8 @@ interface ClientListScreenProps {
 }
 
 export default function ClientListScreen({ initialClients, initialClientInvoices }: ClientListScreenProps = {}) {
-  const isReset = isDemoReset();
-  const isCustomMode = !!localStorage.getItem(INTEGRATIONS_KEY);
-  const storedClients: Client[] = (() => {
-    if (isReset) return [];
-    try { return JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]') as Client[]; } catch { return []; }
-  })();
-  // Default path = real subscriber data. Mock data flushed (D2 closeout).
-  const clients = isReset ? [] : isCustomMode ? storedClients : (initialClients ?? []);
+  // Real subscriber data is the only source (demo mode removed).
+  const clients = initialClients ?? [];
   const clientInvoices = initialClientInvoices ?? ({} as Record<string | number, ClientInvoiceSet>);
 
   const router = useRouter();

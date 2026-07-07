@@ -2,42 +2,21 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
-import { DEMO_RESET_KEY, CLIENTS_KEY, INTEGRATIONS_KEY, DEFAULT_INTEGRATIONS } from "@/lib/demo-mode";
-import type { Client } from "@/lib/mock-data";
 import { createSupabaseBrowser } from "@/lib/supabase-browser";
 import BillingTab from "@/components/settings/BillingTab";
 import ConnectCard from "@/components/settings/ConnectCard";
 import RevenueRecoveryTab from "@/components/settings/RevenueRecoveryTab";
 
-type IntegrationStatus = "connected" | "syncing" | "disconnected";
-
-interface ManagedIntegration {
-  id: string;
-  name: string;
-  color: string;
-  initial: string;
-  logo?: string;
-  subtitle: string;
-  status: IntegrationStatus;
-  lastSync: string | null;
-  clients: number;
-  invoices: number;
-}
-
-const INTEGRATION_CLIENT_SEEDS: Record<string, Client[]> = {
-  stripe: [
-    { id: 101, name: "Atlas Commerce", industry: "E-commerce", score: 58, prevScore: 65, status: "past_due", balance: 3200, daysOverdue: 22, invoices: 3, lastActivity: "3 days ago", nextAction: "Send final notice", scoreSummary: ["Payment delayed 22 days"], scoreFactors: ["Late payment history"], riskDrivers: ["22 days overdue"] },
-  ],
-  fb: [
-    { id: 102, name: "Bright Solutions", industry: "Consulting", score: 71, prevScore: 68, status: "due", balance: 5800, daysOverdue: 0, invoices: 2, lastActivity: "Today", nextAction: "Follow up in 3 days", scoreSummary: ["Invoice due soon"], scoreFactors: [], riskDrivers: [] },
-  ],
-  xero: [
-    { id: 103, name: "Summit Partners", industry: "Finance", score: 45, prevScore: 52, status: "past_due", balance: 9400, daysOverdue: 45, invoices: 4, lastActivity: "1 week ago", nextAction: "Issue formal demand", scoreSummary: ["Critical collection risk"], scoreFactors: ["4 late payments"], riskDrivers: ["45 days overdue"] },
-  ],
-  gdrive: [
-    { id: 104, name: "Pixel Works", industry: "Creative", score: 63, prevScore: 60, status: "due", balance: 2100, daysOverdue: 0, invoices: 1, lastActivity: "2 days ago", nextAction: "Schedule follow-up", scoreSummary: ["Invoice due in 7 days"], scoreFactors: [], riskDrivers: [] },
-  ],
-};
+// Static invoice-source roster (demo mode removed — no localStorage, no mock
+// seeds, no fake sync). QuickBooks is the only live source; its state comes from
+// /api/qbo/status. Every other source is shown but inactive ("Coming soon").
+const INVOICE_SOURCES = [
+  { id: "qb",     name: "QuickBooks",   color: "#2CA01C", initial: "QB", logo: "https://cdn.simpleicons.org/quickbooks/FFFFFF" },
+  { id: "fb",     name: "FreshBooks",   color: "#1068e0", initial: "FB", logo: "https://cdn.simpleicons.org/freshbooks/FFFFFF" },
+  { id: "stripe", name: "Stripe",       color: "#635BFF", initial: "ST", logo: "https://cdn.simpleicons.org/stripe/FFFFFF" },
+  { id: "xero",   name: "Xero",         color: "#13B5EA", initial: "XR", logo: "https://cdn.simpleicons.org/xero/FFFFFF" },
+  { id: "gdrive", name: "Google Drive", color: "#1FA463", initial: "GD", logo: "https://cdn.simpleicons.org/googledrive/FFFFFF" },
+];
 
 const SETTING_TABS = [
   { id: "integrations",    label: "Integrations",    disabled: false },
@@ -47,19 +26,7 @@ const SETTING_TABS = [
   { id: "profile",         label: "Profile",         disabled: true  },
 ];
 
-function persist(list: ManagedIntegration[]) {
-  localStorage.setItem(INTEGRATIONS_KEY, JSON.stringify(list));
-}
-
-function StatusBadge({ status }: { status: IntegrationStatus }) {
-  if (status === "syncing") {
-    return (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 500, color: C.blue }}>
-        <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.blue, display: "inline-block", animation: "pulse 1.2s ease-in-out infinite" }} />
-        Syncing…
-      </span>
-    );
-  }
+function ConnectedBadge() {
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 500, color: C.green }}>
       <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.green, display: "inline-block" }} />
@@ -72,11 +39,12 @@ export default function IntegrationsScreen() {
   const router = useRouter();
 
   const [activeTab, setActiveTab] = useState("integrations");
-  const [integrations, setIntegrations] = useState<ManagedIntegration[]>(DEFAULT_INTEGRATIONS as ManagedIntegration[]);
-  const [disconnectConfirm, setDisconnectConfirm] = useState<string | null>(null);
 
   // Plan-derived revenue share rate — passed to ConnectCard for fee disclosure.
   const [revShareRate, setRevShareRate] = useState<number | null>(null);
+
+  // Real QuickBooks connection state (no mock flow) — drives the QB source card.
+  const [qboConnected, setQboConnected] = useState(false);
 
   // Honor ?tab= deep links. Connect onboarding returns to ?tab=integrations.
   useEffect(() => {
@@ -89,22 +57,14 @@ export default function IntegrationsScreen() {
     }
   }, []);
 
-  // Load integrations from localStorage
+  // Real QuickBooks connection status.
   useEffect(() => {
-    const reset = localStorage.getItem(DEMO_RESET_KEY) === "true";
-    if (reset) {
-      setIntegrations([]);
-      return;
-    }
-    const saved = localStorage.getItem(INTEGRATIONS_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as ManagedIntegration[];
-        setIntegrations(Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_INTEGRATIONS as ManagedIntegration[]);
-      } catch {
-        setIntegrations(DEFAULT_INTEGRATIONS as ManagedIntegration[]);
-      }
-    }
+    let active = true;
+    fetch("/api/qbo/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (active && d) setQboConnected(!!d.connected); })
+      .catch(() => { /* leave false — card shows "Coming soon"/inactive */ });
+    return () => { active = false; };
   }, []);
 
   // Fetch plan-derived revenue share rate for ConnectCard fee disclosure
@@ -126,38 +86,7 @@ export default function IntegrationsScreen() {
     return () => { active = false; };
   }, []);
 
-  const connected = integrations.filter((i) => i.status !== "disconnected");
-
-  const handleSyncNow = (id: string) => {
-    setIntegrations((prev) => prev.map((i) => i.id === id ? { ...i, status: "syncing" as const } : i));
-    setTimeout(() => {
-      setIntegrations((prev) => {
-        const next = prev.map((i) =>
-          i.id === id ? { ...i, status: "connected" as const, lastSync: "Just now" } : i
-        );
-        persist(next);
-        return next;
-      });
-    }, 2200);
-  };
-
-  const handleDisconnectIntegration = (id: string) => {
-    setDisconnectConfirm(null);
-    setIntegrations((prev) => {
-      const next = prev.map((i) =>
-        i.id === id ? { ...i, status: "disconnected" as const, lastSync: null, clients: 0, invoices: 0 } : i
-      );
-      persist(next);
-      return next;
-    });
-    const seedIds = new Set((INTEGRATION_CLIENT_SEEDS[id] ?? []).map((s) => s.id));
-    if (seedIds.size > 0) {
-      try {
-        const existing: Client[] = JSON.parse(localStorage.getItem(CLIENTS_KEY) || "[]");
-        localStorage.setItem(CLIENTS_KEY, JSON.stringify(existing.filter((c) => !seedIds.has(c.id))));
-      } catch { /* ignore */ }
-    }
-  };
+  const connectedCount = qboConnected ? 1 : 0;
 
   const handleAddClient = () => {
     router.push("/connections");
@@ -166,7 +95,6 @@ export default function IntegrationsScreen() {
   return (
     <div style={{ padding: "36px 48px", fontFamily: C.sans, maxWidth: 900, margin: "0 auto" }}>
       <style>{`
-        @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
         @keyframes fadeUp{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
       `}</style>
 
@@ -211,7 +139,7 @@ export default function IntegrationsScreen() {
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span style={{ fontSize: 16, fontWeight: 600, color: C.text }}>Integrations</span>
-                {connected.length > 0 && (
+                {connectedCount > 0 && (
                   <span
                     style={{
                       fontSize: 12,
@@ -222,7 +150,7 @@ export default function IntegrationsScreen() {
                       padding: "2px 8px",
                     }}
                   >
-                    {connected.length} connected
+                    {connectedCount} connected
                   </span>
                 )}
               </div>
@@ -264,7 +192,7 @@ export default function IntegrationsScreen() {
             <ConnectCard revShareRate={revShareRate} />
           </div>
 
-          {/* INVOICE SOURCES section */}
+          {/* INVOICE SOURCES section — static roster; QuickBooks live, others coming soon */}
           <div>
             <div
               style={{
@@ -279,23 +207,13 @@ export default function IntegrationsScreen() {
               Invoice Sources
             </div>
 
-            {connected.length === 0 ? (
-              <div
-                style={{
-                  background: C.surface,
-                  border: `1px dashed ${C.border}`,
-                  borderRadius: 10,
-                  padding: "36px 24px",
-                  textAlign: "center",
-                }}
-              >
-                <div style={{ fontSize: 14, color: C.textMid, fontWeight: 500 }}>No integrations available.</div>
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {connected.map((integration) => (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {INVOICE_SOURCES.map((source) => {
+                const isQb = source.id === "qb";
+                const active = isQb && qboConnected;
+                return (
                   <div
-                    key={integration.id}
+                    key={source.id}
                     style={{
                       background: C.card,
                       border: `1px solid ${C.border}`,
@@ -304,7 +222,7 @@ export default function IntegrationsScreen() {
                       display: "flex",
                       alignItems: "center",
                       gap: 20,
-                      animation: "fadeUp 0.18s ease",
+                      opacity: isQb ? 1 : 0.6,
                     }}
                   >
                     {/* Logo */}
@@ -313,150 +231,77 @@ export default function IntegrationsScreen() {
                         width: 48,
                         height: 48,
                         borderRadius: 12,
-                        background: integration.color,
+                        background: source.color,
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
                         flexShrink: 0,
                       }}
                     >
-                      {integration.logo && (
-                        <img
-                          src={integration.logo}
-                          alt={integration.name}
-                          style={{ width: 26, height: 26, objectFit: "contain" }}
-                          onError={(e) => {
-                            e.currentTarget.style.display = "none";
-                            (e.currentTarget.nextElementSibling as HTMLElement).style.display = "inline";
-                          }}
-                        />
-                      )}
-                      <span
-                        style={{
-                          fontSize: 14,
-                          fontWeight: 700,
-                          color: "#fff",
-                          display: integration.logo ? "none" : "inline",
+                      <img
+                        src={source.logo}
+                        alt={source.name}
+                        style={{ width: 26, height: 26, objectFit: "contain" }}
+                        onError={(e) => {
+                          e.currentTarget.style.display = "none";
+                          (e.currentTarget.nextElementSibling as HTMLElement).style.display = "inline";
                         }}
-                      >
-                        {integration.initial}
+                      />
+                      <span style={{ fontSize: 14, fontWeight: 700, color: "#fff", display: "none" }}>
+                        {source.initial}
                       </span>
                     </div>
 
                     {/* Info */}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 3 }}>
-                        <span style={{ fontSize: 15, fontWeight: 600, color: C.text }}>{integration.name}</span>
-                        {integration.status !== "disconnected" && <StatusBadge status={integration.status} />}
+                        <span style={{ fontSize: 15, fontWeight: 600, color: C.text }}>{source.name}</span>
+                        {active && <ConnectedBadge />}
                       </div>
                       <div style={{ fontSize: 13, color: C.textDim, fontWeight: 500 }}>
-                        Sync invoices from {integration.name}
+                        Sync invoices from {source.name}
                       </div>
-                      {integration.lastSync && (
-                        <div
-                          style={{
-                            fontSize: 11,
-                            color: C.textDim,
-                            fontWeight: 500,
-                            marginTop: 5,
-                            display: "flex",
-                            gap: 12,
-                          }}
-                        >
-                          <span>Last synced: {integration.lastSync}</span>
-                          {integration.clients > 0 && <span>·</span>}
-                          {integration.clients > 0 && (
-                            <span>
-                              {integration.clients} clients · {integration.invoices} invoices
-                            </span>
-                          )}
-                        </div>
-                      )}
                     </div>
 
-                    {/* Actions */}
-                    <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                      <button
-                        onClick={() => handleSyncNow(integration.id)}
-                        disabled={integration.status === "syncing"}
-                        style={{
-                          padding: "7px 14px",
-                          fontSize: 13,
-                          fontWeight: 600,
-                          color: integration.status === "syncing" ? C.textDim : C.blue,
-                          background: integration.status === "syncing" ? C.surface : C.blueBg,
-                          border: `1px solid ${integration.status === "syncing" ? C.border : C.blue}`,
-                          borderRadius: 6,
-                          cursor: integration.status === "syncing" ? "not-allowed" : "pointer",
-                        }}
-                      >
-                        {integration.status === "syncing" ? "Syncing…" : "Sync now"}
-                      </button>
-
-                      {disconnectConfirm === integration.id ? (
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <span style={{ fontSize: 11, color: C.textMid, fontWeight: 500 }}>Disconnect?</span>
-                          <button
-                            onClick={() => handleDisconnectIntegration(integration.id)}
-                            style={{
-                              padding: "7px 12px",
-                              fontSize: 13,
-                              fontWeight: 600,
-                              color: "#fff",
-                              background: C.red,
-                              border: "none",
-                              borderRadius: 6,
-                              cursor: "pointer",
-                            }}
-                          >
-                            Yes, disconnect
-                          </button>
-                          <button
-                            onClick={() => setDisconnectConfirm(null)}
-                            style={{
-                              padding: "7px 12px",
-                              fontSize: 13,
-                              fontWeight: 500,
-                              color: C.textMid,
-                              background: C.surface,
-                              border: `1px solid ${C.border}`,
-                              borderRadius: 6,
-                              cursor: "pointer",
-                            }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
+                    {/* Action */}
+                    <div style={{ flexShrink: 0 }}>
+                      {isQb ? (
                         <button
-                          onClick={() => setDisconnectConfirm(integration.id)}
+                          onClick={handleAddClient}
                           style={{
                             padding: "7px 14px",
                             fontSize: 13,
                             fontWeight: 600,
-                            color: C.textMid,
-                            background: C.surface,
-                            border: `1px solid ${C.border}`,
+                            color: C.blue,
+                            background: C.blueBg,
+                            border: `1px solid ${C.blue}`,
                             borderRadius: 6,
                             cursor: "pointer",
                           }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.color = C.red;
-                            e.currentTarget.style.borderColor = C.red;
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.color = C.textMid;
-                            e.currentTarget.style.borderColor = C.border;
+                        >
+                          {qboConnected ? "Manage" : "Connect"}
+                        </button>
+                      ) : (
+                        <span
+                          style={{
+                            display: "inline-block",
+                            fontSize: 11,
+                            fontWeight: 600,
+                            color: C.textDim,
+                            background: C.surface,
+                            border: `1px solid ${C.border}`,
+                            borderRadius: 999,
+                            padding: "4px 12px",
                           }}
                         >
-                          Disconnect
-                        </button>
+                          Coming soon
+                        </span>
                       )}
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
+                );
+              })}
+            </div>
           </div>
         </section>
       )}
