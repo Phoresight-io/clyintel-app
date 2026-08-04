@@ -29,6 +29,7 @@ interface RecoveryLinkRow {
   invoice_id: string;
   subscriber_id: string;
   link_status: string;
+  link_type: string;
 }
 
 // Resolve the recovery_links row for a completed session. Primary match is the
@@ -40,7 +41,7 @@ async function resolveLink(
   sessionId: string | null,
   token: string | null,
 ): Promise<RecoveryLinkRow | null> {
-  const cols = "id, invoice_id, subscriber_id, link_status";
+  const cols = "id, invoice_id, subscriber_id, link_status, link_type";
 
   if (sessionId) {
     const { data } = await supabase
@@ -98,14 +99,26 @@ export async function handleRecoveryCheckoutCompleted(
   }
 
   // ── c. Flip to paid + record settlement. Persists regardless of the capture
-  //       outcome below — the payment happened, so the link IS paid. ───────────
+  //       outcome below — the payment happened, so the link IS paid.
+  //
+  //       settlement_amount_cents is governed by recovery_links_settlement_amount_check:
+  //       it MUST be non-null for a 'settlement' link and MUST be null for a
+  //       'standard' link. So only include it on settlement links — writing it on
+  //       a standard link violates the constraint and rejects the whole UPDATE. ─
+  const updatePayload: {
+    link_status: string;
+    updated_at: string;
+    settlement_amount_cents?: number | null;
+  } = {
+    link_status: "paid",
+    updated_at: new Date().toISOString(),
+  };
+  if (link.link_type === "settlement") {
+    updatePayload.settlement_amount_cents = amountTotal;
+  }
   const { error: flipError } = await supabase
     .from("recovery_links")
-    .update({
-      link_status: "paid",
-      settlement_amount_cents: amountTotal,
-      updated_at: new Date().toISOString(),
-    })
+    .update(updatePayload)
     .eq("id", link.id);
   if (flipError) {
     // We could not even record the payment — do not attempt capture. Stripe will
