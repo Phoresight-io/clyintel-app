@@ -49,7 +49,7 @@ export interface QboReflectProbeResult {
  * read-only GET of the external invoice to prove the token + realm reach QBO.
  * No write. Any failure propagates to the caller (the seam types it).
  */
-export async function reflectPayment(
+export async function qboReflectPayment(
   input: ReflectPaymentInput,
 ): Promise<QboReflectProbeResult> {
   // Proves refresh + scope: resolves (and, if near expiry, refreshes) the token
