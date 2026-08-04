@@ -105,7 +105,11 @@ export async function handleRecoveryCheckoutCompleted(
   //       it MUST be non-null for a 'settlement' link and MUST be null for a
   //       'standard' link. So only include it on settlement links — writing it on
   //       a standard link violates the constraint and rejects the whole UPDATE. ─
-  const updatePayload: Record<string, unknown> = {
+  const updatePayload: {
+    link_status: string;
+    updated_at: string;
+    settlement_amount_cents?: number | null;
+  } = {
     link_status: "paid",
     updated_at: new Date().toISOString(),
   };
