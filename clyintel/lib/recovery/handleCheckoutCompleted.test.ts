@@ -68,7 +68,7 @@ describe("handleRecoveryCheckoutCompleted", () => {
       {
         recovery_links: [
           // (1) resolve by session id
-          { data: { id: "rl_1", invoice_id: "inv_uuid", subscriber_id: "sub_1", link_status: "active" }, error: null },
+          { data: { id: "rl_1", invoice_id: "inv_uuid", subscriber_id: "sub_1", link_status: "active", link_type: "settlement" }, error: null },
           // (2) the flip update
           { data: null, error: null },
         ],
@@ -150,7 +150,7 @@ describe("handleRecoveryCheckoutCompleted", () => {
     withSupabase(
       {
         recovery_links: [
-          { data: { id: "rl_1", invoice_id: "inv_uuid", subscriber_id: "sub_1", link_status: "active" }, error: null },
+          { data: { id: "rl_1", invoice_id: "inv_uuid", subscriber_id: "sub_1", link_status: "active", link_type: "settlement" }, error: null },
           { data: null, error: null }, // flip
         ],
         invoices: [{ data: { external_id: "145", amount_cents: 390000, due_date: "2026-05-01" }, error: null }],
@@ -166,5 +166,55 @@ describe("handleRecoveryCheckoutCompleted", () => {
     // Link is paid (payment happened) but the ambiguous realm blocks attribution.
     expect(captured.update).toMatchObject({ link_status: "paid", settlement_amount_cents: 390000 });
     expect(processCaptureEvent).toHaveBeenCalledTimes(0);
+  });
+
+  it("standard link: flip payload OMITS settlement_amount_cents (would violate recovery_links_settlement_amount_check)", async () => {
+    const captured: { update?: Record<string, unknown> } = {};
+    withSupabase(
+      {
+        recovery_links: [
+          { data: { id: "rl_1", invoice_id: "inv_uuid", subscriber_id: "sub_1", link_status: "active", link_type: "standard" }, error: null },
+          { data: null, error: null }, // flip
+        ],
+        invoices: [{ data: { external_id: "145", amount_cents: 390000, due_date: "2026-05-01" }, error: null }],
+        connected_accounts: [{ data: [{ external_id: "realm_9130" }], error: null }],
+      },
+      captured,
+    );
+    vi.mocked(processCaptureEvent).mockResolvedValue({ status: "no_fee", reason: "no_outreach" } as never);
+
+    await expect(
+      handleRecoveryCheckoutCompleted(SESSION, "evt_std", EVENT_CREATED),
+    ).resolves.toBeUndefined();
+
+    // Constraint: standard link ⇒ settlement_amount_cents MUST be null/absent.
+    expect(captured.update).toMatchObject({ link_status: "paid" });
+    expect(captured.update).toHaveProperty("updated_at");
+    expect(captured.update).not.toHaveProperty("settlement_amount_cents");
+    // Flip succeeded ⇒ handler proceeds to capture as usual.
+    expect(processCaptureEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("settlement link: flip payload INCLUDES settlement_amount_cents = amount_total", async () => {
+    const captured: { update?: Record<string, unknown> } = {};
+    withSupabase(
+      {
+        recovery_links: [
+          { data: { id: "rl_1", invoice_id: "inv_uuid", subscriber_id: "sub_1", link_status: "active", link_type: "settlement" }, error: null },
+          { data: null, error: null }, // flip
+        ],
+        invoices: [{ data: { external_id: "145", amount_cents: 390000, due_date: "2026-05-01" }, error: null }],
+        connected_accounts: [{ data: [{ external_id: "realm_9130" }], error: null }],
+      },
+      captured,
+    );
+    vi.mocked(processCaptureEvent).mockResolvedValue({ status: "no_fee", reason: "no_outreach" } as never);
+
+    await expect(
+      handleRecoveryCheckoutCompleted(SESSION, "evt_settle", EVENT_CREATED),
+    ).resolves.toBeUndefined();
+
+    // Constraint: settlement link ⇒ settlement_amount_cents MUST be non-null.
+    expect(captured.update).toMatchObject({ link_status: "paid", settlement_amount_cents: 390000 });
   });
 });
