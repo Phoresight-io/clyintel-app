@@ -1,6 +1,7 @@
 import { getSupabase } from "../supabase";
 import { createLiveCaptureDeps } from "../capture/captureDepsLive";
 import { processCaptureEvent } from "../capture/processCaptureEvent";
+import { reflectPayment } from "../ledgerSync/reflectPayment";
 import { resolveInvoicePastDue } from "../qbo/captureAdapter";
 import type { CaptureEvent } from "../capture/captureEvent";
 
@@ -221,6 +222,37 @@ export async function handleRecoveryCheckoutCompleted(
     console.log(
       `stripe-webhook: recovery capture for link ${link.id} (event=${eventId}) → ${JSON.stringify(result)}`,
     );
+
+    // ── f. Reflect the payment into the subscriber's accounting system (D2 P1).
+    //       ADDITIVE side effect only: fires after a ledger row exists (written
+    //       OR duplicate — both carry ledgerId; reflecting on duplicate covers a
+    //       Stripe replay and is idempotent via ledger_sync). The neutral seam
+    //       NEVER throws and its own idempotency guards the QBO write, so a
+    //       non-'done'/error result must NOT fail the webhook or block the
+    //       already-written ledger row. We always log and return 200. ──────────
+    if (result.status === "written" || result.status === "duplicate") {
+      try {
+        const reflectResult = await reflectPayment({
+          subscriberId: link.subscriber_id,
+          provider: "quickbooks", // Phase 1 = QBO only; the seam validates it.
+          externalInvoiceId: invoice.external_id,
+          amountPaidCents: amountTotal ?? 0,
+          currency: "USD",
+          capturePaymentId: paymentIntent,
+          ledgerRowId: result.ledgerId,
+        });
+        console.log(
+          `stripe-webhook: reflectPayment for link ${link.id} (event=${eventId}) → ${JSON.stringify(reflectResult)}`,
+        );
+      } catch (reflectErr) {
+        // The seam is designed never to throw; this is belt-and-suspenders so a
+        // reflect fault can never turn a captured payment into a failed webhook.
+        console.error(
+          `stripe-webhook: reflectPayment threw for link ${link.id} (event=${eventId})`,
+          reflectErr,
+        );
+      }
+    }
   } catch (err) {
     console.error(
       `stripe-webhook: recovery capture threw for link ${link.id} (event=${eventId})`,

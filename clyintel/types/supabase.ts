@@ -532,6 +532,56 @@ export type Database = {
           },
         ]
       }
+      ledger_sync: {
+        Row: {
+          attempts: number
+          created_at: string
+          external_payment_id: string | null
+          id: string
+          last_error: string | null
+          ledger_row_id: string
+          max_attempts: number
+          provider: string
+          source_payment_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          external_payment_id?: string | null
+          id?: string
+          last_error?: string | null
+          ledger_row_id: string
+          max_attempts?: number
+          provider: string
+          source_payment_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          external_payment_id?: string | null
+          id?: string
+          last_error?: string | null
+          ledger_row_id?: string
+          max_attempts?: number
+          provider?: string
+          source_payment_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ledger_sync_ledger_row_id_fkey"
+            columns: ["ledger_row_id"]
+            isOneToOne: false
+            referencedRelation: "rev_share_ledger"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payments: {
         Row: {
           amount_cents: number
