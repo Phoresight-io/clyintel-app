@@ -1,9 +1,30 @@
 import { getSupabase } from "../supabase";
+import type { Database } from "../../types/supabase";
 import {
   qboReflectPayment,
   type ReflectPaymentInput,
   type QboReflectProbeResult,
 } from "./adapters/qboAdapter";
+
+/** The connected_accounts.provider enum (source of truth: generated types). */
+type IntegrationProvider = Database["public"]["Enums"]["integration_provider"];
+
+const KNOWN_PROVIDERS: readonly IntegrationProvider[] = [
+  "stripe",
+  "quickbooks",
+  "twilio",
+  "mailersend",
+];
+
+/**
+ * Narrow a free-form contract string to the connected_accounts.provider enum.
+ * The neutral contract carries `provider` as a plain string; the DB column is
+ * enum-typed, so we validate before querying (and a string that isn't a known
+ * integration can have no connected row anyway).
+ */
+function isIntegrationProvider(p: string): p is IntegrationProvider {
+  return (KNOWN_PROVIDERS as readonly string[]).includes(p);
+}
 
 // Provider-neutral ledger-sync SEAM + dispatcher (D2, §3 deliverable #1).
 //
@@ -52,13 +73,21 @@ export async function reflectPayment(
 ): Promise<ReflectPaymentResult> {
   const supabase = getSupabase();
 
+  // A provider string that isn't even a known integration enum value can have no
+  // connected_accounts row — treat it as a missing connection (and it keeps the
+  // enum-typed .eq() below sound).
+  if (!isIntegrationProvider(input.provider)) {
+    return { ok: false, skipped: true, reason: "no_connected_account" };
+  }
+  const provider = input.provider; // narrowed to IntegrationProvider
+
   // Validate the passed-in provider against the DB: the row must exist for THIS
   // subscriber AND THIS provider (the enum-typed connected_accounts.provider).
   const { data: row, error } = await supabase
     .from("connected_accounts")
     .select("id, provider")
     .eq("subscriber_id", input.subscriberId)
-    .eq("provider", input.provider)
+    .eq("provider", provider)
     .maybeSingle();
 
   if (error) {
@@ -72,7 +101,7 @@ export async function reflectPayment(
 
   // Only 'quickbooks' has an adapter in Phase 0. Any other (valid, connected)
   // provider is a typed skip until its adapter lands.
-  if (input.provider !== "quickbooks") {
+  if (provider !== "quickbooks") {
     return { ok: false, skipped: true, reason: "unsupported_provider" };
   }
 
