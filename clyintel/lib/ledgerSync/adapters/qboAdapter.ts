@@ -1,31 +1,37 @@
 import { getValidAccessToken } from "../../qbo/tokens";
 import { getInvoice } from "../../qbo/client";
+import { qboPostEntity } from "../../qbo/writeClient";
+import { getSupabase } from "../../supabase";
 
-// QuickBooks ledger-sync adapter — Phase 0 PROVING STUB (D2, §3 deliverable #3).
+// QuickBooks ledger-sync adapter — D2 Phase 1 (real Payment POST + idempotency).
 //
-// Purpose: prove the rails BEFORE anything touches a customer's books. It
-// authenticates (which exercises getValidAccessToken's proactive refresh +
-// Intuit refresh-token rotation) and does a single READ-ONLY round-trip against
-// sandbox QBO. It writes NOTHING.
+// Reflects a captured recovery payment into QBO by writing a Payment that marks
+// the external invoice Paid in Full. Idempotency + retry accounting live in the
+// `ledger_sync` table (composite unique on (source_payment_id, provider)); this
+// adapter is the guard + the write, NOT the retry driver (that is external —
+// Stripe replay / a future worker).
 //
-// Explicitly NOT in Phase 0: no Payment POST, no qboPostEntity / writeClient
-// call (writeClient is on main but intentionally NOT imported here — the real
-// write is Phase 1), no fee logic, no idempotency, no wiring into the money path
-// (handleCheckoutCompleted). Phase 1 replaces the stub body with the real write.
+// Guard order (before any POST):
+//   1. Upsert the ledger_sync row on (source_payment_id, provider).
+//   2. status='done'  → short-circuit, return the existing external_payment_id.
+//   3. status='dead'  → terminal skip.
+//   4. attempts >= max_attempts → flip to 'dead', skip. (This is the cap.)
+//   5. else attempt: increment attempts, POST the Payment, then 'done' on
+//      success / 'failed' (or 'dead' at the cap) on failure.
 //
-// Error policy: this stub does NOT catch. getValidAccessToken and getInvoice
-// throw on failure (e.g. a 401 with an auth-flavored message), and those errors
-// PROPAGATE. The neutral seam (deliverable #4, lib/ledgerSync/reflectPayment.ts)
-// is the layer that catches and types errors — not the adapter.
+// Never throws past the seam — every outcome is a typed QboReflectResult. The
+// token is obtained via getValidAccessToken (refresh/rotation handled there); the
+// POST goes through the additive qboPostEntity primitive. The frozen GET client
+// (getInvoice) is used read-only to resolve the required CustomerRef.
 //
-// Relative imports (not the @/ alias) match the capture/money-path convention
-// (see handleCheckoutCompleted.ts) so vitest — which runs without the alias —
-// can mock the qbo seam.
+// Relative imports (not the @/ alias) match the capture/money-path convention so
+// vitest — which runs without the alias — can mock the qbo + supabase seams.
+
+const PROVIDER = "quickbooks" as const;
 
 /**
  * Provider-neutral input contract (LOCKED). The neutral seam passes this exact
- * shape to whichever adapter matches `provider`; nothing provider-specific
- * leaks up to the webhook.
+ * shape to whichever adapter matches `provider`.
  */
 export interface ReflectPaymentInput {
   subscriberId: string;
@@ -37,28 +43,155 @@ export interface ReflectPaymentInput {
   ledgerRowId: string;
 }
 
-/** Phase 0 stub result: read-only rails proven, zero writes to books. */
-export interface QboReflectProbeResult {
-  ok: true;
-  provider: "quickbooks";
-  probe: "read-verified";
+/** Typed result of the QBO adapter. Never thrown — always returned. */
+export type QboReflectResult =
+  | {
+      ok: true;
+      provider: "quickbooks";
+      status: "done";
+      externalPaymentId: string | null;
+      alreadyReflected: boolean;
+    }
+  | { ok: false; skipped: true; reason: "dead" }
+  | { ok: false; error: string };
+
+/** Minimal shapes we read off the QBO responses (escape-hatch typed). */
+interface QboPaymentCreated {
+  Id: string;
+  raw?: unknown;
+}
+interface QboInvoiceRaw {
+  CustomerRef?: { value?: string };
 }
 
-/**
- * Phase 0 proving stub. Authenticates for the subscriber and performs a
- * read-only GET of the external invoice to prove the token + realm reach QBO.
- * No write. Any failure propagates to the caller (the seam types it).
- */
 export async function qboReflectPayment(
   input: ReflectPaymentInput,
-): Promise<QboReflectProbeResult> {
-  // Proves refresh + scope: resolves (and, if near expiry, refreshes) the token
-  // and the realm from the subscriber's connected_accounts row.
-  const { accessToken, realmId } = await getValidAccessToken(input.subscriberId);
+): Promise<QboReflectResult> {
+  const service = getSupabase();
 
-  // Read-only round-trip: proves the token + realm actually reach sandbox QBO.
-  // Throws on non-2xx (auth-flavored on 401) — deliberately not caught here.
-  await getInvoice(realmId, input.externalInvoiceId, accessToken);
+  // 1. Ensure a ledger_sync row exists for this (source_payment_id, provider).
+  //    ignoreDuplicates: a concurrent/replayed call keeps the existing row's
+  //    status + attempts rather than resetting them.
+  const { error: upsertErr } = await service.from("ledger_sync").upsert(
+    {
+      ledger_row_id: input.ledgerRowId,
+      source_payment_id: input.capturePaymentId,
+      provider: PROVIDER,
+      status: "pending",
+    },
+    { onConflict: "source_payment_id,provider", ignoreDuplicates: true },
+  );
+  if (upsertErr) {
+    return { ok: false, error: `ledger_sync upsert failed: ${upsertErr.message}` };
+  }
 
-  return { ok: true, provider: "quickbooks", probe: "read-verified" };
+  // Read the authoritative current row.
+  const { data: row, error: readErr } = await service
+    .from("ledger_sync")
+    .select("id, status, attempts, max_attempts, external_payment_id")
+    .eq("source_payment_id", input.capturePaymentId)
+    .eq("provider", PROVIDER)
+    .single();
+  if (readErr || !row) {
+    return { ok: false, error: `ledger_sync read failed: ${readErr?.message ?? "no row"}` };
+  }
+
+  // 2. Already reflected → short-circuit (carry the existing QBO Payment Id).
+  if (row.status === "done") {
+    return {
+      ok: true,
+      provider: PROVIDER,
+      status: "done",
+      externalPaymentId: row.external_payment_id,
+      alreadyReflected: true,
+    };
+  }
+  // 3. Terminal.
+  if (row.status === "dead") {
+    return { ok: false, skipped: true, reason: "dead" };
+  }
+  // 4. Cap reached (a prior 'failed'/'pending' row that exhausted attempts) →
+  //    flip to dead and skip. Bounded here, never an in-line retry loop.
+  if (row.attempts >= row.max_attempts) {
+    await service
+      .from("ledger_sync")
+      .update({ status: "dead", updated_at: new Date().toISOString() })
+      .eq("id", row.id);
+    return { ok: false, skipped: true, reason: "dead" };
+  }
+
+  // 5. Attempt. Increment attempts up front so a crash still counts the try.
+  const attemptNo = row.attempts + 1;
+  await service
+    .from("ledger_sync")
+    .update({ attempts: attemptNo, updated_at: new Date().toISOString() })
+    .eq("id", row.id);
+
+  try {
+    const { accessToken, realmId } = await getValidAccessToken(input.subscriberId);
+
+    // CustomerRef is required on a QBO Payment create. Resolve it from the live
+    // invoice (also proves the invoice is reachable). getInvoice throws non-2xx.
+    const invoice = await getInvoice(realmId, input.externalInvoiceId, accessToken);
+    const customerId = (invoice.raw as QboInvoiceRaw | undefined)?.CustomerRef?.value;
+    if (!customerId) {
+      throw new Error(
+        `QBO invoice ${input.externalInvoiceId} has no CustomerRef.value; cannot build Payment`,
+      );
+    }
+
+    // Full face value was paid through the recovery link → mark Paid in Full.
+    // (Settlement/partial reflect is out of Phase 1 scope.)
+    const amount = input.amountPaidCents / 100;
+    const body = {
+      CustomerRef: { value: customerId },
+      TotalAmt: amount,
+      TxnDate: new Date().toISOString().slice(0, 10),
+      PrivateNote: `Clyintel recovery reflect (${input.capturePaymentId})`,
+      Line: [
+        {
+          Amount: amount,
+          LinkedTxn: [{ TxnId: input.externalInvoiceId, TxnType: "Invoice" }],
+        },
+      ],
+    };
+
+    const payment = await qboPostEntity<QboPaymentCreated>(
+      realmId,
+      "payment",
+      accessToken,
+      body,
+    );
+    const externalPaymentId = payment.Id;
+
+    await service
+      .from("ledger_sync")
+      .update({
+        status: "done",
+        external_payment_id: externalPaymentId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", row.id);
+
+    return {
+      ok: true,
+      provider: PROVIDER,
+      status: "done",
+      externalPaymentId,
+      alreadyReflected: false,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // At the cap after this failed attempt → terminal; otherwise retryable.
+    const nowDead = attemptNo >= row.max_attempts;
+    await service
+      .from("ledger_sync")
+      .update({
+        status: nowDead ? "dead" : "failed",
+        last_error: message,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", row.id);
+    return { ok: false, error: message };
+  }
 }

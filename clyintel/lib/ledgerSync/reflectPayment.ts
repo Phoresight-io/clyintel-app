@@ -3,7 +3,7 @@ import type { Database } from "../../types/supabase";
 import {
   qboReflectPayment,
   type ReflectPaymentInput,
-  type QboReflectProbeResult,
+  type QboReflectResult,
 } from "./adapters/qboAdapter";
 
 /** The connected_accounts.provider enum (source of truth: generated types). */
@@ -60,7 +60,7 @@ export type ReflectPaymentSkipReason = "no_connected_account" | "unsupported_pro
  *   - `ok: false` (no skipped)  → a typed error (log; the payment still happened).
  */
 export type ReflectPaymentResult =
-  | QboReflectProbeResult
+  | QboReflectResult
   | { ok: false; skipped: true; reason: ReflectPaymentSkipReason }
   | { ok: false; error: string };
 
