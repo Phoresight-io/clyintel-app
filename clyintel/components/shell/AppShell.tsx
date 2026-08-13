@@ -36,6 +36,10 @@ export default function AppShell({
   const [planName, setPlanName] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  // Identity is "resolved" once we have the SSR seed OR the client session check
+  // has completed. Until then the menu shows a loading state — never a blank
+  // avatar / "SIGNED IN AS —" resting state.
+  const [resolved, setResolved] = useState(initialEmail != null);
 
   // Identity for the avatar + account menu. Sourced from the ACTUAL current
   // session user first (email is always present, never stale), then enriched
@@ -47,7 +51,11 @@ export default function AppShell({
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!active || !user) return;
+      if (!active) return;
+      // Session check done — flip out of the loading state whether or not a user
+      // was found (a logged-out shell is a resolved "no user" state, not loading).
+      setResolved(true);
+      if (!user) return;
 
       // Session-truth first: email + email-derived initials, immediately.
       setEmail(user.email ?? null);
@@ -162,7 +170,7 @@ export default function AppShell({
               title={email ?? undefined}
               style={{ width: 32, height: 32, borderRadius: "50%", background: C.navy, display: "flex", alignItems: "center", justifyContent: "center", border: "none", cursor: "pointer", padding: 0 }}
             >
-              <span style={{ fontSize: 13, fontWeight: 700, color: "#FFFFFF" }}>{initials || "·"}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#FFFFFF", opacity: initials ? 1 : 0.6 }}>{initials || (resolved ? "·" : "…")}</span>
             </button>
             {menuOpen && (
               <>
@@ -171,7 +179,9 @@ export default function AppShell({
                 <div role="menu" style={{ position: "absolute", top: 40, right: 0, minWidth: 220, background: "#FFFFFF", border: `1px solid ${C.border}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", zIndex: 201, overflow: "hidden" }}>
                   <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.border}` }}>
                     <div style={{ fontSize: 11, fontWeight: 600, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>Signed in as</div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: C.navy, wordBreak: "break-all" }}>{email ?? "—"}</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: email ? C.navy : C.textDim, wordBreak: "break-all" }}>
+                      {email ? email : resolved ? "Not signed in" : "Loading…"}
+                    </div>
                     {planName && <div style={{ fontSize: 12, color: C.textMid, marginTop: 3 }}>{planName}</div>}
                   </div>
                   <button
