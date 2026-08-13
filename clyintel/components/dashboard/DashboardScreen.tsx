@@ -3,7 +3,6 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 import type { Invoice, Client, NegotiationRec, ClientInvoiceSet, Exchange } from "@/lib/mock-data";
-import { isDemoReset, CLIENTS_KEY, INTEGRATIONS_KEY } from "@/lib/demo-mode";
 import ExchangeDrawer from "@/components/shared/ExchangeDrawer";
 import NegotiationActions from "./NegotiationActions";
 import { RecCard } from "./RecoveryRecModal";
@@ -31,15 +30,11 @@ interface DashboardScreenProps {
 }
 
 export default function DashboardScreen({ initialClients, initialClientInvoices }: DashboardScreenProps = {}) {
-  const isReset = isDemoReset();
-  const isCustomMode = !!localStorage.getItem(INTEGRATIONS_KEY);
-  const storedClients: Client[] = (() => {
-    if (isReset) return [];
-    try { return JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]') as Client[]; } catch { return []; }
-  })();
-  // Default path = real subscriber data. Mock data has been flushed (D2 closeout);
+  // Real subscriber data is the single source of truth. The demo/localStorage
+  // custom-mode path (INTEGRATIONS_KEY / CLIENTS_KEY / isReset) was retired at
+  // D2 close-out: it shadowed real synced invoices and is gone.
   // exchanges/negotiations stay empty until D3 wires their real sources.
-  const clients = isReset ? [] : isCustomMode ? storedClients : (initialClients ?? []);
+  const clients = initialClients ?? [];
   const clientInvoices = initialClientInvoices ?? ({} as Record<string | number, ClientInvoiceSet>);
   const invoiceExchanges = {} as Record<string, Exchange[]>;
   const negotiationRecs = [] as NegotiationRec[];
@@ -211,7 +206,11 @@ export default function DashboardScreen({ initialClients, initialClientInvoices 
 
         {allInvoices.length === 0 && (
           <div style={{ textAlign: "center", padding: "40px 20px", color: C.textMid, fontWeight: 500, fontSize: 14 }}>
-            No invoices match your filters.
+            {clients.length === 0
+              ? "No invoices yet. Connect a source and run a sync to import your invoices."
+              : totalFilterCount > 0 || searchText.length >= 3
+                ? "No invoices match your filters."
+                : "No past-due invoices — you're all caught up."}
           </div>
         )}
         {allInvoices.map((inv, idx) => {
