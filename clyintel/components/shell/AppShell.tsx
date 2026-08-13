@@ -20,11 +20,19 @@ function deriveInitials(name: string | null, email: string | null): string {
   return "";
 }
 
-export default function AppShell({ children }: { children: React.ReactNode }) {
+export default function AppShell({
+  children,
+  initialEmail = null,
+}: {
+  children: React.ReactNode;
+  /** Session email resolved server-side (root layout) so the account menu paints
+   *  the real identity on first render, before the client getUser() resolves. */
+  initialEmail?: string | null;
+}) {
   const pathname = usePathname();
   const router = useRouter();
-  const [initials, setInitials] = useState("");
-  const [email, setEmail] = useState<string | null>(null);
+  const [initials, setInitials] = useState(() => deriveInitials(null, initialEmail));
+  const [email, setEmail] = useState<string | null>(initialEmail);
   const [planName, setPlanName] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
