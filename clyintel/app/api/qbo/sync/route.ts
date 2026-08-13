@@ -5,6 +5,34 @@ import { getValidAccessToken } from "@/lib/qbo/tokens";
 import { listCustomers, listInvoices } from "@/lib/qbo/client";
 import { mergeClientContact } from "@/lib/qbo/mergeClientContact";
 import { evaluateOutreachEligibility } from "@/lib/outreach/eligibility";
+import type { Database, Json } from "@/types/supabase";
+
+type InvoiceStatus = Database["public"]["Enums"]["invoice_status"];
+
+// Derive a synced invoice's status from QBO's authoritative figures at sync
+// time, rather than letting the column DEFAULT ('draft') stand — a synced QBO
+// invoice has been issued, so 'draft' is never correct for it. QBO `Balance` is
+// the outstanding amount and `TotalAmt` the face value:
+//   paid    → nothing outstanding
+//   partial → some paid, but a balance remains
+//   overdue → outstanding and past its due date
+//   sent    → outstanding, not yet due (or no due date)
+// `todayIso` and QBO DueDate are both YYYY-MM-DD, so a lexicographic compare is
+// a correct date comparison. NB: amount_paid_cents is intentionally NOT written
+// by this sync (amounts are out of scope); status is derived from QBO Balance
+// directly, so a partially/fully-paid QBO invoice could show a status that the
+// (unmapped) stored amount_paid_cents doesn't reflect — see PR notes.
+function deriveInvoiceStatus(
+  totalAmtCents: number,
+  balanceCents: number,
+  dueDate: string | null,
+  todayIso: string,
+): InvoiceStatus {
+  if (balanceCents <= 0) return "paid";
+  if (totalAmtCents - balanceCents > 0) return "partial";
+  if (dueDate && dueDate < todayIso) return "overdue";
+  return "sent";
+}
 
 // QuickBooks Online full intake sync. On POST, for the authenticated subscriber:
 // pull every Customer + Invoice from QBO and upsert them into clients / invoices.
@@ -116,7 +144,14 @@ export async function POST() {
       invoice_number: string | null;
       amount_cents: number;
       due_date: string | null;
+      issue_date: string | null;
+      status: InvoiceStatus;
+      raw_source_data: Json;
     }[] = [];
+
+    // Single "today" for the whole batch (UTC date), so status derivation is
+    // consistent across all rows in this sync.
+    const todayIso = new Date().toISOString().slice(0, 10);
 
     for (const inv of invoices) {
       const qboCustomerId = inv.CustomerRef?.value;
@@ -126,15 +161,32 @@ export async function POST() {
         continue;
       }
 
+      // QBO returns dollars; store bigint cents. Round to avoid float drift.
+      const amountCents = Math.round(inv.TotalAmt * 100);
+      // QBO Balance is the outstanding amount; if absent, treat as fully
+      // outstanding (= face) so a missing balance never looks paid.
+      const balanceCents =
+        inv.Balance != null ? Math.round(inv.Balance * 100) : amountCents;
+      // TxnDate (issue date) rides on the raw QBO payload, not the typed list
+      // item; SELECT * returns it. May be absent → null.
+      const txnDate =
+        (inv.raw as { TxnDate?: string } | undefined)?.TxnDate ?? null;
+
       invoiceRows.push({
         subscriber_id: subscriberId,
         client_id: clientId,
         source: "qbo",
         external_id: inv.Id,
         invoice_number: inv.DocNumber ?? null,
-        // QBO returns dollars; store bigint cents. Round to avoid float drift.
-        amount_cents: Math.round(inv.TotalAmt * 100),
+        amount_cents: amountCents,
         due_date: inv.DueDate ?? null,
+        // QBO TxnDate → issue_date (was previously unmapped → NULL).
+        issue_date: txnDate,
+        // Derived explicitly so the column DEFAULT ('draft') never decides a
+        // real synced invoice's status.
+        status: deriveInvoiceStatus(amountCents, balanceCents, inv.DueDate ?? null, todayIso),
+        // Full QBO invoice payload for audit / re-derivation (was unmapped → NULL).
+        raw_source_data: (inv.raw ?? null) as Json,
         // NB: amount_outstanding_cents is a GENERATED column
         // (amount_cents - amount_paid_cents) — writing it errors, so it's omitted.
       });
