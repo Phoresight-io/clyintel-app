@@ -3,7 +3,6 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 import type { Client, ClientInvoiceSet } from "@/lib/mock-data";
-import { isDemoReset, CLIENTS_KEY, INTEGRATIONS_KEY } from "@/lib/demo-mode";
 
 interface ClientListScreenProps {
   initialClients?: Client[];
@@ -11,14 +10,10 @@ interface ClientListScreenProps {
 }
 
 export default function ClientListScreen({ initialClients, initialClientInvoices }: ClientListScreenProps = {}) {
-  const isReset = isDemoReset();
-  const isCustomMode = !!localStorage.getItem(INTEGRATIONS_KEY);
-  const storedClients: Client[] = (() => {
-    if (isReset) return [];
-    try { return JSON.parse(localStorage.getItem(CLIENTS_KEY) || '[]') as Client[]; } catch { return []; }
-  })();
-  // Default path = real subscriber data. Mock data flushed (D2 closeout).
-  const clients = isReset ? [] : isCustomMode ? storedClients : (initialClients ?? []);
+  // Real subscriber data is the single source of truth. The demo/localStorage
+  // custom-mode path (INTEGRATIONS_KEY / CLIENTS_KEY / isReset) was retired at
+  // D2 close-out: it shadowed real synced invoices and is gone.
+  const clients = initialClients ?? [];
   const clientInvoices = initialClientInvoices ?? ({} as Record<string | number, ClientInvoiceSet>);
 
   const router = useRouter();
@@ -46,6 +41,11 @@ export default function ClientListScreen({ initialClients, initialClientInvoices
         <div style={{ display: "grid", gridTemplateColumns: "200px 140px 140px 120px 100px 140px 140px", gap: 16, padding: "12px 16px", background: C.surface, borderBottom: `1px solid ${C.border}`, fontSize: 11, fontWeight: 600, color: C.navy, textTransform: "uppercase" }}>
           <div>Client Name</div><div>Industry</div><div>Score</div><div>Status</div><div>Invoices</div><div>Outstanding</div><div>Recovery YTD</div>
         </div>
+        {clients.length === 0 && (
+          <div style={{ padding: "40px 16px", textAlign: "center", fontSize: 14, color: C.textMid }}>
+            No clients yet. Connect a source and run a sync to import your invoices.
+          </div>
+        )}
         {clients.map((client, i) => {
           const scoreColor = client.score >= 80 ? C.green : client.score >= 60 ? C.amber : C.red;
           const recoveryYTD = getRecoveryYTD(client.id);
