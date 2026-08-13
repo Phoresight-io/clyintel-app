@@ -143,6 +143,7 @@ export async function POST() {
       external_id: string;
       invoice_number: string | null;
       amount_cents: number;
+      amount_paid_cents: number;
       due_date: string | null;
       issue_date: string | null;
       status: InvoiceStatus;
@@ -167,6 +168,12 @@ export async function POST() {
       // outstanding (= face) so a missing balance never looks paid.
       const balanceCents =
         inv.Balance != null ? Math.round(inv.Balance * 100) : amountCents;
+      // Paid = face − outstanding. Clamp to [0, amountCents] so an odd QBO
+      // Balance (negative → overpayment, or > TotalAmt) can never write a
+      // negative paid amount or one exceeding the face — keeps the GENERATED
+      // amount_outstanding_cents (= amount_cents − amount_paid_cents) in [0, face]
+      // and consistent with the derived status.
+      const paidCents = Math.max(0, Math.min(amountCents, amountCents - balanceCents));
       // TxnDate (issue date) rides on the raw QBO payload, not the typed list
       // item; SELECT * returns it. May be absent → null.
       const txnDate =
@@ -179,6 +186,11 @@ export async function POST() {
         external_id: inv.Id,
         invoice_number: inv.DocNumber ?? null,
         amount_cents: amountCents,
+        // QBO paid amount (TotalAmt − Balance), so amount_paid_cents matches the
+        // Balance-derived status. Was unmapped (default 0), which left paid/
+        // partial rows contradicting their status; now consistent. The GENERATED
+        // amount_outstanding_cents self-corrects to QBO Balance.
+        amount_paid_cents: paidCents,
         due_date: inv.DueDate ?? null,
         // QBO TxnDate → issue_date (was previously unmapped → NULL).
         issue_date: txnDate,
