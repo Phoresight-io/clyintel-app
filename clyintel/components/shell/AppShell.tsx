@@ -62,12 +62,16 @@ export default function AppShell({
       setResolved(true);
       if (!user) return;
 
-      // Session-truth first: email + email-derived initials, immediately.
-      setEmail(user.email ?? null);
-      setInitials(deriveInitials(null, user.email ?? null));
+      // Session-truth — but NEVER downgrade the SSR seed. getSession() can return
+      // a user whose .email is null; writing that would clobber the seed and show
+      // "Not signed in" for a logged-in user. Only ever apply a REAL value.
+      if (user.email) {
+        setEmail(user.email);
+        setInitials(deriveInitials(null, user.email));
+      }
 
       // Enrich (nicer initials from a real name, plan label). Non-fatal if the
-      // subscribers row is missing/blank — the session identity already stands.
+      // subscribers row is missing/blank — the seeded identity already stands.
       const { data } = await supabase
         .from("subscribers")
         .select("business_name, contact_name, email, plan:plans(display_name)")
@@ -75,10 +79,11 @@ export default function AppShell({
         .maybeSingle();
       if (!active || !data) return;
       const planDisplay = (data.plan as { display_name?: string } | null)?.display_name ?? null;
-      setInitials(
-        deriveInitials(data.business_name || data.contact_name, data.email || user.email || null),
-      );
-      if (data.email || user.email) setEmail(data.email || user.email || null);
+      const enrichedEmail = data.email || user.email || null;
+      if (enrichedEmail) {
+        setEmail(enrichedEmail);
+        setInitials(deriveInitials(data.business_name || data.contact_name, enrichedEmail));
+      }
       setPlanName(planDisplay);
     })();
     return () => {
@@ -186,11 +191,6 @@ export default function AppShell({
                     <div style={{ fontSize: 11, fontWeight: 600, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>Signed in as</div>
                     <div style={{ fontSize: 14, fontWeight: 600, color: email ? C.navy : C.textDim, wordBreak: "break-all" }}>
                       {email ? email : resolved ? "Not signed in" : "Loading…"}
-                    </div>
-                    {/* TEMP render-path diagnostic — REMOVE with the fix. Shows the raw
-                        values AppShell actually holds, to pin why the seed isn't shown. */}
-                    <div style={{ fontSize: 10, color: "#0a0", fontFamily: "monospace", marginTop: 4, wordBreak: "break-all" }}>
-                      seed={JSON.stringify(initialEmail)} · email={JSON.stringify(email)} · resolved={String(resolved)}
                     </div>
                     {planName && <div style={{ fontSize: 12, color: C.textMid, marginTop: 3 }}>{planName}</div>}
                   </div>
