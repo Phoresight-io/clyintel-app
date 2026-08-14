@@ -48,9 +48,14 @@ export default function AppShell({
     let active = true;
     (async () => {
       const supabase = createSupabaseBrowser();
+      // getSession() reads the session from local cookies WITHOUT a network
+      // validate/refresh — so it resolves instantly on mount and never races the
+      // middleware on the single-use refresh token (getUser() did, leaving the
+      // menu stuck resolving). Display-only use; authorization stays server-side.
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        data: { session },
+      } = await supabase.auth.getSession();
+      const user = session?.user ?? null;
       if (!active) return;
       // Session check done — flip out of the loading state whether or not a user
       // was found (a logged-out shell is a resolved "no user" state, not loading).
