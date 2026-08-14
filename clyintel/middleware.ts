@@ -47,6 +47,20 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // Forward the identity THIS getUser() resolved to Server Components (the root
+  // layout seeds the account menu from it). Middleware is the single place that
+  // refreshes/persists the session; a Server Component running its OWN getUser()
+  // would race on the single-use refresh token (and can't persist a rotated one),
+  // which is why the layout's own getUser() returned null. Rebuild the forwarded
+  // request with the header, preserving any auth cookies the refresh wrote.
+  if (user?.email) {
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set('x-user-email', user.email);
+    const response = NextResponse.next({ request: { headers: requestHeaders } });
+    supabaseResponse.cookies.getAll().forEach((cookie) => response.cookies.set(cookie));
+    return response;
+  }
+
   return supabaseResponse;
 }
 
