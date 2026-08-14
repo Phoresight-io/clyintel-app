@@ -187,6 +187,11 @@ export default function AppShell({
                     <div style={{ fontSize: 14, fontWeight: 600, color: email ? C.navy : C.textDim, wordBreak: "break-all" }}>
                       {email ? email : resolved ? "Not signed in" : "Loading…"}
                     </div>
+                    {/* TEMP render-path diagnostic — REMOVE with the fix. Shows the raw
+                        values AppShell actually holds, to pin why the seed isn't shown. */}
+                    <div style={{ fontSize: 10, color: "#0a0", fontFamily: "monospace", marginTop: 4, wordBreak: "break-all" }}>
+                      seed={JSON.stringify(initialEmail)} · email={JSON.stringify(email)} · resolved={String(resolved)}
+                    </div>
                     {planName && <div style={{ fontSize: 12, color: C.textMid, marginTop: 3 }}>{planName}</div>}
                   </div>
                   <button
