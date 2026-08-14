@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 import { createSupabaseBrowser } from "@/lib/supabase-browser";
@@ -40,13 +40,6 @@ export default function AppShell({
   // has completed. Until then the menu shows a loading state — never a blank
   // avatar / "SIGNED IN AS —" resting state.
   const [resolved, setResolved] = useState(initialEmail != null);
-  // TEMP transition instrumentation — REMOVE with the fix.
-  const mountSeedRef = useRef(initialEmail); // initialEmail as it was on the FIRST render (what useState saw)
-  const emailInitRef = useRef(email); // email state value at mount (what useState(initialEmail) produced)
-  const dbgRef = useRef<string[]>([]);
-  const dbg = (m: string) => {
-    dbgRef.current.push(m);
-  };
 
   // Identity for the avatar + account menu. Sourced from the ACTUAL current
   // session user first (email is always present, never stale), then enriched
@@ -64,7 +57,6 @@ export default function AppShell({
       } = await supabase.auth.getSession();
       const user = session?.user ?? null;
       if (!active) return;
-      dbg(`sess=${user ? `user,email=${JSON.stringify(user.email)}` : "null"}`);
       // Session check done — flip out of the loading state whether or not a user
       // was found (a logged-out shell is a resolved "no user" state, not loading).
       setResolved(true);
@@ -74,7 +66,6 @@ export default function AppShell({
       // a user whose .email is null; writing that would clobber the seed and show
       // "Not signed in" for a logged-in user. Only ever apply a REAL value.
       if (user.email) {
-        dbg(`setEmail(session)=${JSON.stringify(user.email)}`);
         setEmail(user.email);
         setInitials(deriveInitials(null, user.email));
       }
@@ -89,9 +80,7 @@ export default function AppShell({
       if (!active || !data) return;
       const planDisplay = (data.plan as { display_name?: string } | null)?.display_name ?? null;
       const enrichedEmail = data.email || user.email || null;
-      dbg(`data.email=${JSON.stringify(data.email)}`);
       if (enrichedEmail) {
-        dbg(`setEmail(enrich)=${JSON.stringify(enrichedEmail)}`);
         setEmail(enrichedEmail);
         setInitials(deriveInitials(data.business_name || data.contact_name, enrichedEmail));
       }
@@ -129,6 +118,15 @@ export default function AppShell({
   if (pathname === '/login' || pathname.startsWith('/auth/') || pathname.startsWith('/pay/')) {
     return <>{children}</>;
   }
+
+  // Render identity from the LIVE prop as well as state. `email`/`initials` come
+  // from useState(initialEmail), which freezes the FIRST-render value — and the
+  // SSR seed can arrive null at hydration then populate a render later, leaving
+  // that state stuck at null. Falling back to the current `initialEmail` prop
+  // shows the identity as soon as the seed is present, regardless of useState
+  // timing. On sign-out we blank it so no identity lingers before the redirect.
+  const displayEmail = signingOut ? null : email ?? initialEmail;
+  const displayInitials = signingOut ? "" : initials || deriveInitials(null, initialEmail);
 
   const isRecoveryActive = pathname === "/" || pathname.startsWith("/client") || pathname === "/connections";
   const isPortfolioActive = pathname === "/portfolio";
@@ -188,10 +186,10 @@ export default function AppShell({
               aria-label="Account menu"
               aria-haspopup="menu"
               aria-expanded={menuOpen}
-              title={email ?? undefined}
+              title={displayEmail ?? undefined}
               style={{ width: 32, height: 32, borderRadius: "50%", background: C.navy, display: "flex", alignItems: "center", justifyContent: "center", border: "none", cursor: "pointer", padding: 0 }}
             >
-              <span style={{ fontSize: 13, fontWeight: 700, color: "#FFFFFF", opacity: initials ? 1 : 0.6 }}>{initials || (resolved ? "·" : "…")}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#FFFFFF", opacity: displayInitials ? 1 : 0.6 }}>{displayInitials || (resolved ? "·" : "…")}</span>
             </button>
             {menuOpen && (
               <>
@@ -200,15 +198,8 @@ export default function AppShell({
                 <div role="menu" style={{ position: "absolute", top: 40, right: 0, minWidth: 220, background: "#FFFFFF", border: `1px solid ${C.border}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", zIndex: 201, overflow: "hidden" }}>
                   <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.border}` }}>
                     <div style={{ fontSize: 11, fontWeight: 600, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>Signed in as</div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: email ? C.navy : C.textDim, wordBreak: "break-all" }}>
-                      {email ? email : resolved ? "Not signed in" : "Loading…"}
-                    </div>
-                    {/* TEMP render-branch diagnostic — REMOVE with the fix. Prints every
-                        variable the identity-vs-"Not signed in" branch depends on, so a
-                        bad load reveals which one is transiently falsy (esp. seed vs email). */}
-                    <div style={{ fontSize: 10, color: "#0a0", fontFamily: "monospace", marginTop: 4, wordBreak: "break-all" }}>
-                      mountSeed={JSON.stringify(mountSeedRef.current)} · nowSeed={JSON.stringify(initialEmail)} · emailInit={JSON.stringify(emailInitRef.current)} · email={JSON.stringify(email)} · initials={JSON.stringify(initials)} · resolved={String(resolved)}
-                      {"\n"}log=[{dbgRef.current.join(" | ")}]
+                    <div style={{ fontSize: 14, fontWeight: 600, color: displayEmail ? C.navy : C.textDim, wordBreak: "break-all" }}>
+                      {displayEmail ? displayEmail : resolved ? "Not signed in" : "Loading…"}
                     </div>
                     {planName && <div style={{ fontSize: 12, color: C.textMid, marginTop: 3 }}>{planName}</div>}
                   </div>
