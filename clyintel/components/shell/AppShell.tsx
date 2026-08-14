@@ -192,6 +192,12 @@ export default function AppShell({
                     <div style={{ fontSize: 14, fontWeight: 600, color: email ? C.navy : C.textDim, wordBreak: "break-all" }}>
                       {email ? email : resolved ? "Not signed in" : "Loading…"}
                     </div>
+                    {/* TEMP render-branch diagnostic — REMOVE with the fix. Prints every
+                        variable the identity-vs-"Not signed in" branch depends on, so a
+                        bad load reveals which one is transiently falsy (esp. seed vs email). */}
+                    <div style={{ fontSize: 10, color: "#0a0", fontFamily: "monospace", marginTop: 4, wordBreak: "break-all" }}>
+                      seed={JSON.stringify(initialEmail)} · email={JSON.stringify(email)} · initials={JSON.stringify(initials)} · resolved={String(resolved)}
+                    </div>
                     {planName && <div style={{ fontSize: 12, color: C.textMid, marginTop: 3 }}>{planName}</div>}
                   </div>
                   <button
