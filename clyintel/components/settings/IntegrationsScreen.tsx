@@ -77,6 +77,9 @@ export default function IntegrationsScreen() {
 
   // Plan-derived revenue share rate — passed to ConnectCard for fee disclosure.
   const [revShareRate, setRevShareRate] = useState<number | null>(null);
+  // Real DB counts for the QuickBooks source (the card's clients/invoices were a
+  // hardcoded demo seed — 6/24). Null until loaded; then the qb card shows truth.
+  const [qboCounts, setQboCounts] = useState<{ clients: number; invoices: number } | null>(null);
 
   // Honor ?tab= deep links. Connect onboarding returns to ?tab=integrations.
   useEffect(() => {
@@ -122,6 +125,28 @@ export default function IntegrationsScreen() {
       if (!active) return;
       const rate = (sub as { plan?: { revenue_share_rate?: number } } | null)?.plan?.revenue_share_rate;
       if (typeof rate === "number") setRevShareRate(rate);
+    })();
+    return () => { active = false; };
+  }, []);
+
+  // Real, persisted counts for the QuickBooks card — scoped to the caller's own
+  // source='qbo' rows (RLS enforces subscriber_id = auth.uid()); a HEAD count
+  // avoids fetching the rows. Replaces the hardcoded demo seed so the card
+  // matches the portfolio instead of undercounting.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const supabase = createSupabaseBrowser();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || !active) return;
+      const [clientsRes, invoicesRes] = await Promise.all([
+        supabase.from("clients").select("id", { count: "exact", head: true })
+          .eq("subscriber_id", user.id).eq("source", "qbo"),
+        supabase.from("invoices").select("id", { count: "exact", head: true })
+          .eq("subscriber_id", user.id).eq("source", "qbo"),
+      ]);
+      if (!active || clientsRes.error || invoicesRes.error) return;
+      setQboCounts({ clients: clientsRes.count ?? 0, invoices: invoicesRes.count ?? 0 });
     })();
     return () => { active = false; };
   }, []);
@@ -293,7 +318,13 @@ export default function IntegrationsScreen() {
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {connected.map((integration) => (
+                {connected.map((integration) => {
+                  // The QuickBooks card shows real DB counts (source='qbo') once
+                  // loaded; every other (demo) integration keeps its seed values.
+                  const useReal = integration.id === "qb" && qboCounts !== null;
+                  const displayClients = useReal ? qboCounts!.clients : integration.clients;
+                  const displayInvoices = useReal ? qboCounts!.invoices : integration.invoices;
+                  return (
                   <div
                     key={integration.id}
                     style={{
@@ -364,10 +395,10 @@ export default function IntegrationsScreen() {
                           }}
                         >
                           <span>Last synced: {integration.lastSync}</span>
-                          {integration.clients > 0 && <span>·</span>}
-                          {integration.clients > 0 && (
+                          {displayClients > 0 && <span>·</span>}
+                          {displayClients > 0 && (
                             <span>
-                              {integration.clients} clients · {integration.invoices} invoices
+                              {displayClients} clients · {displayInvoices} invoices
                             </span>
                           )}
                         </div>
@@ -454,7 +485,8 @@ export default function IntegrationsScreen() {
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
