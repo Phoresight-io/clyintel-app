@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 import { createSupabaseBrowser } from "@/lib/supabase-browser";
@@ -40,6 +40,13 @@ export default function AppShell({
   // has completed. Until then the menu shows a loading state — never a blank
   // avatar / "SIGNED IN AS —" resting state.
   const [resolved, setResolved] = useState(initialEmail != null);
+  // TEMP transition instrumentation — REMOVE with the fix.
+  const mountSeedRef = useRef(initialEmail); // initialEmail as it was on the FIRST render (what useState saw)
+  const emailInitRef = useRef(email); // email state value at mount (what useState(initialEmail) produced)
+  const dbgRef = useRef<string[]>([]);
+  const dbg = (m: string) => {
+    dbgRef.current.push(m);
+  };
 
   // Identity for the avatar + account menu. Sourced from the ACTUAL current
   // session user first (email is always present, never stale), then enriched
@@ -57,6 +64,7 @@ export default function AppShell({
       } = await supabase.auth.getSession();
       const user = session?.user ?? null;
       if (!active) return;
+      dbg(`sess=${user ? `user,email=${JSON.stringify(user.email)}` : "null"}`);
       // Session check done — flip out of the loading state whether or not a user
       // was found (a logged-out shell is a resolved "no user" state, not loading).
       setResolved(true);
@@ -66,6 +74,7 @@ export default function AppShell({
       // a user whose .email is null; writing that would clobber the seed and show
       // "Not signed in" for a logged-in user. Only ever apply a REAL value.
       if (user.email) {
+        dbg(`setEmail(session)=${JSON.stringify(user.email)}`);
         setEmail(user.email);
         setInitials(deriveInitials(null, user.email));
       }
@@ -80,7 +89,9 @@ export default function AppShell({
       if (!active || !data) return;
       const planDisplay = (data.plan as { display_name?: string } | null)?.display_name ?? null;
       const enrichedEmail = data.email || user.email || null;
+      dbg(`data.email=${JSON.stringify(data.email)}`);
       if (enrichedEmail) {
+        dbg(`setEmail(enrich)=${JSON.stringify(enrichedEmail)}`);
         setEmail(enrichedEmail);
         setInitials(deriveInitials(data.business_name || data.contact_name, enrichedEmail));
       }
@@ -196,7 +207,8 @@ export default function AppShell({
                         variable the identity-vs-"Not signed in" branch depends on, so a
                         bad load reveals which one is transiently falsy (esp. seed vs email). */}
                     <div style={{ fontSize: 10, color: "#0a0", fontFamily: "monospace", marginTop: 4, wordBreak: "break-all" }}>
-                      seed={JSON.stringify(initialEmail)} · email={JSON.stringify(email)} · initials={JSON.stringify(initials)} · resolved={String(resolved)}
+                      mountSeed={JSON.stringify(mountSeedRef.current)} · nowSeed={JSON.stringify(initialEmail)} · emailInit={JSON.stringify(emailInitRef.current)} · email={JSON.stringify(email)} · initials={JSON.stringify(initials)} · resolved={String(resolved)}
+                      {"\n"}log=[{dbgRef.current.join(" | ")}]
                     </div>
                     {planName && <div style={{ fontSize: 12, color: C.textMid, marginTop: 3 }}>{planName}</div>}
                   </div>
