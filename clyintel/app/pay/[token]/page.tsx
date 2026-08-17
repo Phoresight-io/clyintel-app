@@ -176,11 +176,15 @@ export default async function PayPage({ params, searchParams }: PageProps) {
       : false;
 
     if (!lnk || lnk.link_status !== "active" || linkExpired) {
+      console.error("[pay-gate] branch=link_inactive");
       redirect(`/pay/${token}?error=1`);
     }
 
     const balance = await getRemainingBalance(lnk.invoice_id);
-    if (balance === 0) redirect(`/pay/${token}?error=1`);
+    if (balance === 0) {
+      console.error("[pay-gate] branch=balance_zero");
+      redirect(`/pay/${token}?error=1`);
+    }
 
     // Re-fetch canonical gate values inside the action (never trust closed-over
     // user-facing data; only trust data re-read with service-role).
@@ -197,7 +201,10 @@ export default async function PayPage({ params, searchParams }: PageProps) {
         .single(),
     ]);
 
-    if (!subRes.data || !invRes.data) redirect(`/pay/${token}?error=1`);
+    if (!subRes.data || !invRes.data) {
+      console.error("[pay-gate] branch=missing_row");
+      redirect(`/pay/${token}?error=1`);
+    }
 
     const subData = subRes.data!;
     const invData = invRes.data!;
@@ -220,7 +227,10 @@ export default async function PayPage({ params, searchParams }: PageProps) {
     if (gateRequireInvoiceNum) {
       const canonical = (invData.invoice_number ?? "").trim().toLowerCase();
       const entered = ((formData.get("invoice_number") as string) ?? "").trim().toLowerCase();
-      if (!canonical || canonical !== entered) redirect(`/pay/${token}?error=1`);
+      if (!canonical || canonical !== entered) {
+        console.error("[pay-gate] branch=invoice_mismatch", { canonical, entered });
+        redirect(`/pay/${token}?error=1`);
+      }
     }
 
     if (gateRequireZip && canonicalZip) {
@@ -238,7 +248,10 @@ export default async function PayPage({ params, searchParams }: PageProps) {
       .eq("onboarding_status", "complete")
       .single();
 
-    if (!po?.provider_account_id) redirect(`/pay/${token}?error=1`);
+    if (!po?.provider_account_id) {
+      console.error("[pay-gate] branch=no_payout_account");
+      redirect(`/pay/${token}?error=1`);
+    }
 
     const appUrl = getAppUrl();
 
@@ -256,14 +269,15 @@ export default async function PayPage({ params, searchParams }: PageProps) {
         successUrl: `${appUrl}/pay/${token}/done`,
         cancelUrl: `${appUrl}/pay/${token}?canceled=1`,
       });
-    } catch {
+    } catch (e) {
+      console.error("[pay-gate] branch=session_throw", e);
       redirect(`/pay/${token}?error=1`);
     }
 
     // Face value below the rev-share floor — no fee due, no session minted.
     if (!result.ok) {
       console.error(
-        `pay/${token} verifyChallenge: invoice below rev-share minimum, refusing to create session — invoice_id=${lnk.invoice_id}`
+        `[pay-gate] branch=below_minimum pay/${token} verifyChallenge: invoice below rev-share minimum, refusing to create session — invoice_id=${lnk.invoice_id}`
       );
       redirect(`/pay/${token}?error=1`);
     }
