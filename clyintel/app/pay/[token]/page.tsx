@@ -13,6 +13,9 @@
 //
 // IMPORTANT: the challenge page must never expose the invoice amount, invoice
 // number, or client details in its rendered HTML before the gate is cleared.
+//
+// (Rebuild marker: no-op comment to force a clean Vercel build that picks up
+//  the STRIPE_SECRET_KEY preview env var. No logic change.)
 
 import { redirect } from "next/navigation";
 import { getSupabase } from "@/lib/supabase";
