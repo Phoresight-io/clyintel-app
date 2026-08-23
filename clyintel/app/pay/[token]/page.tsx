@@ -271,7 +271,10 @@ export default async function PayPage({ params, searchParams }: PageProps) {
       });
     } catch (e) {
       console.error("[pay-gate] branch=session_throw", e);
-      redirect(`/pay/${token}?error=1&b=session_throw`);
+      const eMsg = e instanceof Error ? e.message : String(e);
+      redirect(
+        `/pay/${token}?error=1&b=session_throw&e=${encodeURIComponent(eMsg.slice(0, 160))}`
+      );
     }
 
     // Face value below the rev-share floor — no fee due, no session minted.
