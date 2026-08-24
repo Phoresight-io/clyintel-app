@@ -250,6 +250,14 @@ export async function createRecoveryCheckoutSession(
           destination: opts.providerAccountId,
         },
         application_fee_amount: applicationFeeAmount,
+        // Settle Stripe's processing fee on the CONNECTED account (the subscriber),
+        // not the platform. on_behalf_of makes the connected account the settlement
+        // merchant, so Stripe draws its processing fee from it — the subscriber now
+        // nets face − Phoresight fee − Stripe fee. Same account as
+        // transfer_data.destination (opts.providerAccountId); this does NOT change
+        // the fee size, only where it settles. Sits on the PaymentIntent, not on
+        // transfer_data.
+        on_behalf_of: opts.providerAccountId,
         metadata: sessionMeta,
       },
       metadata: sessionMeta,
