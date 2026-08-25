@@ -5,6 +5,7 @@ import { getValidAccessToken } from "@/lib/qbo/tokens";
 import { listCustomers, listInvoices } from "@/lib/qbo/client";
 import { mergeClientContact } from "@/lib/qbo/mergeClientContact";
 import { evaluateOutreachEligibility } from "@/lib/outreach/eligibility";
+import { computeBalanceEvent, type BalanceEventRow } from "@/lib/balanceEvents/computeBalanceEvent";
 import type { Database, Json } from "@/types/supabase";
 
 type InvoiceStatus = Database["public"]["Enums"]["invoice_status"];
@@ -154,6 +155,11 @@ export async function POST() {
     // consistent across all rows in this sync.
     const todayIso = new Date().toISOString().slice(0, 10);
 
+    // New outstanding (cents) per QBO invoice Id for this batch, = amount_cents −
+    // amount_paid_cents (exactly the value the GENERATED amount_outstanding_cents
+    // column will hold post-upsert). Feeds balance-drop detection below.
+    const newOutstandingByExternalId = new Map<string, number>();
+
     for (const inv of invoices) {
       const qboCustomerId = inv.CustomerRef?.value;
       const clientId = qboCustomerId ? clientIdByQboId.get(qboCustomerId) : undefined;
@@ -174,6 +180,8 @@ export async function POST() {
       // amount_outstanding_cents (= amount_cents − amount_paid_cents) in [0, face]
       // and consistent with the derived status.
       const paidCents = Math.max(0, Math.min(amountCents, amountCents - balanceCents));
+      // Record the new outstanding (= face − paid) for balance-drop detection.
+      newOutstandingByExternalId.set(inv.Id, amountCents - paidCents);
       // TxnDate (issue date) rides on the raw QBO payload, not the typed list
       // item; SELECT * returns it. May be absent → null.
       const txnDate =
@@ -204,18 +212,138 @@ export async function POST() {
       });
     }
 
+    // --- Balance-drop anchors (PRE-upsert, best-effort) ------------------
+    // Resolve each invoice's PREVIOUS outstanding balance BEFORE the upsert
+    // overwrites it — otherwise the drop is unrecoverable. Anchor precedence:
+    //   1. balance_events last new_outstanding_cents (durable monotonic ledger),
+    //   2. else existing invoices.amount_outstanding_cents (never-evented invoice),
+    //   3. else null (brand-new invoice → no anchor, no emission).
+    // reminder_count is read here too (the emission-time value). This whole block
+    // is additive and must NEVER abort invoice sync: on any error we log, clear
+    // the anchors, and let emission no-op this run.
+    const anchorByExternalId = new Map<
+      string,
+      { prevOutstandingCents: number | null; reminderCount: number }
+    >();
+    const externalIds = invoiceRows.map((r) => r.external_id);
+    if (externalIds.length > 0) {
+      try {
+        // One batched read of existing invoices in this batch (fallback anchor +
+        // reminder_count + the uuid needed to look up their ledger events).
+        const { data: preInvoices, error: preError } = await service
+          .from("invoices")
+          .select("id, external_id, amount_outstanding_cents, reminder_count")
+          .eq("subscriber_id", subscriberId)
+          .eq("source", "qbo")
+          .in("external_id", externalIds);
+        if (preError) throw new Error(preError.message);
+
+        const uuidByExternalId = new Map<string, string>();
+        for (const row of preInvoices ?? []) {
+          if (!row.external_id) continue;
+          uuidByExternalId.set(row.external_id, row.id);
+          anchorByExternalId.set(row.external_id, {
+            prevOutstandingCents: row.amount_outstanding_cents,
+            reminderCount: row.reminder_count ?? 0,
+          });
+        }
+
+        // One batched read of the latest balance_events per known invoice uuid.
+        // Ordered newest-first; the first row seen per invoice_id is its latest.
+        const uuids = [...uuidByExternalId.values()];
+        if (uuids.length > 0) {
+          const { data: events, error: evError } = await service
+            .from("balance_events")
+            .select("invoice_id, new_outstanding_cents, detected_at")
+            .in("invoice_id", uuids)
+            .order("detected_at", { ascending: false });
+          if (evError) throw new Error(evError.message);
+
+          const lastEventByInvoiceId = new Map<string, number>();
+          for (const ev of events ?? []) {
+            if (!lastEventByInvoiceId.has(ev.invoice_id)) {
+              lastEventByInvoiceId.set(ev.invoice_id, ev.new_outstanding_cents);
+            }
+          }
+          // The ledger anchor, where present, overrides the invoices fallback.
+          for (const [ext, uuid] of uuidByExternalId) {
+            const last = lastEventByInvoiceId.get(uuid);
+            if (last != null) {
+              anchorByExternalId.set(ext, {
+                prevOutstandingCents: last,
+                reminderCount: anchorByExternalId.get(ext)?.reminderCount ?? 0,
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.error(
+          "qbo/sync: balance-event anchor read failed (emission skipped this run)",
+          err,
+        );
+        anchorByExternalId.clear();
+      }
+    }
+
     let invoicesUpserted = 0;
+    // QBO external_id → our invoices.id (uuid) for every upserted row, incl. brand
+    // new ones (their uuids only exist post-upsert). Drives balance emission below.
+    const upsertedIdByExternalId = new Map<string, string>();
     if (invoiceRows.length > 0) {
       const { data: upsertedInvoices, error: invoiceError } = await service
         .from("invoices")
         .upsert(invoiceRows, { onConflict: "subscriber_id,source,external_id" })
-        .select("id");
+        .select("id, external_id");
 
       if (invoiceError) {
         throw new Error(`QBO sync: invoices upsert failed: ${invoiceError.message}`);
       }
 
       invoicesUpserted = upsertedInvoices?.length ?? 0;
+      for (const row of upsertedInvoices ?? []) {
+        if (row.external_id) upsertedIdByExternalId.set(row.external_id, row.id);
+      }
+    }
+
+    // --- Balance-drop emission (POST-upsert, best-effort) ----------------
+    // Invoice uuids now exist for brand-new rows too. Compare each invoice's
+    // PRE-upsert anchor against its new outstanding and record one balance_events
+    // row per detected drop. prev comes from the pre-upsert anchor — never
+    // re-derived from the just-written new state. computeBalanceEvent guarantees
+    // every emitted row satisfies the DB CHECK constraints. A failed insert is
+    // logged loudly, never swallowed, and never aborts the sync (money path).
+    let balanceEventsEmitted = 0;
+    {
+      const syncedAt = new Date().toISOString();
+      const balanceEventRows: BalanceEventRow[] = [];
+      for (const [externalId, newOutstandingCents] of newOutstandingByExternalId) {
+        const invoiceId = upsertedIdByExternalId.get(externalId);
+        if (!invoiceId) continue; // upsert didn't return this row; nothing to reference
+        const anchor = anchorByExternalId.get(externalId);
+        const row = computeBalanceEvent({
+          subscriberId,
+          invoiceId,
+          source: "qbo",
+          prevOutstandingCents: anchor?.prevOutstandingCents ?? null,
+          newOutstandingCents,
+          reminderCount: anchor?.reminderCount ?? 0,
+          syncedAt,
+        });
+        if (row) balanceEventRows.push(row);
+      }
+
+      if (balanceEventRows.length > 0) {
+        const { error: emitError } = await service
+          .from("balance_events")
+          .insert(balanceEventRows);
+        if (emitError) {
+          console.error(
+            `qbo/sync: balance_events insert failed (${balanceEventRows.length} rows dropped): ${emitError.message}`,
+          );
+        } else {
+          balanceEventsEmitted = balanceEventRows.length;
+        }
+      }
     }
 
     // --- Outreach eligibility (Brick A) ----------------------------------
@@ -280,6 +408,7 @@ export async function POST() {
       invoicesUpserted,
       invoicesSkipped,
       outreachAttemptsCreated,
+      balanceEventsEmitted,
     });
   } catch (err) {
     // The QBO client strips access tokens from its error messages, so echoing

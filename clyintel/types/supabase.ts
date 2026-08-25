@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5"
+    PostgrestVersion: "14.15"
   }
   public: {
     Tables: {
@@ -69,6 +69,73 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "audit_log_subscriber_id_fkey"
+            columns: ["subscriber_id"]
+            isOneToOne: false
+            referencedRelation: "subscribers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      balance_events: {
+        Row: {
+          created_at: string
+          delta_cents: number
+          detected_at: string
+          evidence: Json | null
+          fee_eligible: boolean
+          id: string
+          invoice_id: string
+          new_outstanding_cents: number
+          outreach_had_fired: boolean
+          prev_outstanding_cents: number
+          source: string
+          subscriber_id: string
+        }
+        Insert: {
+          created_at?: string
+          delta_cents: number
+          detected_at?: string
+          evidence?: Json | null
+          fee_eligible: boolean
+          id?: string
+          invoice_id: string
+          new_outstanding_cents: number
+          outreach_had_fired: boolean
+          prev_outstanding_cents: number
+          source: string
+          subscriber_id: string
+        }
+        Update: {
+          created_at?: string
+          delta_cents?: number
+          detected_at?: string
+          evidence?: Json | null
+          fee_eligible?: boolean
+          id?: string
+          invoice_id?: string
+          new_outstanding_cents?: number
+          outreach_had_fired?: boolean
+          prev_outstanding_cents?: number
+          source?: string
+          subscriber_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "balance_events_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "balance_events_source_fkey"
+            columns: ["source"]
+            isOneToOne: false
+            referencedRelation: "capture_sources"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "balance_events_subscriber_id_fkey"
             columns: ["subscriber_id"]
             isOneToOne: false
             referencedRelation: "subscribers"
@@ -465,6 +532,7 @@ export type Database = {
           source: string | null
           status: Database["public"]["Enums"]["invoice_status"]
           subscriber_id: string
+          test_user: boolean
           updated_at: string
         }
         Insert: {
@@ -489,6 +557,7 @@ export type Database = {
           source?: string | null
           status?: Database["public"]["Enums"]["invoice_status"]
           subscriber_id: string
+          test_user?: boolean
           updated_at?: string
         }
         Update: {
@@ -513,6 +582,7 @@ export type Database = {
           source?: string | null
           status?: Database["public"]["Enums"]["invoice_status"]
           subscriber_id?: string
+          test_user?: boolean
           updated_at?: string
         }
         Relationships: [
@@ -999,6 +1069,7 @@ export type Database = {
       }
       rev_share_ledger: {
         Row: {
+          balance_event_id: string | null
           band: string
           captured_at: string
           created_at: string
@@ -1017,6 +1088,7 @@ export type Database = {
           subscriber_id: string
         }
         Insert: {
+          balance_event_id?: string | null
           band: string
           captured_at: string
           created_at?: string
@@ -1035,6 +1107,7 @@ export type Database = {
           subscriber_id: string
         }
         Update: {
+          balance_event_id?: string | null
           band?: string
           captured_at?: string
           created_at?: string
@@ -1053,6 +1126,13 @@ export type Database = {
           subscriber_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "rev_share_ledger_balance_event_id_fkey"
+            columns: ["balance_event_id"]
+            isOneToOne: true
+            referencedRelation: "balance_events"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "rev_share_ledger_source_fkey"
             columns: ["source"]
@@ -1097,6 +1177,7 @@ export type Database = {
           stripe_customer_id: string | null
           stripe_subscription_id: string | null
           subscription_status: string
+          test_user: boolean
           trial_ends_at: string | null
           updated_at: string
         }
@@ -1127,6 +1208,7 @@ export type Database = {
           stripe_customer_id?: string | null
           stripe_subscription_id?: string | null
           subscription_status?: string
+          test_user?: boolean
           trial_ends_at?: string | null
           updated_at?: string
         }
@@ -1157,6 +1239,7 @@ export type Database = {
           stripe_customer_id?: string | null
           stripe_subscription_id?: string | null
           subscription_status?: string
+          test_user?: boolean
           trial_ends_at?: string | null
           updated_at?: string
         }
