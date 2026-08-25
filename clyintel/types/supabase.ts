@@ -376,6 +376,7 @@ export type Database = {
         Row: {
           access_token: string | null
           connected_at: string
+          disconnected_at: string | null
           external_id: string | null
           id: string
           meta: Json | null
@@ -388,6 +389,7 @@ export type Database = {
         Insert: {
           access_token?: string | null
           connected_at?: string
+          disconnected_at?: string | null
           external_id?: string | null
           id?: string
           meta?: Json | null
@@ -400,6 +402,7 @@ export type Database = {
         Update: {
           access_token?: string | null
           connected_at?: string
+          disconnected_at?: string | null
           external_id?: string | null
           id?: string
           meta?: Json | null
