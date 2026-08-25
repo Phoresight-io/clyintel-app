@@ -54,7 +54,7 @@ export async function POST() {
 
   // No connection (or already voided) → idempotent success.
   if (!row || !row.external_id) {
-    return NextResponse.json({ ok: true, alreadyDisconnected: true });
+    return NextResponse.json({ disconnected: true });
   }
 
   const prevMeta = (row.meta && typeof row.meta === "object" ? row.meta : {}) as Record<
@@ -91,5 +91,5 @@ export async function POST() {
     payload: { provider: "quickbooks", realm_id: row.external_id } as never,
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ disconnected: true });
 }
