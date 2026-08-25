@@ -84,6 +84,9 @@ export async function GET(req: NextRequest) {
       access_token: encryptSecret(tokens.access_token),
       refresh_token: encryptSecret(tokens.refresh_token),
       token_expires_at: tokenExpiresAt,
+      // Reconnect clears the soft-void marker so disconnected_at means what it
+      // says: null when connected, set only while disconnected.
+      disconnected_at: null,
       updated_at: new Date().toISOString(),
       meta: {
         token_type: "bearer",
