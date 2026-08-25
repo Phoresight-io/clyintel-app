@@ -219,17 +219,22 @@ export async function POST() {
     //   2. else existing invoices.amount_outstanding_cents (never-evented invoice),
     //   3. else null (brand-new invoice → no anchor, no emission).
     // reminder_count is read here too (the emission-time value). This whole block
-    // is additive and must NEVER abort invoice sync: on any error we log, clear
-    // the anchors, and let emission no-op this run.
+    // is additive and must NEVER abort invoice sync. The two reads are split so a
+    // failure of the best-effort ledger override can never wipe the invoice-seeded
+    // base anchors: only an invoices pre-read failure (no reliable base) skips
+    // emission; a ledger-read failure just skips the override.
     const anchorByExternalId = new Map<
       string,
       { prevOutstandingCents: number | null; reminderCount: number }
     >();
+    const uuidByExternalId = new Map<string, string>();
     const externalIds = invoiceRows.map((r) => r.external_id);
     if (externalIds.length > 0) {
+      // Base anchors: one batched read of existing invoices in this batch
+      // (fallback anchor + reminder_count + the uuid needed to look up their
+      // ledger events). If THIS fails there is no reliable base, so clear and
+      // let emission no-op this run.
       try {
-        // One batched read of existing invoices in this batch (fallback anchor +
-        // reminder_count + the uuid needed to look up their ledger events).
         const { data: preInvoices, error: preError } = await service
           .from("invoices")
           .select("id, external_id, amount_outstanding_cents, reminder_count")
@@ -238,7 +243,6 @@ export async function POST() {
           .in("external_id", externalIds);
         if (preError) throw new Error(preError.message);
 
-        const uuidByExternalId = new Map<string, string>();
         for (const row of preInvoices ?? []) {
           if (!row.external_id) continue;
           uuidByExternalId.set(row.external_id, row.id);
@@ -247,11 +251,23 @@ export async function POST() {
             reminderCount: row.reminder_count ?? 0,
           });
         }
+      } catch (err) {
+        console.error(
+          "qbo/sync: balance-event anchor read failed (emission skipped this run)",
+          err,
+        );
+        anchorByExternalId.clear();
+        uuidByExternalId.clear();
+      }
 
-        // One batched read of the latest balance_events per known invoice uuid.
-        // Ordered newest-first; the first row seen per invoice_id is its latest.
-        const uuids = [...uuidByExternalId.values()];
-        if (uuids.length > 0) {
+      // Ledger-last override: a best-effort ENHANCEMENT over the invoice-seeded
+      // base anchors. One batched read of the latest balance_events per known
+      // invoice uuid (newest-first; first row seen per invoice_id is its latest).
+      // On failure, KEEP the base anchors (do NOT clear) so first-observation
+      // drops still emit — just skip the override this run.
+      const uuids = [...uuidByExternalId.values()];
+      if (uuids.length > 0) {
+        try {
           const { data: events, error: evError } = await service
             .from("balance_events")
             .select("invoice_id, new_outstanding_cents, detected_at")
@@ -275,13 +291,12 @@ export async function POST() {
               });
             }
           }
+        } catch (err) {
+          console.error(
+            "qbo/sync: balance-event anchor read failed (ledger override skipped this run)",
+            err,
+          );
         }
-      } catch (err) {
-        console.error(
-          "qbo/sync: balance-event anchor read failed (emission skipped this run)",
-          err,
-        );
-        anchorByExternalId.clear();
       }
     }
 
