@@ -5,6 +5,7 @@ import { encryptSecret } from "@/lib/crypto";
 import { QBO_SCOPE } from "@/lib/qbo/constants";
 import { exchangeAuthCode } from "@/lib/qbo/tokens";
 import { QBO_STATE_COOKIE, isStateValid } from "@/lib/qbo/oauthState";
+import { runQboSync } from "@/lib/qbo/runQboSync";
 
 // QuickBooks OAuth callback. Validates the signed state cookie, exchanges the
 // code for tokens, and upserts the encrypted token set into connected_accounts
@@ -21,12 +22,18 @@ export async function GET(req: NextRequest) {
   const returnedState = params.get("state");
   const errorParam = params.get("error");
 
-  const redirectTo = (qbo: string) =>
-    NextResponse.redirect(`${url.origin}/connections?qbo=${qbo}`, { status: 303 });
-
-  // Single-use cookie: always clear it once we've reached the callback.
-  const finish = (qbo: string) => {
-    const res = redirectTo(qbo);
+  // Single-use cookie: always clear it once we've reached the callback. `extra`
+  // carries optional post-connect sync counts (synced/events) on the success
+  // path; the non-count paths (denied/state_invalid/error) pass none, so their
+  // URL stays `/connections?qbo=<x>` exactly as before.
+  const finish = (qbo: string, extra?: Record<string, string | number>) => {
+    const qs = new URLSearchParams({ qbo });
+    if (extra) {
+      for (const [k, v] of Object.entries(extra)) qs.set(k, String(v));
+    }
+    const res = NextResponse.redirect(`${url.origin}/connections?${qs.toString()}`, {
+      status: 303,
+    });
     res.cookies.delete(QBO_STATE_COOKIE);
     return res;
   };
@@ -119,5 +126,22 @@ export async function GET(req: NextRequest) {
     } as never,
   });
 
-  return finish("connected");
+  // Auto-sync on reauthorize (Delta 4). Tokens are persisted, so the reauth has
+  // ALREADY succeeded — a sync failure must NEVER fail it (mirrors the
+  // reflectPayment-never-blocks principle). We pass the subscriber id we just
+  // resolved and wrote, rather than re-deriving it, so the sync is scoped to the
+  // exact account that authorized. On success we forward the counts as redirect
+  // params for the connections screen to toast; on any throw we log and redirect
+  // success WITHOUT count params so the toast never claims a false count.
+  let syncCounts: { synced: number; events: number } | null = null;
+  try {
+    const r = await runQboSync(subscriberId);
+    syncCounts = { synced: r.invoicesUpserted, events: r.balanceEventsEmitted };
+  } catch (err) {
+    console.error("qbo/callback: post-connect sync failed (reauth still succeeds)", err);
+  }
+
+  return syncCounts
+    ? finish("connected", { synced: syncCounts.synced, events: syncCounts.events })
+    : finish("connected");
 }
