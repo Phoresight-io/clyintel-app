@@ -26,7 +26,13 @@ const SETTING_TABS = [
 const PROVIDER_ROUTES: Partial<
   Record<InvoiceSourceId, { reauthorizeHref: string; disconnectEndpoint: string }>
 > = {
-  quickbooks: { reauthorizeHref: "/api/qbo/connect", disconnectEndpoint: "/api/qbo/disconnect" },
+  quickbooks: {
+    // ReAuthorize/Reconnect from Integrations asks the callback to land the user
+    // back here (allowlisted in oauthState). The bare /connections QuickBooksCard
+    // "Reconnect" passes no returnTo and keeps the default /connections landing.
+    reauthorizeHref: `/api/qbo/connect?returnTo=${encodeURIComponent("/settings?tab=integrations")}`,
+    disconnectEndpoint: "/api/qbo/disconnect",
+  },
 };
 
 interface SyncToast {

@@ -4,7 +4,13 @@ import { getSupabase } from "@/lib/supabase";
 import { encryptSecret } from "@/lib/crypto";
 import { QBO_SCOPE } from "@/lib/qbo/constants";
 import { exchangeAuthCode } from "@/lib/qbo/tokens";
-import { QBO_STATE_COOKIE, isStateValid } from "@/lib/qbo/oauthState";
+import {
+  QBO_STATE_COOKIE,
+  isStateValid,
+  parseStateCookie,
+  sanitizeReturnTo,
+  DEFAULT_RETURN_TO,
+} from "@/lib/qbo/oauthState";
 import { runQboSync } from "@/lib/qbo/runQboSync";
 
 // QuickBooks OAuth callback. Validates the signed state cookie, exchanges the
@@ -24,16 +30,21 @@ export async function GET(req: NextRequest) {
 
   // Single-use cookie: always clear it once we've reached the callback. `extra`
   // carries optional post-connect sync counts (synced/events) on the success
-  // path; the non-count paths (denied/state_invalid/error) pass none, so their
-  // URL stays `/connections?qbo=<x>` exactly as before.
-  const finish = (qbo: string, extra?: Record<string, string | number>) => {
-    const qs = new URLSearchParams({ qbo });
+  // path. `returnTo` is a validated in-app path (default /connections) — the
+  // error paths pass none, so their URL stays `/connections?qbo=<x>` exactly as
+  // before; only a successful reauth carrying a valid return-to lands elsewhere.
+  // returnTo is always allowlisted, so `new URL(returnTo, origin)` is same-origin.
+  const finish = (
+    qbo: string,
+    extra?: Record<string, string | number>,
+    returnTo: string = DEFAULT_RETURN_TO,
+  ) => {
+    const target = new URL(returnTo, url.origin);
+    target.searchParams.set("qbo", qbo);
     if (extra) {
-      for (const [k, v] of Object.entries(extra)) qs.set(k, String(v));
+      for (const [k, v] of Object.entries(extra)) target.searchParams.set(k, String(v));
     }
-    const res = NextResponse.redirect(`${url.origin}/connections?${qs.toString()}`, {
-      status: 303,
-    });
+    const res = NextResponse.redirect(target.toString(), { status: 303 });
     res.cookies.delete(QBO_STATE_COOKIE);
     return res;
   };
@@ -57,6 +68,12 @@ export async function GET(req: NextRequest) {
   if (!code || !realmId) {
     return finish("state_invalid");
   }
+
+  // CSRF has passed, so the sealed cookie is trustworthy — but re-validate the
+  // carried return-to at use-time anyway (never trust the carrier blindly). Used
+  // only for the success redirects below; a bad/absent value falls back to
+  // /connections and never errors the flow (reauth-never-fails-reauth).
+  const returnTo = sanitizeReturnTo(parseStateCookie(cookieValue)?.returnTo);
 
   const redirectUri = process.env.QBO_REDIRECT_URI;
   if (!redirectUri) {
@@ -142,6 +159,6 @@ export async function GET(req: NextRequest) {
   }
 
   return syncCounts
-    ? finish("connected", { synced: syncCounts.synced, events: syncCounts.events })
-    : finish("connected");
+    ? finish("connected", { synced: syncCounts.synced, events: syncCounts.events }, returnTo)
+    : finish("connected", undefined, returnTo);
 }
