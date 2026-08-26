@@ -26,18 +26,29 @@ function daysFromToday(due: string | null): number | null {
   return Math.round((d.getTime() - today.getTime()) / MS_PER_DAY);
 }
 
-function uiStatus(status: InvoiceRow["status"]): "past_due" | "current" | "paid" {
+function uiStatus(
+  status: InvoiceRow["status"],
+  dueDate: string | null,
+): "past_due" | "current" | "paid" {
   if (status === "paid") return "paid";
   if (status === "overdue" || status === "in_recovery" || status === "written_off") return "past_due";
-  return "current";
+  // `partial` carries no past-due info — deriveInvoiceStatus (runQboSync) sets it
+  // BEFORE the overdue check, so a partially-paid invoice can be past-due or not.
+  // Decide with the SAME daysFromToday(due) < 0 convention every other row on this
+  // page already uses: past-due partial → past_due, not-yet-due partial → current.
+  if (status === "partial") {
+    const delta = daysFromToday(dueDate);
+    return delta !== null && delta < 0 ? "past_due" : "current";
+  }
+  return "current"; // draft | sent
 }
 
 export function toUIInvoice(row: InvoiceRow): Invoice {
-  const ui = uiStatus(row.status);
+  const ui = uiStatus(row.status, row.due_date);
   const dayDelta = daysFromToday(row.due_date);
   const invoice: Invoice = {
     id: row.invoice_number || row.id,
-    amount: Math.round(row.amount_cents) / 100,
+    amount: Math.round(row.amount_outstanding_cents ?? row.amount_cents) / 100,
     dueDate: formatDate(row.due_date),
     status: ui,
     lastActivity: row.last_reminder_at ? formatDate(row.last_reminder_at) : "—",
@@ -64,13 +75,13 @@ export function toUIClientInvoiceSet(rows: InvoiceRow[]): ClientInvoiceSet {
 }
 
 function deriveStatus(rows: InvoiceRow[]): ClientStatus {
-  const statuses = rows.map((r) => uiStatus(r.status));
+  const statuses = rows.map((r) => uiStatus(r.status, r.due_date));
   if (statuses.some((s) => s === "past_due")) return "past_due";
   const hasOpen = statuses.some((s) => s === "current");
   if (hasOpen) {
     // "due" if anything is due within 7 days, else "current"
     const dueSoon = rows.some((r) => {
-      if (uiStatus(r.status) !== "current") return false;
+      if (uiStatus(r.status, r.due_date) !== "current") return false;
       const delta = daysFromToday(r.due_date);
       return delta !== null && delta <= 7;
     });
@@ -81,11 +92,11 @@ function deriveStatus(rows: InvoiceRow[]): ClientStatus {
 
 export function toUIClient(client: ClientRow, ptr: PtrScoreRow | null, invoices: InvoiceRow[]): Client {
   const outstandingCents = invoices.reduce(
-    (sum, inv) => (uiStatus(inv.status) === "past_due" ? sum + (inv.amount_outstanding_cents ?? inv.amount_cents) : sum),
+    (sum, inv) => (uiStatus(inv.status, inv.due_date) === "past_due" ? sum + (inv.amount_outstanding_cents ?? inv.amount_cents) : sum),
     0
   );
   const maxOverdue = invoices.reduce((max, inv) => {
-    if (uiStatus(inv.status) !== "past_due") return max;
+    if (uiStatus(inv.status, inv.due_date) !== "past_due") return max;
     const delta = daysFromToday(inv.due_date);
     const overdue = delta !== null && delta < 0 ? Math.abs(delta) : 0;
     return Math.max(max, overdue);
