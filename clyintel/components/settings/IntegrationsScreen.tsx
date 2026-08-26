@@ -1,43 +1,14 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
-import { DEMO_RESET_KEY, CLIENTS_KEY, INTEGRATIONS_KEY, DEFAULT_INTEGRATIONS } from "@/lib/demo-mode";
-import type { Client } from "@/lib/mock-data";
 import { createSupabaseBrowser } from "@/lib/supabase-browser";
+import { getInvoiceSource, type InvoiceSourceId } from "@/lib/invoiceSources";
 import BillingTab from "@/components/settings/BillingTab";
 import ConnectCard from "@/components/settings/ConnectCard";
 import RevenueRecoveryTab from "@/components/settings/RevenueRecoveryTab";
-
-type IntegrationStatus = "connected" | "syncing" | "disconnected";
-
-interface ManagedIntegration {
-  id: string;
-  name: string;
-  color: string;
-  initial: string;
-  logo?: string;
-  subtitle: string;
-  status: IntegrationStatus;
-  lastSync: string | null;
-  clients: number;
-  invoices: number;
-}
-
-const INTEGRATION_CLIENT_SEEDS: Record<string, Client[]> = {
-  stripe: [
-    { id: 101, name: "Atlas Commerce", industry: "E-commerce", score: 58, prevScore: 65, status: "past_due", balance: 3200, daysOverdue: 22, invoices: 3, lastActivity: "3 days ago", nextAction: "Send final notice", scoreSummary: ["Payment delayed 22 days"], scoreFactors: ["Late payment history"], riskDrivers: ["22 days overdue"] },
-  ],
-  fb: [
-    { id: 102, name: "Bright Solutions", industry: "Consulting", score: 71, prevScore: 68, status: "due", balance: 5800, daysOverdue: 0, invoices: 2, lastActivity: "Today", nextAction: "Follow up in 3 days", scoreSummary: ["Invoice due soon"], scoreFactors: [], riskDrivers: [] },
-  ],
-  xero: [
-    { id: 103, name: "Summit Partners", industry: "Finance", score: 45, prevScore: 52, status: "past_due", balance: 9400, daysOverdue: 45, invoices: 4, lastActivity: "1 week ago", nextAction: "Issue formal demand", scoreSummary: ["Critical collection risk"], scoreFactors: ["4 late payments"], riskDrivers: ["45 days overdue"] },
-  ],
-  gdrive: [
-    { id: 104, name: "Pixel Works", industry: "Creative", score: 63, prevScore: 60, status: "due", balance: 2100, daysOverdue: 0, invoices: 1, lastActivity: "2 days ago", nextAction: "Schedule follow-up", scoreSummary: ["Invoice due in 7 days"], scoreFactors: [], riskDrivers: [] },
-  ],
-};
+import InvoiceSourceCard, { type SourceRow } from "@/components/settings/InvoiceSourceCard";
+import { Toast, ToastSuccessDot } from "@/components/ui/Toast";
 
 const SETTING_TABS = [
   { id: "integrations",    label: "Integrations",    disabled: false },
@@ -47,39 +18,36 @@ const SETTING_TABS = [
   { id: "profile",         label: "Profile",         disabled: true  },
 ];
 
-function persist(list: ManagedIntegration[]) {
-  localStorage.setItem(INTEGRATIONS_KEY, JSON.stringify(list));
-}
+// OAuth connect-start + disconnect endpoints per invoice-source provider. Only
+// QuickBooks is live today; a provider absent here simply can't be managed (its
+// coming-soon registry entry never yields a /api/sources row anyway). The
+// provider id ("quickbooks") differs from QBO's route prefix ("qbo"), so this
+// mapping can't be derived from the id.
+const PROVIDER_ROUTES: Partial<
+  Record<InvoiceSourceId, { reauthorizeHref: string; disconnectEndpoint: string }>
+> = {
+  quickbooks: { reauthorizeHref: "/api/qbo/connect", disconnectEndpoint: "/api/qbo/disconnect" },
+};
 
-function StatusBadge({ status }: { status: IntegrationStatus }) {
-  if (status === "syncing") {
-    return (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 500, color: C.blue }}>
-        <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.blue, display: "inline-block", animation: "pulse 1.2s ease-in-out infinite" }} />
-        Syncing…
-      </span>
-    );
-  }
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 500, color: C.green }}>
-      <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.green, display: "inline-block" }} />
-      Connected
-    </span>
-  );
+interface SyncToast {
+  invoices: number;
+  events: number;
 }
 
 export default function IntegrationsScreen() {
   const router = useRouter();
 
   const [activeTab, setActiveTab] = useState("integrations");
-  const [integrations, setIntegrations] = useState<ManagedIntegration[]>(DEFAULT_INTEGRATIONS as ManagedIntegration[]);
-  const [disconnectConfirm, setDisconnectConfirm] = useState<string | null>(null);
+
+  // Real invoice-source rows from /api/sources (registry-scoped, caller's own).
+  const [sources, setSources] = useState<SourceRow[] | null>(null);
+  const [sourcesLoading, setSourcesLoading] = useState(true);
 
   // Plan-derived revenue share rate — passed to ConnectCard for fee disclosure.
   const [revShareRate, setRevShareRate] = useState<number | null>(null);
-  // Real DB counts for the QuickBooks source (the card's clients/invoices were a
-  // hardcoded demo seed — 6/24). Null until loaded; then the qb card shows truth.
-  const [qboCounts, setQboCounts] = useState<{ clients: number; invoices: number } | null>(null);
+
+  // Sync-result toast (from PR-B's ?qbo=connected&synced=N&events=M params).
+  const [syncToast, setSyncToast] = useState<SyncToast | null>(null);
 
   // Honor ?tab= deep links. Connect onboarding returns to ?tab=integrations.
   useEffect(() => {
@@ -92,25 +60,24 @@ export default function IntegrationsScreen() {
     }
   }, []);
 
-  // Load integrations from localStorage
+  // Sync-result toast: PR-B's callback appends ?qbo=connected&synced=N&events=M
+  // after an auto-sync on reauthorize. It currently redirects to /connections,
+  // NOT here — so in the normal reauthorize-from-Integrations flow this toast
+  // won't fire until the callback honors a return-to (named follow-up). Wired to
+  // this screen's own params so it fires wherever those params actually land here.
   useEffect(() => {
-    const reset = localStorage.getItem(DEMO_RESET_KEY) === "true";
-    if (reset) {
-      setIntegrations([]);
-      return;
-    }
-    const saved = localStorage.getItem(INTEGRATIONS_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as ManagedIntegration[];
-        setIntegrations(Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_INTEGRATIONS as ManagedIntegration[]);
-      } catch {
-        setIntegrations(DEFAULT_INTEGRATIONS as ManagedIntegration[]);
-      }
-    }
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("qbo") !== "connected") return;
+    const synced = params.get("synced");
+    const events = params.get("events");
+    if (synced === null || events === null) return; // sync failed/absent → no false count
+    const invoices = Number(synced);
+    const ev = Number(events);
+    if (Number.isNaN(invoices) || Number.isNaN(ev)) return;
+    setSyncToast({ invoices, events: ev });
   }, []);
 
-  // Fetch plan-derived revenue share rate for ConnectCard fee disclosure
+  // Fetch plan-derived revenue share rate for ConnectCard fee disclosure.
   useEffect(() => {
     let active = true;
     (async () => {
@@ -129,60 +96,30 @@ export default function IntegrationsScreen() {
     return () => { active = false; };
   }, []);
 
-  // Real, persisted counts for the QuickBooks card — scoped to the caller's own
-  // source='qbo' rows (RLS enforces subscriber_id = auth.uid()); a HEAD count
-  // avoids fetching the rows. Replaces the hardcoded demo seed so the card
-  // matches the portfolio instead of undercounting.
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      const supabase = createSupabaseBrowser();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !active) return;
-      const [clientsRes, invoicesRes] = await Promise.all([
-        supabase.from("clients").select("id", { count: "exact", head: true })
-          .eq("subscriber_id", user.id).eq("source", "qbo"),
-        supabase.from("invoices").select("id", { count: "exact", head: true })
-          .eq("subscriber_id", user.id).eq("source", "qbo"),
-      ]);
-      if (!active || clientsRes.error || invoicesRes.error) return;
-      setQboCounts({ clients: clientsRes.count ?? 0, invoices: invoicesRes.count ?? 0 });
-    })();
-    return () => { active = false; };
+  // Real invoice-source rows. never-connected providers return NO row, so they
+  // are simply absent (never rendered). Refetched after a disconnect so the card
+  // flips to its disconnected tile.
+  const fetchSources = useCallback(async () => {
+    try {
+      const res = await fetch("/api/sources", { cache: "no-store" });
+      if (!res.ok) {
+        setSources([]);
+        return;
+      }
+      const data = (await res.json()) as { sources?: SourceRow[] };
+      setSources(Array.isArray(data.sources) ? data.sources : []);
+    } catch {
+      setSources([]);
+    } finally {
+      setSourcesLoading(false);
+    }
   }, []);
 
-  const connected = integrations.filter((i) => i.status !== "disconnected");
+  useEffect(() => {
+    void fetchSources();
+  }, [fetchSources]);
 
-  const handleSyncNow = (id: string) => {
-    setIntegrations((prev) => prev.map((i) => i.id === id ? { ...i, status: "syncing" as const } : i));
-    setTimeout(() => {
-      setIntegrations((prev) => {
-        const next = prev.map((i) =>
-          i.id === id ? { ...i, status: "connected" as const, lastSync: "Just now" } : i
-        );
-        persist(next);
-        return next;
-      });
-    }, 2200);
-  };
-
-  const handleDisconnectIntegration = (id: string) => {
-    setDisconnectConfirm(null);
-    setIntegrations((prev) => {
-      const next = prev.map((i) =>
-        i.id === id ? { ...i, status: "disconnected" as const, lastSync: null, clients: 0, invoices: 0 } : i
-      );
-      persist(next);
-      return next;
-    });
-    const seedIds = new Set((INTEGRATION_CLIENT_SEEDS[id] ?? []).map((s) => s.id));
-    if (seedIds.size > 0) {
-      try {
-        const existing: Client[] = JSON.parse(localStorage.getItem(CLIENTS_KEY) || "[]");
-        localStorage.setItem(CLIENTS_KEY, JSON.stringify(existing.filter((c) => !seedIds.has(c.id))));
-      } catch { /* ignore */ }
-    }
-  };
+  const connectedCount = (sources ?? []).filter((s) => s.state === "connected").length;
 
   const handleAddClient = () => {
     router.push("/connections");
@@ -236,7 +173,7 @@ export default function IntegrationsScreen() {
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span style={{ fontSize: 16, fontWeight: 600, color: C.text }}>Integrations</span>
-                {connected.length > 0 && (
+                {connectedCount > 0 && (
                   <span
                     style={{
                       fontSize: 12,
@@ -247,7 +184,7 @@ export default function IntegrationsScreen() {
                       padding: "2px 8px",
                     }}
                   >
-                    {connected.length} connected
+                    {connectedCount} connected
                   </span>
                 )}
               </div>
@@ -289,7 +226,7 @@ export default function IntegrationsScreen() {
             <ConnectCard revShareRate={revShareRate} />
           </div>
 
-          {/* INVOICE SOURCES section */}
+          {/* INVOICE SOURCES section — real cards from /api/sources + registry */}
           <div>
             <div
               style={{
@@ -304,7 +241,11 @@ export default function IntegrationsScreen() {
               Invoice Sources
             </div>
 
-            {connected.length === 0 ? (
+            {sourcesLoading ? (
+              <div style={{ fontSize: 13, color: C.textDim, fontWeight: 500, padding: "12px 0" }}>
+                Loading sources…
+              </div>
+            ) : (sources ?? []).length === 0 ? (
               <div
                 style={{
                   background: C.surface,
@@ -314,177 +255,27 @@ export default function IntegrationsScreen() {
                   textAlign: "center",
                 }}
               >
-                <div style={{ fontSize: 14, color: C.textMid, fontWeight: 500 }}>No integrations available.</div>
+                <div style={{ fontSize: 14, color: C.textMid, fontWeight: 500 }}>
+                  No invoice sources connected yet.
+                </div>
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {connected.map((integration) => {
-                  // The QuickBooks card shows real DB counts (source='qbo') once
-                  // loaded; every other (demo) integration keeps its seed values.
-                  const useReal = integration.id === "qb" && qboCounts !== null;
-                  const displayClients = useReal ? qboCounts!.clients : integration.clients;
-                  const displayInvoices = useReal ? qboCounts!.invoices : integration.invoices;
+                {(sources ?? []).map((row) => {
+                  const registry = getInvoiceSource(row.provider);
+                  const routes = PROVIDER_ROUTES[row.provider as InvoiceSourceId];
+                  // A row for an unknown provider, or one without OAuth routes,
+                  // can't be managed here — skip rather than render a broken card.
+                  if (!registry || !routes) return null;
                   return (
-                  <div
-                    key={integration.id}
-                    style={{
-                      background: C.card,
-                      border: `1px solid ${C.border}`,
-                      borderRadius: 12,
-                      padding: "20px 24px",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 20,
-                      animation: "fadeUp 0.18s ease",
-                    }}
-                  >
-                    {/* Logo */}
-                    <div
-                      style={{
-                        width: 48,
-                        height: 48,
-                        borderRadius: 12,
-                        background: integration.color,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        flexShrink: 0,
-                      }}
-                    >
-                      {integration.logo && (
-                        <img
-                          src={integration.logo}
-                          alt={integration.name}
-                          style={{ width: 26, height: 26, objectFit: "contain" }}
-                          onError={(e) => {
-                            e.currentTarget.style.display = "none";
-                            (e.currentTarget.nextElementSibling as HTMLElement).style.display = "inline";
-                          }}
-                        />
-                      )}
-                      <span
-                        style={{
-                          fontSize: 14,
-                          fontWeight: 700,
-                          color: "#fff",
-                          display: integration.logo ? "none" : "inline",
-                        }}
-                      >
-                        {integration.initial}
-                      </span>
-                    </div>
-
-                    {/* Info */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 3 }}>
-                        <span style={{ fontSize: 15, fontWeight: 600, color: C.text }}>{integration.name}</span>
-                        {integration.status !== "disconnected" && <StatusBadge status={integration.status} />}
-                      </div>
-                      <div style={{ fontSize: 13, color: C.textDim, fontWeight: 500 }}>
-                        Sync invoices from {integration.name}
-                      </div>
-                      {integration.lastSync && (
-                        <div
-                          style={{
-                            fontSize: 11,
-                            color: C.textDim,
-                            fontWeight: 500,
-                            marginTop: 5,
-                            display: "flex",
-                            gap: 12,
-                          }}
-                        >
-                          <span>Last synced: {integration.lastSync}</span>
-                          {displayClients > 0 && <span>·</span>}
-                          {displayClients > 0 && (
-                            <span>
-                              {displayClients} clients · {displayInvoices} invoices
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Actions */}
-                    <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                      <button
-                        onClick={() => handleSyncNow(integration.id)}
-                        disabled={integration.status === "syncing"}
-                        style={{
-                          padding: "7px 14px",
-                          fontSize: 13,
-                          fontWeight: 600,
-                          color: integration.status === "syncing" ? C.textDim : C.blue,
-                          background: integration.status === "syncing" ? C.surface : C.blueBg,
-                          border: `1px solid ${integration.status === "syncing" ? C.border : C.blue}`,
-                          borderRadius: 6,
-                          cursor: integration.status === "syncing" ? "not-allowed" : "pointer",
-                        }}
-                      >
-                        {integration.status === "syncing" ? "Syncing…" : "Sync now"}
-                      </button>
-
-                      {disconnectConfirm === integration.id ? (
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <span style={{ fontSize: 11, color: C.textMid, fontWeight: 500 }}>Disconnect?</span>
-                          <button
-                            onClick={() => handleDisconnectIntegration(integration.id)}
-                            style={{
-                              padding: "7px 12px",
-                              fontSize: 13,
-                              fontWeight: 600,
-                              color: "#fff",
-                              background: C.red,
-                              border: "none",
-                              borderRadius: 6,
-                              cursor: "pointer",
-                            }}
-                          >
-                            Yes, disconnect
-                          </button>
-                          <button
-                            onClick={() => setDisconnectConfirm(null)}
-                            style={{
-                              padding: "7px 12px",
-                              fontSize: 13,
-                              fontWeight: 500,
-                              color: C.textMid,
-                              background: C.surface,
-                              border: `1px solid ${C.border}`,
-                              borderRadius: 6,
-                              cursor: "pointer",
-                            }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setDisconnectConfirm(integration.id)}
-                          style={{
-                            padding: "7px 14px",
-                            fontSize: 13,
-                            fontWeight: 600,
-                            color: C.textMid,
-                            background: C.surface,
-                            border: `1px solid ${C.border}`,
-                            borderRadius: 6,
-                            cursor: "pointer",
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.color = C.red;
-                            e.currentTarget.style.borderColor = C.red;
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.color = C.textMid;
-                            e.currentTarget.style.borderColor = C.border;
-                          }}
-                        >
-                          Disconnect
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                    <InvoiceSourceCard
+                      key={row.provider}
+                      source={registry}
+                      row={row}
+                      reauthorizeHref={routes.reauthorizeHref}
+                      disconnectEndpoint={routes.disconnectEndpoint}
+                      onDisconnected={fetchSources}
+                    />
                   );
                 })}
               </div>
@@ -532,6 +323,14 @@ export default function IntegrationsScreen() {
           <div style={{ fontSize: 16, fontWeight: 600, color: C.text, marginBottom: 4 }}>Profile</div>
           <div style={{ fontSize: 13, color: C.textDim, fontWeight: 500 }}>Coming soon.</div>
         </section>
+      )}
+
+      {/* Sync-result toast */}
+      {syncToast && (
+        <Toast icon={<ToastSuccessDot />} onDismiss={() => setSyncToast(null)}>
+          Synced · {syncToast.invoices} invoice{syncToast.invoices === 1 ? "" : "s"},{" "}
+          {syncToast.events} balance event{syncToast.events === 1 ? "" : "s"}
+        </Toast>
       )}
     </div>
   );
