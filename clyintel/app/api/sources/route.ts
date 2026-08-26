@@ -50,6 +50,12 @@ interface SourceRow {
   /** The prior Company ID preserved on soft-void, so a disconnected tile can
    *  still show a (client-masked) id. Null when connected or never set. */
   disconnected_external_id: string | null;
+  /** Raw refresh-token expiry from meta.refresh_expires_at (same field
+   *  /api/qbo/status exposes). The card owns all threshold math — we return the
+   *  raw timestamp only, never a days-remaining or amber/red computation, because
+   *  expiry slides forward on each active refresh. Null on a disconnected row (no
+   *  live token) or when meta lacks the key. */
+  refresh_expires_at: string | null;
   connected_at: string;
   updated_at: string;
   disconnected_at: string | null;
@@ -92,6 +98,9 @@ export async function GET() {
         typeof meta.disconnected_external_id === "string"
           ? meta.disconnected_external_id
           : null;
+      // Defensive jsonb read, mirroring /api/qbo/status. Null if meta lacks it.
+      const refreshExpiresAt =
+        typeof meta.refresh_expires_at === "string" ? meta.refresh_expires_at : null;
 
       const connected = row.external_id !== null;
 
@@ -100,6 +109,8 @@ export async function GET() {
         state: connected ? "connected" : "disconnected",
         external_id: row.external_id, // full/unmasked; client masks in JS
         disconnected_external_id: connected ? null : disconnectedExternalId,
+        // A soft-voided row has no live token — never surface a stale expiry.
+        refresh_expires_at: connected ? refreshExpiresAt : null,
         connected_at: row.connected_at,
         updated_at: row.updated_at,
         disconnected_at: row.disconnected_at,
