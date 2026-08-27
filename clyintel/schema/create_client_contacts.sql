@@ -83,3 +83,12 @@ where c.email is not null
     select 1 from public.client_contacts cc
     where cc.client_id = c.id and cc.is_primary
   );
+
+-- ── Account-attention flag on clients — DATA-ONLY (no derivation this PR) ─────
+-- Single nullable reason column: non-null = the account needs attention, and the
+-- value records WHY. One source of truth (a separate boolean would be derivable
+-- from this and could drift). Left nullable with no backfill — derivation wires
+-- up in Brick 0b. Kept as text (not an enum) so 0b can settle the reason set
+-- before it's frozen into a type.
+alter table public.clients
+  add column if not exists attention_reason text;
