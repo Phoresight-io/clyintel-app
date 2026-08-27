@@ -16,7 +16,15 @@ export interface SendEmailParams {
   html?: string;
 }
 
-export async function sendEmail(params: SendEmailParams): Promise<void> {
+export interface SendEmailResult {
+  // MailerSend's message id, from the `X-Message-Id` response header. This is the
+  // resolution key the inbound webhook (Brick 1b) matches replies/events against,
+  // so callers that record the send MUST persist it. Null only if MailerSend
+  // omits the header (should not happen on a 2xx, but we never throw over it).
+  messageId: string | null;
+}
+
+export async function sendEmail(params: SendEmailParams): Promise<SendEmailResult> {
   const apiKey = process.env.MAILERSEND_API_KEY;
   if (!apiKey) {
     throw new Error("MAILERSEND_API_KEY is not set");
@@ -43,4 +51,6 @@ export async function sendEmail(params: SendEmailParams): Promise<void> {
     const detail = await res.text().catch(() => "");
     throw new Error(`MailerSend error: ${res.status} ${detail}`.trim());
   }
+
+  return { messageId: res.headers.get("x-message-id") };
 }
