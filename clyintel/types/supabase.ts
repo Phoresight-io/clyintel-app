@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.15"
+    PostgrestVersion: "14.17"
   }
   public: {
     Tables: {
@@ -170,8 +170,59 @@ export type Database = {
         }
         Relationships: []
       }
+      client_contacts: {
+        Row: {
+          client_id: string
+          created_at: string
+          email: string | null
+          id: string
+          is_primary: boolean
+          opt_out_email: boolean
+          opt_out_sms: boolean
+          opt_out_voice: boolean
+          phone: string | null
+          role: string | null
+          updated_at: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          email?: string | null
+          id?: string
+          is_primary?: boolean
+          opt_out_email?: boolean
+          opt_out_sms?: boolean
+          opt_out_voice?: boolean
+          phone?: string | null
+          role?: string | null
+          updated_at?: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          email?: string | null
+          id?: string
+          is_primary?: boolean
+          opt_out_email?: boolean
+          opt_out_sms?: boolean
+          opt_out_voice?: boolean
+          phone?: string | null
+          role?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_contacts_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       clients: {
         Row: {
+          attention_reason: string | null
           avg_days_to_pay: number | null
           billing_address: Json | null
           company: string | null
@@ -195,6 +246,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          attention_reason?: string | null
           avg_days_to_pay?: number | null
           billing_address?: Json | null
           company?: string | null
@@ -218,6 +270,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          attention_reason?: string | null
           avg_days_to_pay?: number | null
           billing_address?: Json | null
           company?: string | null
