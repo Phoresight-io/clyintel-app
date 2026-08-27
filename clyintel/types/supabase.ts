@@ -170,6 +170,137 @@ export type Database = {
         }
         Relationships: []
       }
+      cadence_steps: {
+        Row: {
+          cadence_id: string
+          channel: Database["public"]["Enums"]["communication_channel"]
+          created_at: string
+          id: string
+          offset_business_days: number
+          step_number: number
+        }
+        Insert: {
+          cadence_id: string
+          channel: Database["public"]["Enums"]["communication_channel"]
+          created_at?: string
+          id?: string
+          offset_business_days?: number
+          step_number: number
+        }
+        Update: {
+          cadence_id?: string
+          channel?: Database["public"]["Enums"]["communication_channel"]
+          created_at?: string
+          id?: string
+          offset_business_days?: number
+          step_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cadence_steps_cadence_id_fkey"
+            columns: ["cadence_id"]
+            isOneToOne: false
+            referencedRelation: "cadences"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cadences: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          key: string
+          name: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          key: string
+          name: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          key?: string
+          name?: string
+        }
+        Relationships: []
+      }
+      invoice_cadence_progress: {
+        Row: {
+          cadence_id: string
+          communication_id: string | null
+          created_at: string
+          id: string
+          invoice_id: string
+          recorded_at: string
+          recovery_attempt_id: string | null
+          step_number: number
+          subscriber_id: string
+        }
+        Insert: {
+          cadence_id: string
+          communication_id?: string | null
+          created_at?: string
+          id?: string
+          invoice_id: string
+          recorded_at?: string
+          recovery_attempt_id?: string | null
+          step_number: number
+          subscriber_id: string
+        }
+        Update: {
+          cadence_id?: string
+          communication_id?: string | null
+          created_at?: string
+          id?: string
+          invoice_id?: string
+          recorded_at?: string
+          recovery_attempt_id?: string | null
+          step_number?: number
+          subscriber_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_cadence_progress_cadence_id_fkey"
+            columns: ["cadence_id"]
+            isOneToOne: false
+            referencedRelation: "cadences"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_cadence_progress_communication_id_fkey"
+            columns: ["communication_id"]
+            isOneToOne: false
+            referencedRelation: "communications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_cadence_progress_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_cadence_progress_recovery_attempt_id_fkey"
+            columns: ["recovery_attempt_id"]
+            isOneToOne: false
+            referencedRelation: "recovery_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_cadence_progress_subscriber_id_fkey"
+            columns: ["subscriber_id"]
+            isOneToOne: false
+            referencedRelation: "subscribers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_contacts: {
         Row: {
           client_id: string
