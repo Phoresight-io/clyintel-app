@@ -93,8 +93,13 @@ export async function runQboSync(subscriberId: string): Promise<QboSyncResult> {
       }
     }
 
+    // Capture the SAME merged contact values the client upsert uses, keyed by QBO
+    // Customer Id, so the primary-contact reconcile below writes identical
+    // email/phone (client and contact can never disagree).
+    const mergedByQboId = new Map<string, { email: string | null; phone: string | null }>();
     const clientRows = customers.map((c) => {
       const contact = mergeClientContact(c, existingContactByQboId.get(c.Id));
+      mergedByQboId.set(c.Id, contact);
       return {
         subscriber_id: subscriberId,
         source: "qbo",
@@ -118,6 +123,87 @@ export async function runQboSync(subscriberId: string): Promise<QboSyncResult> {
     for (const row of upsertedClients ?? []) {
       // external_id is the QBO Customer Id we just wrote; map it to our uuid.
       if (row.external_id) clientIdByQboId.set(row.external_id, row.id);
+    }
+
+    // --- Primary contact reconcile (Brick 0b) ----------------------------
+    // Keep each synced client's is_primary client_contacts row in step with the
+    // client. We can't upsert onto the partial unique index
+    // (client_contacts_one_primary_per_client is `WHERE is_primary`, not a full
+    // constraint, so it can't be an onConflict target), so we pre-read existing
+    // primaries and UPDATE-or-INSERT explicitly:
+    //   - existing primary → UPDATE email/phone only (opt_out_* are NOT in the
+    //     payload, so a re-sync never resurrects an opted-out contact; QBO has no
+    //     opt-out concept).
+    //   - no primary + has email → INSERT a new primary (mirrors the 0a backfill).
+    //   - no primary + no email → skip (email-less clients get no contact).
+    // email/phone come from mergedByQboId (the same values the client upsert
+    // wrote), so client and contact never disagree.
+    const clientUuids = [...clientIdByQboId.values()];
+    if (clientUuids.length > 0) {
+      const existingPrimaryIdByClientId = new Map<string, string>();
+      const { data: existingPrimaries, error: primaryReadError } = await service
+        .from("client_contacts")
+        .select("id, client_id")
+        .in("client_id", clientUuids)
+        .eq("is_primary", true);
+      if (primaryReadError) {
+        throw new Error(
+          `QBO sync: existing primary contacts read failed: ${primaryReadError.message}`,
+        );
+      }
+      for (const row of existingPrimaries ?? []) {
+        existingPrimaryIdByClientId.set(row.client_id, row.id);
+      }
+
+      const contactInserts: {
+        client_id: string;
+        email: string | null;
+        phone: string | null;
+        is_primary: true;
+      }[] = [];
+      const contactUpdates: { id: string; email: string | null; phone: string | null }[] = [];
+
+      for (const [qboId, clientUuid] of clientIdByQboId) {
+        const merged = mergedByQboId.get(qboId) ?? { email: null, phone: null };
+        const existingId = existingPrimaryIdByClientId.get(clientUuid);
+        if (existingId) {
+          contactUpdates.push({ id: existingId, email: merged.email, phone: merged.phone });
+        } else if (merged.email && merged.email.trim() !== "") {
+          contactInserts.push({
+            client_id: clientUuid,
+            email: merged.email,
+            phone: merged.phone,
+            is_primary: true,
+          });
+        }
+        // else: no primary and no email → intentionally no contact row.
+      }
+
+      if (contactInserts.length > 0) {
+        const { error: insertError } = await service
+          .from("client_contacts")
+          .insert(contactInserts);
+        if (insertError) {
+          throw new Error(`QBO sync: primary contacts insert failed: ${insertError.message}`);
+        }
+      }
+
+      if (contactUpdates.length > 0) {
+        // Explicit per-row UPDATE (email/phone only) so opt_out_*/is_primary are
+        // preserved. Parallelized; any failure surfaces in the greppable idiom.
+        const results = await Promise.all(
+          contactUpdates.map((u) =>
+            service
+              .from("client_contacts")
+              .update({ email: u.email, phone: u.phone })
+              .eq("id", u.id),
+          ),
+        );
+        const firstError = results.find((r) => r.error)?.error;
+        if (firstError) {
+          throw new Error(`QBO sync: primary contact update failed: ${firstError.message}`);
+        }
+      }
     }
   }
 
