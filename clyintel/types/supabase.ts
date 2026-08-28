@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.17"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -143,33 +143,6 @@ export type Database = {
           },
         ]
       }
-      capture_sources: {
-        Row: {
-          active: boolean
-          config: Json
-          created_at: string
-          display_name: string
-          id: string
-          kind: string
-        }
-        Insert: {
-          active?: boolean
-          config?: Json
-          created_at?: string
-          display_name: string
-          id: string
-          kind: string
-        }
-        Update: {
-          active?: boolean
-          config?: Json
-          created_at?: string
-          display_name?: string
-          id?: string
-          kind?: string
-        }
-        Relationships: []
-      }
       cadence_steps: {
         Row: {
           cadence_id: string
@@ -229,77 +202,32 @@ export type Database = {
         }
         Relationships: []
       }
-      invoice_cadence_progress: {
+      capture_sources: {
         Row: {
-          cadence_id: string
-          communication_id: string | null
+          active: boolean
+          config: Json
           created_at: string
+          display_name: string
           id: string
-          invoice_id: string
-          recorded_at: string
-          recovery_attempt_id: string | null
-          step_number: number
-          subscriber_id: string
+          kind: string
         }
         Insert: {
-          cadence_id: string
-          communication_id?: string | null
+          active?: boolean
+          config?: Json
           created_at?: string
-          id?: string
-          invoice_id: string
-          recorded_at?: string
-          recovery_attempt_id?: string | null
-          step_number: number
-          subscriber_id: string
+          display_name: string
+          id: string
+          kind: string
         }
         Update: {
-          cadence_id?: string
-          communication_id?: string | null
+          active?: boolean
+          config?: Json
           created_at?: string
+          display_name?: string
           id?: string
-          invoice_id?: string
-          recorded_at?: string
-          recovery_attempt_id?: string | null
-          step_number?: number
-          subscriber_id?: string
+          kind?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "invoice_cadence_progress_cadence_id_fkey"
-            columns: ["cadence_id"]
-            isOneToOne: false
-            referencedRelation: "cadences"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "invoice_cadence_progress_communication_id_fkey"
-            columns: ["communication_id"]
-            isOneToOne: false
-            referencedRelation: "communications"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "invoice_cadence_progress_invoice_id_fkey"
-            columns: ["invoice_id"]
-            isOneToOne: false
-            referencedRelation: "invoices"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "invoice_cadence_progress_recovery_attempt_id_fkey"
-            columns: ["recovery_attempt_id"]
-            isOneToOne: false
-            referencedRelation: "recovery_attempts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "invoice_cadence_progress_subscriber_id_fkey"
-            columns: ["subscriber_id"]
-            isOneToOne: false
-            referencedRelation: "subscribers"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       client_contacts: {
         Row: {
@@ -656,6 +584,78 @@ export type Database = {
           submitted_at?: string | null
         }
         Relationships: []
+      }
+      invoice_cadence_progress: {
+        Row: {
+          cadence_id: string
+          communication_id: string | null
+          created_at: string
+          id: string
+          invoice_id: string
+          recorded_at: string
+          recovery_attempt_id: string | null
+          step_number: number
+          subscriber_id: string
+        }
+        Insert: {
+          cadence_id: string
+          communication_id?: string | null
+          created_at?: string
+          id?: string
+          invoice_id: string
+          recorded_at?: string
+          recovery_attempt_id?: string | null
+          step_number: number
+          subscriber_id: string
+        }
+        Update: {
+          cadence_id?: string
+          communication_id?: string | null
+          created_at?: string
+          id?: string
+          invoice_id?: string
+          recorded_at?: string
+          recovery_attempt_id?: string | null
+          step_number?: number
+          subscriber_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_cadence_progress_cadence_id_fkey"
+            columns: ["cadence_id"]
+            isOneToOne: false
+            referencedRelation: "cadences"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_cadence_progress_communication_id_fkey"
+            columns: ["communication_id"]
+            isOneToOne: false
+            referencedRelation: "communications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_cadence_progress_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_cadence_progress_recovery_attempt_id_fkey"
+            columns: ["recovery_attempt_id"]
+            isOneToOne: false
+            referencedRelation: "recovery_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_cadence_progress_subscriber_id_fkey"
+            columns: ["subscriber_id"]
+            isOneToOne: false
+            referencedRelation: "subscribers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       invoice_payments: {
         Row: {
