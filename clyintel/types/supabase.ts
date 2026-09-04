@@ -293,6 +293,7 @@ export type Database = {
           open_invoice_count: number
           opt_out_email: boolean
           opt_out_sms: boolean
+          payment_link_url: string | null
           phone: string | null
           preferred_channel:
             | Database["public"]["Enums"]["communication_channel"]
@@ -317,6 +318,7 @@ export type Database = {
           open_invoice_count?: number
           opt_out_email?: boolean
           opt_out_sms?: boolean
+          payment_link_url?: string | null
           phone?: string | null
           preferred_channel?:
             | Database["public"]["Enums"]["communication_channel"]
@@ -341,6 +343,7 @@ export type Database = {
           open_invoice_count?: number
           opt_out_email?: boolean
           opt_out_sms?: boolean
+          payment_link_url?: string | null
           phone?: string | null
           preferred_channel?:
             | Database["public"]["Enums"]["communication_channel"]
@@ -1353,6 +1356,7 @@ export type Database = {
           id: string
           pay_gate_require_invoice_number: boolean
           pay_gate_require_zip: boolean
+          payment_link_url: string | null
           phone: string | null
           plan_id: string
           qbo_access_token: string | null
@@ -1384,6 +1388,7 @@ export type Database = {
           id?: string
           pay_gate_require_invoice_number?: boolean
           pay_gate_require_zip?: boolean
+          payment_link_url?: string | null
           phone?: string | null
           plan_id: string
           qbo_access_token?: string | null
@@ -1415,6 +1420,7 @@ export type Database = {
           id?: string
           pay_gate_require_invoice_number?: boolean
           pay_gate_require_zip?: boolean
+          payment_link_url?: string | null
           phone?: string | null
           plan_id?: string
           qbo_access_token?: string | null
