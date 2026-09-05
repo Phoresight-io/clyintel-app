@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import {
   sendEmailStep,
   renderTemplate,
+  renderHtmlBody,
+  resolvePaymentLink,
   nextAttemptNumber,
   COMM_STATUS,
   type SendEmailPort,
@@ -37,6 +39,9 @@ const vars: RenderVars = {
   invoice_number: "INV-9",
   amount_due: "$100.00",
   due_date: "2026-06-01",
+  invoice_date: "2026-05-01",
+  subscriber_name: "Phoresight",
+  payment_link: "https://buy.stripe.com/test_123",
 };
 
 // Fully-stubbed port; each op is a spy so we can assert what was/wasn't called.
@@ -58,6 +63,34 @@ function makePort(over: Partial<SendEmailPort> = {}): SendEmailPort {
 describe("renderTemplate", () => {
   it("substitutes known vars and leaves unknown tokens intact", () => {
     expect(renderTemplate("Hi {{client_name}} / {{unknown}}", vars)).toBe("Hi Acme / {{unknown}}");
+  });
+});
+
+describe("resolvePaymentLink", () => {
+  it("prefers the client link, then subscriber link, else null", () => {
+    expect(resolvePaymentLink("https://c", "https://s")).toBe("https://c");
+    expect(resolvePaymentLink("", "https://s")).toBe("https://s");
+    expect(resolvePaymentLink("  ", "https://s")).toBe("https://s"); // whitespace = absent
+    expect(resolvePaymentLink(null, null)).toBeNull();
+    expect(resolvePaymentLink(undefined, "")).toBeNull();
+  });
+});
+
+describe("renderHtmlBody", () => {
+  it("escapes values, renders payment_link as an anchor, and \\n → <br>", () => {
+    const html = renderHtmlBody("Hi {{client_name}}\nPay: {{payment_link}}", {
+      ...vars,
+      client_name: "A & <b>Co</b>",
+      payment_link: "https://pay/?a=1&b=2",
+    });
+    expect(html).toBe(
+      'Hi A &amp; &lt;b&gt;Co&lt;/b&gt;<br>Pay: ' +
+        '<a href="https://pay/?a=1&amp;b=2">https://pay/?a=1&amp;b=2</a>',
+    );
+  });
+
+  it("leaves unknown tokens as escaped literals", () => {
+    expect(renderHtmlBody("x {{nope}}", vars)).toBe("x {{nope}}");
   });
 });
 
@@ -92,6 +125,17 @@ describe("sendEmailStep — gating", () => {
     const res = await sendEmailStep(CTX, "dry_run", port);
     expect(res.outcome).toBe("no_template");
     expect(port.insertPendingCommunication).not.toHaveBeenCalled();
+  });
+
+  it("no resolvable payment link → suppressed, nothing written, no send", async () => {
+    const port = makePort({
+      loadRenderVars: vi.fn(async () => ({ ...vars, payment_link: "" })),
+    });
+    const res = await sendEmailStep(CTX, "dry_run", port);
+    expect(res.outcome).toBe("no_payment_link");
+    expect(port.insertPendingCommunication).not.toHaveBeenCalled();
+    expect(port.dispatchEmail).not.toHaveBeenCalled();
+    expect(port.insertRecoveryAttempt).not.toHaveBeenCalled();
   });
 });
 
