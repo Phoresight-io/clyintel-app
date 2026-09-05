@@ -122,17 +122,46 @@ function createDefaultPort(): RunCadencePort {
         recoveryAttemptId: res.recoveryAttemptId,
       };
     },
-    async recordProgress(row) {
+    async claimStep(row) {
+      // Insert the claim with null links. A 23505 unique violation on
+      // (invoice_id, step_number) means another run already claimed this step —
+      // surfaced distinctly (never swallowed by a blanket catch); any other error
+      // is a real failure and throws.
       const { error } = await service.from("invoice_cadence_progress").insert({
         subscriber_id: row.subscriber_id,
         invoice_id: row.invoice_id,
         cadence_id: row.cadence_id,
         step_number: row.step_number,
-        communication_id: row.communication_id,
-        recovery_attempt_id: row.recovery_attempt_id,
+        communication_id: null,
+        recovery_attempt_id: null,
       });
       if (error) {
-        throw new Error(`outreach/run: progress insert failed: ${error.message}`);
+        if (error.code === "23505") return "already_claimed";
+        throw new Error(`outreach/run: claim insert failed: ${error.message}`);
+      }
+      return "claimed";
+    },
+    async finalizeProgress(key, links) {
+      const { error } = await service
+        .from("invoice_cadence_progress")
+        .update({
+          communication_id: links.communication_id,
+          recovery_attempt_id: links.recovery_attempt_id,
+        })
+        .eq("invoice_id", key.invoice_id)
+        .eq("step_number", key.step_number);
+      if (error) {
+        throw new Error(`outreach/run: progress finalize failed: ${error.message}`);
+      }
+    },
+    async releaseProgress(key) {
+      const { error } = await service
+        .from("invoice_cadence_progress")
+        .delete()
+        .eq("invoice_id", key.invoice_id)
+        .eq("step_number", key.step_number);
+      if (error) {
+        throw new Error(`outreach/run: progress release failed: ${error.message}`);
       }
     },
   };

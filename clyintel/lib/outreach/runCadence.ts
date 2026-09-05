@@ -147,22 +147,46 @@ export type RunSendResult = {
   recoveryAttemptId: string | null;
 };
 
+// Result of claiming a (invoice, step) progress row BEFORE sending. The
+// unique(invoice_id, step_number) index is the authoritative concurrency guard:
+// a second concurrent claim for the same step loses the insert race and comes
+// back "already_claimed", so the engine skips it (no send, no double-count).
+export type ClaimResult = "claimed" | "already_claimed";
+
+// A (invoice, step) key — the unique tuple that identifies a progress row for
+// finalize/release, without threading the row id around.
+export interface ProgressKey {
+  invoice_id: string;
+  step_number: number;
+}
+
 export interface RunCadencePort {
   loadActiveCadence(): Promise<CadenceDef | null>;
   loadCandidateInvoices(): Promise<CadenceInvoice[]>;
   loadRecordedStepNumbers(invoiceId: string): Promise<number[]>;
-  // Hard-wired to sendEmailStep(ctx, "dry_run") in the real port — 1c has NO live
-  // path. The engine only ever asks the port to "run the send step"; the dry-run
-  // wiring is the port's responsibility so it cannot leak a live send in here.
-  runSendStep(ctx: SendEmailStepContext): Promise<RunSendResult>;
-  recordProgress(row: {
+  // CLAIM the (invoice, step) progress row BEFORE the send, with null links. A
+  // 23505 unique violation on (invoice_id, step_number) → "already_claimed".
+  claimStep(row: {
     subscriber_id: string;
     invoice_id: string;
     cadence_id: string;
     step_number: number;
-    communication_id: string | null;
-    recovery_attempt_id: string | null;
-  }): Promise<void>;
+  }): Promise<ClaimResult>;
+  // Hard-wired to sendEmailStep(ctx, "dry_run") in the real port — 1c has NO live
+  // path. The engine only ever asks the port to "run the send step"; the dry-run
+  // wiring is the port's responsibility so it cannot leak a live send in here.
+  runSendStep(ctx: SendEmailStepContext): Promise<RunSendResult>;
+  // FINALIZE the claim: fill the dry-run/live artifact links onto the claimed row
+  // (the step stays recorded → never retries).
+  finalizeProgress(
+    key: ProgressKey,
+    links: { communication_id: string | null; recovery_attempt_id: string | null },
+  ): Promise<void>;
+  // RELEASE the claim: delete the claimed row (clean — nothing FK-references it)
+  // so the step is un-recorded and retries next run. Used on a real send failure
+  // AND on any gate-suppressed outcome (no artifact was produced), so no orphan
+  // claim is ever left behind.
+  releaseProgress(key: ProgressKey): Promise<void>;
 }
 
 export type InvoiceDisposition =
@@ -170,6 +194,7 @@ export type InvoiceDisposition =
   | "not_past_due"
   | "no_step_due"
   | "unsupported_channel"
+  | "already_claimed"
   | "fired"
   | "skipped_no_artifact";
 
@@ -181,6 +206,7 @@ export interface CadenceRunSummary {
   notPastDue: number;
   noStepDue: number;
   unsupportedChannel: number;
+  alreadyClaimed: number;
   fired: number;
   skippedNoArtifact: number;
 }
@@ -199,6 +225,7 @@ export async function runCadence(
     notPastDue: 0,
     noStepDue: 0,
     unsupportedChannel: 0,
+    alreadyClaimed: 0,
     fired: 0,
     skippedNoArtifact: 0,
   };
@@ -239,31 +266,44 @@ export async function runCadence(
       continue;
     }
 
-    // 5. Run the send step (DRY-RUN, via the port) and record progress.
+    // 5. CLAIM-BEFORE-SEND. Insert the progress row (null links) as a claim FIRST.
+    //    The unique(invoice_id, step_number) index — not the best-effort read
+    //    above — is the authoritative guard: a concurrent run that already claimed
+    //    this step loses this insert and we skip cleanly (no send, no advance).
+    const claim = await port.claimStep({
+      subscriber_id: inv.subscriber_id,
+      invoice_id: inv.id,
+      cadence_id: cadence.id,
+      step_number: step.step_number,
+    });
+    if (claim === "already_claimed") {
+      summary.alreadyClaimed++;
+      continue; // another run owns this step → never double-send / double-count
+    }
+
+    // 6. SEND (DRY-RUN today, via the port).
     const res = await port.runSendStep({
       subscriberId: inv.subscriber_id,
       clientId: inv.client_id,
       invoiceId: inv.id,
     });
 
-    // Record ONLY when the step actually produced a dry-run artifact. A contactless
-    // / channel-denied / misconfigured invoice yields no artifact → clean skip, no
-    // progress row, no advance (it is retried next run and still writes nothing).
-    // NOTE: run-then-record leaves a tiny window where a would_send row exists but
-    // its progress row is not yet written; a duplicate would be a harmless second
-    // dry-run row (nothing is sent). Row-claim-before-send hardening is deferred,
-    // same posture as the qbo/worker row-locking TODO.
+    const key = { invoice_id: inv.id, step_number: step.step_number };
+    // 7. FINALIZE or RELEASE the claim by outcome:
+    //    - would_send (dry-run) / sent (live): fill the artifact links; the step
+    //      stays recorded and never retries (dry-run net behavior is unchanged —
+    //      a progress row with links exists after a would_send, as before).
+    //    - anything else (live send_failed, or a gate-suppressed outcome that
+    //      produced no artifact): DELETE the claim so no orphan remains and the
+    //      step retries next run (delete-on-failure / Option A).
     if (res.outcome === "would_send" || res.outcome === "sent") {
-      await port.recordProgress({
-        subscriber_id: inv.subscriber_id,
-        invoice_id: inv.id,
-        cadence_id: cadence.id,
-        step_number: step.step_number,
+      await port.finalizeProgress(key, {
         communication_id: res.communicationId,
         recovery_attempt_id: res.recoveryAttemptId,
       });
       summary.fired++;
     } else {
+      await port.releaseProgress(key);
       summary.skippedNoArtifact++;
     }
   }

@@ -37,12 +37,14 @@ function makePort(over: Partial<RunCadencePort> = {}): RunCadencePort {
     loadActiveCadence: vi.fn(async () => DEFAULT_CADENCE),
     loadCandidateInvoices: vi.fn(async () => [invoice()]),
     loadRecordedStepNumbers: vi.fn(async () => [] as number[]),
+    claimStep: vi.fn(async () => "claimed" as const),
     runSendStep: vi.fn(async () => ({
       outcome: "would_send",
       communicationId: "comm-1",
       recoveryAttemptId: "ra-1",
     })),
-    recordProgress: vi.fn(async () => {}),
+    finalizeProgress: vi.fn(async () => {}),
+    releaseProgress: vi.fn(async () => {}),
     ...over,
   };
 }
@@ -140,8 +142,8 @@ describe("runCadence — terminus states each halt (no send, no progress)", () =
       const summary = await runCadence(MON, port);
       expect(summary.terminated).toBe(1);
       expect(summary.fired).toBe(0);
+      expect(port.claimStep).not.toHaveBeenCalled();
       expect(port.runSendStep).not.toHaveBeenCalled();
-      expect(port.recordProgress).not.toHaveBeenCalled();
     });
   }
 });
@@ -182,20 +184,71 @@ describe("runCadence — past-due boundary", () => {
   });
 });
 
-describe("runCadence — step firing + dry-run + progress", () => {
-  it("step due → sendEmailStep called once (dry-run seam) and progress recorded", async () => {
+describe("runCadence — step firing + dry-run + claim/finalize", () => {
+  it("would_send (dry-run): claim written, then finalized with links — net progress row UNCHANGED", async () => {
     const port = makePort();
     const summary = await runCadence(MON, port);
     expect(summary.fired).toBe(1);
     expect(port.runSendStep).toHaveBeenCalledOnce();
-    expect(port.recordProgress).toHaveBeenCalledWith({
+    // Claim goes in FIRST, before the send, with the (invoice, step) identity.
+    expect(port.claimStep).toHaveBeenCalledWith({
       subscriber_id: "sub-1",
       invoice_id: "inv-1",
       cadence_id: "cad-1",
       step_number: 1,
-      communication_id: "comm-1",
-      recovery_attempt_id: "ra-1",
     });
+    // Then the claim is finalized with the send artifacts — the surviving row is
+    // (invoice, step) + links, identical to the pre-C2/3 single-insert end state.
+    expect(port.finalizeProgress).toHaveBeenCalledWith(
+      { invoice_id: "inv-1", step_number: 1 },
+      { communication_id: "comm-1", recovery_attempt_id: "ra-1" },
+    );
+    expect(port.releaseProgress).not.toHaveBeenCalled();
+  });
+
+  it("sent (live path via injected fake): claim → finalized with communication + recovery ids", async () => {
+    const port = makePort({
+      runSendStep: vi.fn(async () => ({
+        outcome: "sent",
+        communicationId: "comm-live",
+        recoveryAttemptId: "ra-live",
+      })),
+    });
+    const summary = await runCadence(MON, port);
+    expect(summary.fired).toBe(1);
+    expect(port.finalizeProgress).toHaveBeenCalledWith(
+      { invoice_id: "inv-1", step_number: 1 },
+      { communication_id: "comm-live", recovery_attempt_id: "ra-live" },
+    );
+    expect(port.releaseProgress).not.toHaveBeenCalled();
+  });
+
+  it("send_failed (live path): claim → DELETED (released) → step retryable, nothing fired", async () => {
+    const port = makePort({
+      runSendStep: vi.fn(async () => ({
+        outcome: "send_failed",
+        communicationId: "comm-x",
+        recoveryAttemptId: "ra-x",
+      })),
+    });
+    const summary = await runCadence(MON, port);
+    expect(summary.fired).toBe(0);
+    expect(summary.skippedNoArtifact).toBe(1);
+    expect(port.claimStep).toHaveBeenCalledOnce();
+    expect(port.releaseProgress).toHaveBeenCalledWith({ invoice_id: "inv-1", step_number: 1 });
+    expect(port.finalizeProgress).not.toHaveBeenCalled();
+    // Released → the step is un-recorded, so a subsequent run would re-select it.
+    expect(selectDueStep(DEFAULT_CADENCE, "2026-08-24", new Set(), "2026-08-24")?.step_number).toBe(1);
+  });
+
+  it("concurrent claim: unique violation → clean skip, no send, no second progress row", async () => {
+    const port = makePort({ claimStep: vi.fn(async () => "already_claimed" as const) });
+    const summary = await runCadence(MON, port);
+    expect(summary.alreadyClaimed).toBe(1);
+    expect(summary.fired).toBe(0);
+    expect(port.runSendStep).not.toHaveBeenCalled();
+    expect(port.finalizeProgress).not.toHaveBeenCalled();
+    expect(port.releaseProgress).not.toHaveBeenCalled();
   });
 });
 
@@ -205,8 +258,8 @@ describe("runCadence — idempotency (recorded step is the guard)", () => {
     const summary = await runCadence(MON, port);
     expect(summary.noStepDue).toBe(1);
     expect(summary.fired).toBe(0);
+    expect(port.claimStep).not.toHaveBeenCalled();
     expect(port.runSendStep).not.toHaveBeenCalled();
-    expect(port.recordProgress).not.toHaveBeenCalled();
   });
 });
 
@@ -229,7 +282,7 @@ describe("runCadence — multi-step walk advances one step per invocation", () =
     });
     const s1 = await runCadence(MON, port1);
     expect(s1.fired).toBe(1);
-    expect((port1.recordProgress as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]).toMatchObject({
+    expect((port1.claimStep as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]).toMatchObject({
       step_number: 1,
     });
 
@@ -242,40 +295,29 @@ describe("runCadence — multi-step walk advances one step per invocation", () =
     });
     const s2 = await runCadence(TUE, port2);
     expect(s2.fired).toBe(1);
-    expect((port2.recordProgress as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]).toMatchObject({
+    expect((port2.claimStep as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]).toMatchObject({
       step_number: 2,
     });
   });
 });
 
-describe("runCadence — clean skips (no artifact, no progress)", () => {
-  it("no contact/channel (sendEmailStep → no_primary_contact) → no progress recorded", async () => {
-    const port = makePort({
-      runSendStep: vi.fn(async () => ({
-        outcome: "no_primary_contact",
-        communicationId: null,
-        recoveryAttemptId: null,
-      })),
+describe("runCadence — gate-suppressed skips (claim released, NO orphan)", () => {
+  // Gates run inside sendEmailStep, AFTER the claim is written in runCadence. A
+  // suppressed outcome therefore claims then RELEASES — net: no progress row, and
+  // crucially no orphan claim (the C2/3 invariant).
+  for (const outcome of ["no_primary_contact", "channel_denied", "no_template", "no_payment_link"]) {
+    it(`${outcome} → claim released, finalize never called, nothing fired`, async () => {
+      const port = makePort({
+        runSendStep: vi.fn(async () => ({ outcome, communicationId: null, recoveryAttemptId: null })),
+      });
+      const summary = await runCadence(MON, port);
+      expect(summary.skippedNoArtifact).toBe(1);
+      expect(summary.fired).toBe(0);
+      expect(port.claimStep).toHaveBeenCalledOnce();
+      expect(port.releaseProgress).toHaveBeenCalledWith({ invoice_id: "inv-1", step_number: 1 });
+      expect(port.finalizeProgress).not.toHaveBeenCalled();
     });
-    const summary = await runCadence(MON, port);
-    expect(summary.skippedNoArtifact).toBe(1);
-    expect(summary.fired).toBe(0);
-    expect(port.runSendStep).toHaveBeenCalledOnce();
-    expect(port.recordProgress).not.toHaveBeenCalled();
-  });
-
-  it("channel_denied → no progress recorded", async () => {
-    const port = makePort({
-      runSendStep: vi.fn(async () => ({
-        outcome: "channel_denied",
-        communicationId: null,
-        recoveryAttemptId: null,
-      })),
-    });
-    const summary = await runCadence(MON, port);
-    expect(summary.skippedNoArtifact).toBe(1);
-    expect(port.recordProgress).not.toHaveBeenCalled();
-  });
+  }
 });
 
 describe("runCadence — no active cadence → clean no-op", () => {
@@ -299,7 +341,7 @@ describe("runCadence — non-email step is an unsupported-channel skip (1c seam)
     });
     const summary = await runCadence(MON, port);
     expect(summary.unsupportedChannel).toBe(1);
+    expect(port.claimStep).not.toHaveBeenCalled();
     expect(port.runSendStep).not.toHaveBeenCalled();
-    expect(port.recordProgress).not.toHaveBeenCalled();
   });
 });
