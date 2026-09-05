@@ -3,6 +3,7 @@ import { getSupabase } from "@/lib/supabase";
 import { checkCronAuth } from "@/lib/qbo/worker";
 import type { Database } from "@/types/supabase";
 import { sendEmailStep } from "@/lib/outreach/sendEmailStep";
+import { parseRunRequest, type RunMode } from "@/lib/outreach/parseRunRequest";
 import {
   runCadence,
   type RunCadencePort,
@@ -10,10 +11,15 @@ import {
   type CadenceInvoice,
 } from "@/lib/outreach/runCadence";
 
-// Cadence trigger engine endpoint (Brick 1c) — MANUAL INVOKE ONLY.
+// Cadence trigger engine endpoint (Brick 1c; live-send plumbing added in C4a) —
+// MANUAL INVOKE ONLY.
 //
-// Walks the active cadence over candidate invoices and fires due steps in
-// DRY-RUN (via sendEmailStep). It sends nothing live.
+// Walks the active cadence over candidate invoices and fires due steps via
+// sendEmailStep. DEFAULT (body-less request) is DRY-RUN over all subscribers —
+// unchanged from 1c, sends nothing. C4a adds an optional request body
+// { mode?: "dry_run" | "live", subscriberId?: string }: `mode: "live"` actually
+// sends, and a live run MUST be fenced to a subscriberId (see parseRunRequest).
+// Nothing in the repo passes "live" — that is a deliberate C4b request only.
 //
 // ⚠️ NO CRON. This route is intentionally absent from vercel.json. Cron
 // registration is a DELIBERATE later switch, gated on Preview/Prod Supabase
@@ -50,12 +56,25 @@ export async function POST(req: NextRequest) {
     return new NextResponse("unauthorized", { status: 401 });
   }
 
-  const summary = await runCadence(new Date(), createDefaultPort());
+  // Optional body: { mode?, subscriberId? }. Body-less → dry-run, unfenced (as
+  // before). Malformed / invalid / unfenced-live → 400 (fail safe; never a
+  // silent live default). Auth above is untouched and stays first.
+  const parsed = parseRunRequest(await req.text());
+  if (!parsed.ok) {
+    return new NextResponse(parsed.error, { status: parsed.status });
+  }
+
+  const summary = await runCadence(
+    new Date(),
+    createDefaultPort(parsed.mode, parsed.subscriberId),
+  );
   return NextResponse.json({ ok: true, summary }, { status: 200 });
 }
 
-// ── Default (real) port over Supabase + the dry-run send seam ────────────────
-function createDefaultPort(): RunCadencePort {
+// ── Default (real) port over Supabase + the send seam ────────────────────────
+// `mode` is threaded into sendEmailStep (default "dry_run" behaves as before);
+// `subscriberId`, when set, fences the candidate scan to that subscriber.
+function createDefaultPort(mode: RunMode, subscriberId: string | undefined): RunCadencePort {
   const service = getSupabase();
   return {
     async loadActiveCadence(): Promise<CadenceDef | null> {
@@ -91,11 +110,16 @@ function createDefaultPort(): RunCadencePort {
       };
     },
     async loadCandidateInvoices(): Promise<CadenceInvoice[]> {
-      const { data, error } = await service
+      let query = service
         .from("invoices")
         .select("id, subscriber_id, client_id, status, due_date, amount_outstanding_cents")
         .in("status", CANDIDATE_STATUSES)
         .not("due_date", "is", null);
+      // Opt-in subscriber fence: absent → unchanged (all subscribers).
+      if (subscriberId) {
+        query = query.eq("subscriber_id", subscriberId);
+      }
+      const { data, error } = await query;
       if (error) {
         console.error("outreach/run: invoices read failed", error);
         return [];
@@ -114,8 +138,9 @@ function createDefaultPort(): RunCadencePort {
       return (data ?? []).map((r) => r.step_number);
     },
     async runSendStep(ctx) {
-      // HARD-WIRED dry-run — 1c has no live path.
-      const res = await sendEmailStep(ctx, "dry_run");
+      // mode is "dry_run" by default (unchanged from 1c); "live" only when a
+      // deliberate request passed it — and that request was required to be fenced.
+      const res = await sendEmailStep(ctx, mode);
       return {
         outcome: res.outcome,
         communicationId: res.communicationId,
