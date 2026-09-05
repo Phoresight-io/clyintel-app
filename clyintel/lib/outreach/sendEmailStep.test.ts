@@ -153,8 +153,9 @@ describe("sendEmailStep — dry-run", () => {
     });
     expect(port.insertRecoveryAttempt).toHaveBeenCalledOnce();
     const raArg = (port.insertRecoveryAttempt as unknown as { mock: { calls: unknown[][] } }).mock
-      .calls[0][0] as { status: string; communication_id: string; sent_at: string | null; attempt_number: number };
+      .calls[0][0] as { status: string; communication_id: string; sent_at: string | null; attempt_number: number; counted_toward_limit: boolean };
     expect(raArg.status).toBe("scheduled");
+    expect(raArg.counted_toward_limit).toBe(true); // dry-run still counts (C2 reads this)
     expect(raArg.communication_id).toBe("comm-1");
     expect(raArg.sent_at).toBeNull();
     expect(raArg.attempt_number).toBe(1);
@@ -179,15 +180,16 @@ describe("sendEmailStep — live", () => {
       sent_at: "2026-07-04T00:00:00.000Z",
     });
     const raArg = (port.insertRecoveryAttempt as unknown as { mock: { calls: unknown[][] } }).mock
-      .calls[0][0] as { status: string; sent_at: string | null; attempt_number: number };
+      .calls[0][0] as { status: string; sent_at: string | null; attempt_number: number; counted_toward_limit: boolean };
     expect(raArg.status).toBe("sent");
+    expect(raArg.counted_toward_limit).toBe(true); // a real send happened → counts
     expect(raArg.sent_at).toBe("2026-07-04T00:00:00.000Z");
     expect(raArg.attempt_number).toBe(2); // one past the simulation row
     expect(res.outcome).toBe("sent");
     expect(res.mailersendMessageId).toBe("ms-123");
   });
 
-  it("live send failure → communications failed, recovery scheduled, no throw", async () => {
+  it("live send failure → communications failed, recovery failed + not counted, no throw", async () => {
     const port = makePort({
       dispatchEmail: vi.fn(async () => {
         throw new Error("MailerSend 422");
@@ -201,7 +203,8 @@ describe("sendEmailStep — live", () => {
       sent_at: null,
     });
     const raArg = (port.insertRecoveryAttempt as unknown as { mock: { calls: unknown[][] } }).mock
-      .calls[0][0] as { status: string };
-    expect(raArg.status).toBe("scheduled");
+      .calls[0][0] as { status: string; counted_toward_limit: boolean };
+    expect(raArg.status).toBe("failed"); // C1: a failed send is recorded as failed, not scheduled
+    expect(raArg.counted_toward_limit).toBe(false); // C1: nothing sent → does not count
   });
 });

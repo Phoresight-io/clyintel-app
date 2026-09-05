@@ -183,6 +183,7 @@ export interface SendEmailPort {
     communication_id: string;
     attempt_number: number;
     status: Database["public"]["Enums"]["recovery_status"];
+    counted_toward_limit: boolean;
     sent_at: string | null;
   }): Promise<string>; // returns recovery_attempts.id
   dispatchEmail(params: {
@@ -288,11 +289,17 @@ export async function sendEmailStep(
     sent_at: sentAt,
   });
 
-  // Link a fresh REAL recovery_attempts row (counted_toward_limit defaults true).
-  // dry-run/failed → "scheduled" (a recorded attempt that was not dispatched);
-  // live success → "sent". Numbered past any existing attempt (incl. SIMULATION).
+  // Link a fresh REAL recovery_attempts row. Status + counting are decided HERE,
+  // by outcome, and passed explicitly to the port (the rule lives with the
+  // decision, not in the I/O layer):
+  //   live success → "sent",   counts       (a real send happened);
+  //   live failure → "failed", does NOT count (nothing left the building);
+  //   dry-run      → "scheduled", counts     (would_send; C2's cap reads this).
+  // Numbered past any existing attempt (incl. SIMULATION).
   const existingNums = await port.loadExistingAttemptNumbers(ctx.invoiceId);
-  const recoveryStatus = outcome === "sent" ? "sent" : "scheduled";
+  const recoveryStatus: Database["public"]["Enums"]["recovery_status"] =
+    outcome === "sent" ? "sent" : outcome === "send_failed" ? "failed" : "scheduled";
+  const countedTowardLimit = outcome !== "send_failed";
   const recoveryAttemptId = await port.insertRecoveryAttempt({
     subscriber_id: ctx.subscriberId,
     client_id: ctx.clientId,
@@ -300,6 +307,7 @@ export async function sendEmailStep(
     communication_id: communicationId,
     attempt_number: nextAttemptNumber(existingNums),
     status: recoveryStatus,
+    counted_toward_limit: countedTowardLimit,
     sent_at: sentAt,
   });
 
@@ -421,7 +429,7 @@ function createDefaultPort(): SendEmailPort {
           communication_id: row.communication_id,
           channel: "email",
           attempt_number: row.attempt_number,
-          counted_toward_limit: true,
+          counted_toward_limit: row.counted_toward_limit,
           status: row.status,
           scheduled_at: new Date().toISOString(),
           sent_at: row.sent_at,
