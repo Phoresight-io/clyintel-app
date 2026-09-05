@@ -21,6 +21,10 @@ import type { Database } from "@/types/supabase";
 //      strictly downstream of the compliance gate. 1a uses deterministic
 //      {{variable}} substitution (no LLM, no network) — the LLM fill seam plugs in
 //      here later, still after the gate.
+//   3b. Payment-link gate (Brick B): resolve the link (client → subscriber →
+//      [Connect stub]). No link → suppress: write NOTHING and exit with outcome
+//      no_payment_link, mirroring the compliance gate. Placed AFTER the template
+//      load, BEFORE the pre-send record. Existing gates are NOT reordered.
 //   4. Pre-send communications row (status "pending") is written BEFORE any send,
 //      so a send-succeeds / record-fails can never silently double-send: we never
 //      dispatch without an existing record to reconcile.
@@ -51,6 +55,7 @@ export type SendEmailOutcome =
   | "no_primary_contact" // email-less client → nothing sendable
   | "channel_denied" // opt-out gate denied → nothing written
   | "no_template" // misconfig: no active system-default email template
+  | "no_payment_link" // no resolvable payment link (client→subscriber→[Connect stub]) → suppressed, nothing written
   | "would_send" // dry-run: recorded, not sent
   | "sent" // live: recorded + sent
   | "send_failed"; // live: MailerSend threw; recorded as failed
@@ -62,12 +67,17 @@ export interface SendEmailStepResult {
   mailersendMessageId: string | null;
 }
 
-// Variables the template can reference. Kept small and explicit for 1a.
+// Variables the template can reference. The live system-default template
+// references all of these; `payment_link` is the raw resolved URL ("" when none,
+// which the payment-link gate treats as no-link).
 export interface RenderVars {
   client_name: string;
   invoice_number: string;
   amount_due: string;
   due_date: string;
+  invoice_date: string;
+  subscriber_name: string;
+  payment_link: string;
 }
 
 // ── Pure helpers (unit-tested without I/O) ───────────────────────────────────
@@ -85,6 +95,65 @@ export function renderTemplate(text: string, vars: RenderVars): string {
  *  invoice — including any SIMULATION row — so the numbering never lies. */
 export function nextAttemptNumber(existing: readonly number[]): number {
   return existing.length === 0 ? 1 : Math.max(...existing) + 1;
+}
+
+/** Resolve the payment link to render/gate on: client link wins, else the
+ *  subscriber's account-level default, else null. Pure, no I/O. Path A (Stripe
+ *  Connect) is a STUBBED SEAM here — B does not build Connect; when it lands, a
+ *  resolved Connect link would slot into the marked branch before the final
+ *  null. Whitespace-only values are treated as absent. */
+export function resolvePaymentLink(
+  clientLink: string | null | undefined,
+  subscriberLink: string | null | undefined,
+): string | null {
+  const client = (clientLink ?? "").trim();
+  if (client !== "") return client;
+  const subscriber = (subscriberLink ?? "").trim();
+  if (subscriber !== "") return subscriber;
+  // [Connect stub] Path A — no build in Brick B. A resolved Stripe Connect
+  // payment link would return here, ahead of the null fallthrough:
+  //   const connect = resolveConnectPaymentLink(...); if (connect) return connect;
+  return null;
+}
+
+/** HTML-escape a value for safe interpolation into both text nodes and quoted
+ *  attribute values. */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Render the template body to an escaped HTML string. Every literal chunk and
+ *  every variable value is HTML-escaped; `{{payment_link}}` becomes an anchor
+ *  (`<a href="URL">URL</a>`, URL escaped for both the href and the label);
+ *  unknown tokens are left as escaped literals (never guessed); newlines become
+ *  <br>. The anchor is the ONLY markup this produces, so no substituted value
+ *  can inject HTML. */
+export function renderHtmlBody(text: string, vars: RenderVars): string {
+  const re = /\{\{\s*(\w+)\s*\}\}/g;
+  const lookup = vars as unknown as Record<string, string>;
+  let out = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    out += escapeHtml(text.slice(last, m.index));
+    const key = m[1];
+    const raw = lookup[key];
+    if (raw === undefined) {
+      out += escapeHtml(m[0]); // unknown token → keep literal, escaped
+    } else if (key === "payment_link") {
+      out += raw === "" ? "" : `<a href="${escapeHtml(raw)}">${escapeHtml(raw)}</a>`;
+    } else {
+      out += escapeHtml(raw);
+    }
+    last = re.lastIndex;
+  }
+  out += escapeHtml(text.slice(last));
+  return out.replace(/\n/g, "<br>");
 }
 
 // ── Port: the I/O this step needs. Real impl below; tests inject a fake. ──────
@@ -120,6 +189,7 @@ export interface SendEmailPort {
     to: string;
     subject: string;
     text: string;
+    html: string;
   }): Promise<{ messageId: string | null }>;
   now(): string; // ISO timestamp (injectable for deterministic tests)
 }
@@ -158,9 +228,23 @@ export async function sendEmailStep(
     invoice_number: "",
     amount_due: "",
     due_date: "",
+    invoice_date: "",
+    subscriber_name: "",
+    payment_link: "",
   };
+
+  // 3b. Payment-link gate — a resolved link is REQUIRED. None → suppress: write
+  //     NOTHING, mirror the compliance-gate no-op. loadRenderVars already ran
+  //     resolvePaymentLink (client → subscriber → [Connect stub]); "" means none.
+  if (!vars.payment_link) {
+    return { ...empty, outcome: "no_payment_link" };
+  }
+
   const subject = renderTemplate(template.subject ?? "", vars);
+  // text body: {{payment_link}} renders as the raw URL; stored in communications.body.
   const body = renderTemplate(template.body ?? "", vars);
+  // html body: escaped, {{payment_link}} as <a href>; sent as html only, NOT stored.
+  const htmlBody = renderHtmlBody(template.body ?? "", vars);
 
   // 4. Pre-send record (status "pending") BEFORE any dispatch → no send without a
   //    row to reconcile.
@@ -183,7 +267,7 @@ export async function sendEmailStep(
 
   if (mode === "live") {
     try {
-      const res = await port.dispatchEmail({ to: contact.email, subject, text: body });
+      const res = await port.dispatchEmail({ to: contact.email, subject, text: body, html: htmlBody });
       messageId = res.messageId;
       sentAt = port.now();
       commStatus = COMM_STATUS.sent;
@@ -255,13 +339,18 @@ function createDefaultPort(): SendEmailPort {
     async loadRenderVars(ctx) {
       const { data: inv } = await service
         .from("invoices")
-        .select("invoice_number, amount_outstanding_cents, due_date")
+        .select("invoice_number, amount_outstanding_cents, due_date, issue_date")
         .eq("id", ctx.invoiceId)
         .maybeSingle();
       const { data: client } = await service
         .from("clients")
-        .select("name")
+        .select("name, payment_link_url")
         .eq("id", ctx.clientId)
+        .maybeSingle();
+      const { data: subscriber } = await service
+        .from("subscribers")
+        .select("payment_link_url, business_name, contact_name")
+        .eq("id", ctx.subscriberId)
         .maybeSingle();
       const cents = inv?.amount_outstanding_cents ?? 0;
       return {
@@ -269,6 +358,10 @@ function createDefaultPort(): SendEmailPort {
         invoice_number: inv?.invoice_number ?? "",
         amount_due: `$${(cents / 100).toFixed(2)}`,
         due_date: inv?.due_date ?? "",
+        // invoice_date mirrors due_date's raw formatting (the ISO date string as-is).
+        invoice_date: inv?.issue_date ?? "",
+        subscriber_name: subscriber?.business_name || subscriber?.contact_name || "our team",
+        payment_link: resolvePaymentLink(client?.payment_link_url, subscriber?.payment_link_url) ?? "",
       };
     },
     async loadExistingAttemptNumbers(invoiceId) {
@@ -341,7 +434,7 @@ function createDefaultPort(): SendEmailPort {
       return data.id;
     },
     async dispatchEmail(params) {
-      return sendEmail({ to: params.to, subject: params.subject, text: params.text });
+      return sendEmail({ to: params.to, subject: params.subject, text: params.text, html: params.html });
     },
     now() {
       return new Date().toISOString();
