@@ -232,8 +232,10 @@ export type Database = {
       client_contacts: {
         Row: {
           client_id: string
+          contact_type: string | null
           created_at: string
           email: string | null
+          email_rank: number | null
           id: string
           is_primary: boolean
           opt_out_email: boolean
@@ -241,12 +243,16 @@ export type Database = {
           opt_out_voice: boolean
           phone: string | null
           role: string | null
+          sms_rank: number | null
           updated_at: string
+          voice_rank: number | null
         }
         Insert: {
           client_id: string
+          contact_type?: string | null
           created_at?: string
           email?: string | null
+          email_rank?: number | null
           id?: string
           is_primary?: boolean
           opt_out_email?: boolean
@@ -254,12 +260,16 @@ export type Database = {
           opt_out_voice?: boolean
           phone?: string | null
           role?: string | null
+          sms_rank?: number | null
           updated_at?: string
+          voice_rank?: number | null
         }
         Update: {
           client_id?: string
+          contact_type?: string | null
           created_at?: string
           email?: string | null
+          email_rank?: number | null
           id?: string
           is_primary?: boolean
           opt_out_email?: boolean
@@ -267,7 +277,9 @@ export type Database = {
           opt_out_voice?: boolean
           phone?: string | null
           role?: string | null
+          sms_rank?: number | null
           updated_at?: string
+          voice_rank?: number | null
         }
         Relationships: [
           {
