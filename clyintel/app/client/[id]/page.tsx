@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { createSupabaseServer } from "@/lib/supabase-server";
-import { getClient, getInvoicesByClient, getPtrScores } from "@/lib/data";
+import { getClient, getInvoicesByClient, getPtrScores, getClientContacts } from "@/lib/data";
 import { toUIClient, toUIClientInvoiceSet } from "@/lib/adapters";
 import ClientDetailWrapper from "@/components/detail/ClientDetailWrapper";
 
@@ -24,16 +24,19 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     // RLS-equivalent scoping: not found, or belongs to another subscriber.
     if (!client) notFound();
 
-    const [invoices, ptr] = await Promise.all([
+    // getClient already proved ownership; getClientContacts also self-scopes by
+    // the client's subscriber_id, so it's safe alongside the other per-client reads.
+    const [invoices, ptr, contacts] = await Promise.all([
       getInvoicesByClient(user.id, id),
       getPtrScores(user.id, id),
+      getClientContacts(user.id, id),
     ]);
     const uiClient = toUIClient(client, ptr, invoices);
     const invoiceSet = toUIClientInvoiceSet(invoices);
 
     return (
       <Suspense fallback={null}>
-        <ClientDetailWrapper client={uiClient} invoiceSet={invoiceSet} />
+        <ClientDetailWrapper client={uiClient} invoiceSet={invoiceSet} contacts={contacts} />
       </Suspense>
     );
   }

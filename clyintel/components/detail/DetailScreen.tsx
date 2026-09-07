@@ -3,6 +3,11 @@ import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { C } from "@/lib/theme";
 import type { Client, NegotiationRec, ClientInvoiceSet } from "@/lib/mock-data";
+import {
+  type ClientContactDisplay,
+  rankLabel,
+  sortContactsForDisplay,
+} from "@/lib/contacts/contactDisplay";
 import ExchangeDrawer from "@/components/shared/ExchangeDrawer";
 import PTRWidget from "./PTRWidget";
 import NegotiationActions from "@/components/dashboard/NegotiationActions";
@@ -13,9 +18,11 @@ interface Props {
   // Real Supabase-backed invoice set for this client. When present, the screen
   // renders real data; otherwise it falls back to mock data for demo mode.
   invoiceSet?: ClientInvoiceSet;
+  // Read-only contacts for this client (Brick 3). Undefined in demo/mock mode.
+  contacts?: ClientContactDisplay[];
 }
 
-export default function DetailScreen({ client, invoiceSet }: Props) {
+export default function DetailScreen({ client, invoiceSet, contacts }: Props) {
   const realMode = invoiceSet !== undefined;
   // Mock data flushed (D2 closeout): real invoice set when present, else empty.
   // negotiationRecs has no real source yet — stays empty until D3.
@@ -60,6 +67,10 @@ export default function DetailScreen({ client, invoiceSet }: Props) {
   const prevScore = client.prevScore;
   const scoreDelta = client.score - prevScore;
 
+  // Read-only contacts (Brick 3): dunning-first by rank, poc last. Only rendered
+  // in real mode (contacts !== undefined); demo/mock mode passes no contacts.
+  const sortedContacts = contacts ? sortContactsForDisplay(contacts) : [];
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0, padding: "28px 36px", minHeight: 520, fontFamily: C.sans }}>
       <div style={{ marginBottom: 24 }}>
@@ -96,6 +107,52 @@ export default function DetailScreen({ client, invoiceSet }: Props) {
               ))}
             </div>
           </div>
+
+          {/* Contacts (read-only — Brick 3). Email is the live channel; SMS/voice
+              rank + opt-out are shown but visually muted as "not yet active". */}
+          {contacts !== undefined && (
+            <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", marginBottom: 12 }}>
+              <div style={{ padding: "10px 16px", background: C.surface, borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: C.navy, textTransform: "uppercase", letterSpacing: "0.06em" }}>Contacts</span>
+                <span style={{ fontSize: 10, fontWeight: 600, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.04em" }}>Email is the active channel</span>
+              </div>
+              {sortedContacts.length === 0 ? (
+                <div style={{ padding: "20px 16px", fontSize: 14, color: C.textDim, fontWeight: 500 }}>No contacts on file.</div>
+              ) : (
+                sortedContacts.map((ct, i) => {
+                  const isDunning = ct.contact_type === "dunning";
+                  const typeLabel = isDunning ? "Dunning" : ct.contact_type === "poc" ? "Point of Contact" : "Contact";
+                  return (
+                    <div key={ct.id} style={{ padding: "14px 16px", borderTop: i > 0 ? `1px solid ${C.border}` : "none", display: "flex", flexDirection: "column", gap: 8 }}>
+                      {/* Type badge — dunning emphasized, poc muted */}
+                      <span style={{ alignSelf: "flex-start", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", padding: "2px 8px", borderRadius: 10, color: isDunning ? C.blue : C.textMid, background: isDunning ? C.blueBg : C.surface, border: `1px solid ${isDunning ? C.blue : C.border}` }}>{typeLabel}</span>
+
+                      {/* Email — the live channel, rendered normally */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: C.navy, textTransform: "uppercase", letterSpacing: "0.05em", width: 48 }}>Email</span>
+                        <span style={{ fontSize: 15, fontWeight: 500, color: ct.email ? C.text : C.textDim }}>{ct.email || "—"}</span>
+                        <span style={{ fontSize: 12, fontWeight: 500, color: C.textDim }}>· {rankLabel(ct.email_rank)}</span>
+                        {ct.opt_out_email && (
+                          <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: C.red, background: C.redBg, border: `1px solid ${C.red}`, borderRadius: 8, padding: "1px 6px" }}>Opted out</span>
+                        )}
+                      </div>
+
+                      {/* Phone + SMS/Voice — shown but muted; not a live send channel yet */}
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", opacity: 0.55 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.05em", width: 48 }}>Phone</span>
+                        <span style={{ fontSize: 14, fontWeight: 500, color: ct.phone ? C.textMid : C.textDim }}>{ct.phone || "—"}</span>
+                        <span style={{ fontSize: 11, fontStyle: "italic", color: C.textDim }}>not yet active</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", opacity: 0.55, paddingLeft: 56 }}>
+                        <span style={{ fontSize: 12, color: C.textDim }}>SMS · {rankLabel(ct.sms_rank)}{ct.opt_out_sms ? " · opted out" : ""}</span>
+                        <span style={{ fontSize: 12, color: C.textDim }}>Voice · {rankLabel(ct.voice_rank)}{ct.opt_out_voice ? " · opted out" : ""}</span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
 
           <NegotiationActions cards={recCards} onUpdate={(id, patch) => setRecCards(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c))} activeModal={activeRecModal} setActiveModal={setActiveRecModal} />
 

@@ -2,6 +2,7 @@ import { getSupabase } from "@/lib/supabase";
 import type { Database } from "@/types/supabase";
 import { toUIClient, toUIClientInvoiceSet } from "@/lib/adapters";
 import type { Client as UIClientShape, ClientInvoiceSet } from "@/lib/mock-data";
+import type { ClientContactDisplay } from "@/lib/contacts/contactDisplay";
 
 // All data-fetching functions live here.
 //
@@ -131,6 +132,43 @@ export async function getPtrScores(userId: string, clientId: string): Promise<Pt
     return null;
   }
   return data ?? null;
+}
+
+// Contacts for a single client (read-only display — Brick 3). client_contacts has
+// no subscriber_id, so the query is user-scoped via the parent client join:
+// `clients!inner(subscriber_id)` + `.eq("clients.subscriber_id", userId)` means a
+// contact only returns when its client belongs to userId — the query itself
+// enforces ownership (per this file's "every query scoped to userId" rule), not
+// just the caller's prior getClient. Fail-closed → [].
+export async function getClientContacts(
+  userId: string,
+  clientId: string,
+): Promise<ClientContactDisplay[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("client_contacts")
+    .select(
+      "id, contact_type, email, phone, email_rank, sms_rank, voice_rank, opt_out_email, opt_out_sms, opt_out_voice, clients!inner(subscriber_id)",
+    )
+    .eq("client_id", clientId)
+    .eq("clients.subscriber_id", userId);
+  if (error) {
+    console.error("getClientContacts error", error);
+    return []; // fail closed → no contacts shown
+  }
+  // Strip the join-only `clients` embed; return the plain display shape.
+  return (data ?? []).map((r) => ({
+    id: r.id,
+    contact_type: r.contact_type,
+    email: r.email,
+    phone: r.phone,
+    email_rank: r.email_rank,
+    sms_rank: r.sms_rank,
+    voice_rank: r.voice_rank,
+    opt_out_email: r.opt_out_email,
+    opt_out_sms: r.opt_out_sms,
+    opt_out_voice: r.opt_out_voice,
+  }));
 }
 
 export interface UIPortfolio {
