@@ -2,6 +2,7 @@ import { getSupabase } from "@/lib/supabase";
 import { getValidAccessToken } from "@/lib/qbo/tokens";
 import { listCustomers, listInvoices } from "@/lib/qbo/client";
 import { mergeClientContact } from "@/lib/qbo/mergeClientContact";
+import { planPocReconcile } from "@/lib/qbo/planPocReconcile";
 import { evaluateOutreachEligibility } from "@/lib/outreach/eligibility";
 import { computeBalanceEvent, type BalanceEventRow } from "@/lib/balanceEvents/computeBalanceEvent";
 import type { QboSyncResult } from "@/lib/qbo/syncQbo";
@@ -158,42 +159,15 @@ export async function runQboSync(subscriberId: string): Promise<QboSyncResult> {
         existingPocIdByClientId.set(row.client_id, row.id);
       }
 
-      const contactInserts: {
-        client_id: string;
-        email: string | null;
-        phone: string | null;
-        is_primary: true;
-        contact_type: "poc";
-        email_rank: 1;
-        sms_rank: 1 | null;
-        voice_rank: 1 | null;
-      }[] = [];
-      const contactUpdates: { id: string; email: string | null; phone: string | null }[] = [];
-
-      for (const [qboId, clientUuid] of clientIdByQboId) {
-        const merged = mergedByQboId.get(qboId) ?? { email: null, phone: null };
-        const existingId = existingPocIdByClientId.get(clientUuid);
-        if (existingId) {
-          // UPDATE email/phone only — never contact_type/ranks/opt_out_*/is_primary.
-          contactUpdates.push({ id: existingId, email: merged.email, phone: merged.phone });
-        } else if (merged.email && merged.email.trim() !== "") {
-          // New PoC: tag type + ranks like the 0a backfill. email_rank is always 1
-          // (insert only runs when email is present); sms/voice ranks are 1 only
-          // when a phone exists, else null (contact doesn't participate there).
-          const hasPhone = !!merged.phone && merged.phone.trim() !== "";
-          contactInserts.push({
-            client_id: clientUuid,
-            email: merged.email,
-            phone: merged.phone,
-            is_primary: true,
-            contact_type: "poc",
-            email_rank: 1,
-            sms_rank: hasPhone ? 1 : null,
-            voice_rank: hasPhone ? 1 : null,
-          });
-        }
-        // else: no PoC and no email → intentionally no contact row.
-      }
+      // Pure decision (INSERT new PoC vs UPDATE existing PoC email/phone). The
+      // insert/update shapes and skip rules live in planPocReconcile; runQboSync
+      // only does the I/O below. Because existingPocIdByClientId came from a
+      // contact_type='poc' read, dunning contacts are absent → never updated.
+      const { inserts: contactInserts, updates: contactUpdates } = planPocReconcile(
+        existingPocIdByClientId,
+        clientIdByQboId,
+        mergedByQboId,
+      );
 
       if (contactInserts.length > 0) {
         const { error: insertError } = await service
