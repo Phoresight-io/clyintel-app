@@ -2,6 +2,7 @@ import { getSupabase } from "@/lib/supabase";
 import { getValidAccessToken } from "@/lib/qbo/tokens";
 import { listCustomers, listInvoices } from "@/lib/qbo/client";
 import { mergeClientContact } from "@/lib/qbo/mergeClientContact";
+import { planPocReconcile } from "@/lib/qbo/planPocReconcile";
 import { evaluateOutreachEligibility } from "@/lib/outreach/eligibility";
 import { computeBalanceEvent, type BalanceEventRow } from "@/lib/balanceEvents/computeBalanceEvent";
 import type { QboSyncResult } from "@/lib/qbo/syncQbo";
@@ -125,72 +126,62 @@ export async function runQboSync(subscriberId: string): Promise<QboSyncResult> {
       if (row.external_id) clientIdByQboId.set(row.external_id, row.id);
     }
 
-    // --- Primary contact reconcile (Brick 0b) ----------------------------
-    // Keep each synced client's is_primary client_contacts row in step with the
-    // client. We can't upsert onto the partial unique index
-    // (client_contacts_one_primary_per_client is `WHERE is_primary`, not a full
-    // constraint, so it can't be an onConflict target), so we pre-read existing
-    // primaries and UPDATE-or-INSERT explicitly:
-    //   - existing primary → UPDATE email/phone only (opt_out_* are NOT in the
-    //     payload, so a re-sync never resurrects an opted-out contact; QBO has no
-    //     opt-out concept).
-    //   - no primary + has email → INSERT a new primary (mirrors the 0a backfill).
-    //   - no primary + no email → skip (email-less clients get no contact).
+    // --- PoC contact reconcile (Brick 2; keyed on contact_type='poc') ----
+    // Keep each synced client's QBO-sourced PoC client_contacts row in step with
+    // the client. Keyed on contact_type='poc' (NOT is_primary), so USER-ADDED
+    // dunning contacts are invisible here and can NEVER be updated, deleted, or
+    // overwritten by a re-sync — the non-clobber invariant. We can't upsert onto a
+    // partial unique index, so we pre-read existing PoCs and UPDATE-or-INSERT:
+    //   - existing PoC → UPDATE email/phone only (opt_out_*, contact_type and the
+    //     ranks are NOT in the payload, so a re-sync never resurrects an opted-out
+    //     contact and never disturbs its type/ranks; QBO has no opt-out concept).
+    //   - no PoC + has email → INSERT a new PoC (contact_type='poc', email_rank=1;
+    //     sms/voice_rank=1 where a phone exists — mirrors the 0a backfill; keeps
+    //     is_primary=true through the is_primary transition, so the row is findable
+    //     both ways and the WHERE is_primary unique index still holds).
+    //   - no PoC + no email → skip (email-less clients get no contact).
     // email/phone come from mergedByQboId (the same values the client upsert
     // wrote), so client and contact never disagree.
     const clientUuids = [...clientIdByQboId.values()];
     if (clientUuids.length > 0) {
-      const existingPrimaryIdByClientId = new Map<string, string>();
-      const { data: existingPrimaries, error: primaryReadError } = await service
+      const existingPocIdByClientId = new Map<string, string>();
+      const { data: existingPocs, error: pocReadError } = await service
         .from("client_contacts")
         .select("id, client_id")
         .in("client_id", clientUuids)
-        .eq("is_primary", true);
-      if (primaryReadError) {
+        .eq("contact_type", "poc");
+      if (pocReadError) {
         throw new Error(
-          `QBO sync: existing primary contacts read failed: ${primaryReadError.message}`,
+          `QBO sync: existing PoC contacts read failed: ${pocReadError.message}`,
         );
       }
-      for (const row of existingPrimaries ?? []) {
-        existingPrimaryIdByClientId.set(row.client_id, row.id);
+      for (const row of existingPocs ?? []) {
+        existingPocIdByClientId.set(row.client_id, row.id);
       }
 
-      const contactInserts: {
-        client_id: string;
-        email: string | null;
-        phone: string | null;
-        is_primary: true;
-      }[] = [];
-      const contactUpdates: { id: string; email: string | null; phone: string | null }[] = [];
-
-      for (const [qboId, clientUuid] of clientIdByQboId) {
-        const merged = mergedByQboId.get(qboId) ?? { email: null, phone: null };
-        const existingId = existingPrimaryIdByClientId.get(clientUuid);
-        if (existingId) {
-          contactUpdates.push({ id: existingId, email: merged.email, phone: merged.phone });
-        } else if (merged.email && merged.email.trim() !== "") {
-          contactInserts.push({
-            client_id: clientUuid,
-            email: merged.email,
-            phone: merged.phone,
-            is_primary: true,
-          });
-        }
-        // else: no primary and no email → intentionally no contact row.
-      }
+      // Pure decision (INSERT new PoC vs UPDATE existing PoC email/phone). The
+      // insert/update shapes and skip rules live in planPocReconcile; runQboSync
+      // only does the I/O below. Because existingPocIdByClientId came from a
+      // contact_type='poc' read, dunning contacts are absent → never updated.
+      const { inserts: contactInserts, updates: contactUpdates } = planPocReconcile(
+        existingPocIdByClientId,
+        clientIdByQboId,
+        mergedByQboId,
+      );
 
       if (contactInserts.length > 0) {
         const { error: insertError } = await service
           .from("client_contacts")
           .insert(contactInserts);
         if (insertError) {
-          throw new Error(`QBO sync: primary contacts insert failed: ${insertError.message}`);
+          throw new Error(`QBO sync: PoC contacts insert failed: ${insertError.message}`);
         }
       }
 
       if (contactUpdates.length > 0) {
-        // Explicit per-row UPDATE (email/phone only) so opt_out_*/is_primary are
-        // preserved. Parallelized; any failure surfaces in the greppable idiom.
+        // Explicit per-row UPDATE (email/phone only) so opt_out_*/is_primary/
+        // contact_type/ranks are preserved. Parallelized; any failure surfaces in
+        // the greppable idiom.
         const results = await Promise.all(
           contactUpdates.map((u) =>
             service
@@ -201,7 +192,7 @@ export async function runQboSync(subscriberId: string): Promise<QboSyncResult> {
         );
         const firstError = results.find((r) => r.error)?.error;
         if (firstError) {
-          throw new Error(`QBO sync: primary contact update failed: ${firstError.message}`);
+          throw new Error(`QBO sync: PoC contact update failed: ${firstError.message}`);
         }
       }
     }
