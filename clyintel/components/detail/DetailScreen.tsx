@@ -9,9 +9,11 @@ import {
   sortContactsForDisplay,
 } from "@/lib/contacts/contactDisplay";
 import ExchangeDrawer from "@/components/shared/ExchangeDrawer";
+import ContactEditorDrawer from "./ContactEditorDrawer";
 import PTRWidget from "./PTRWidget";
 import NegotiationActions from "@/components/dashboard/NegotiationActions";
 import { RecCard } from "@/components/dashboard/RecoveryRecModal";
+import { Toast, ToastSuccessDot } from "@/components/ui/Toast";
 
 interface Props {
   client: Client;
@@ -38,6 +40,11 @@ export default function DetailScreen({ client, invoiceSet, contacts }: Props) {
     negotiationRecs.filter(r => invoices?.outstanding.some(inv => inv.id === r.id)).map(r => ({ ...r, editAmount: r.suggestedAmount, status: "pending" as const }))
   );
   const [activeRecModal, setActiveRecModal] = useState<string | null>(null);
+  // Contact editor (Brick 4b): add a dunning contact, or edit an existing one.
+  const [contactEditor, setContactEditor] = useState<
+    { mode: "add" } | { mode: "edit"; contact: ClientContactDisplay } | null
+  >(null);
+  const [contactToast, setContactToast] = useState(false);
 
   useEffect(() => {
     const isDirect = sessionStorage.getItem('clyintel_nav_direct') === 'true';
@@ -114,7 +121,10 @@ export default function DetailScreen({ client, invoiceSet, contacts }: Props) {
             <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", marginBottom: 12 }}>
               <div style={{ padding: "10px 16px", background: C.surface, borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <span style={{ fontSize: 11, fontWeight: 600, color: C.navy, textTransform: "uppercase", letterSpacing: "0.06em" }}>Contacts</span>
-                <span style={{ fontSize: 10, fontWeight: 600, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.04em" }}>Email is the active channel</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.04em" }}>Email is the active channel</span>
+                  <button onClick={() => setContactEditor({ mode: "add" })} style={{ fontSize: 12, fontWeight: 600, color: C.blue, background: C.blueBg, border: `1px solid ${C.blue}`, borderRadius: 6, padding: "3px 10px", cursor: "pointer" }}>+ Add contact</button>
+                </div>
               </div>
               {sortedContacts.length === 0 ? (
                 <div style={{ padding: "20px 16px", fontSize: 14, color: C.textDim, fontWeight: 500 }}>No contacts on file.</div>
@@ -124,8 +134,14 @@ export default function DetailScreen({ client, invoiceSet, contacts }: Props) {
                   const typeLabel = isDunning ? "Dunning" : ct.contact_type === "poc" ? "Point of Contact" : "Contact";
                   return (
                     <div key={ct.id} style={{ padding: "14px 16px", borderTop: i > 0 ? `1px solid ${C.border}` : "none", display: "flex", flexDirection: "column", gap: 8 }}>
-                      {/* Type badge — dunning emphasized, poc muted */}
-                      <span style={{ alignSelf: "flex-start", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", padding: "2px 8px", borderRadius: 10, color: isDunning ? C.blue : C.textMid, background: isDunning ? C.blueBg : C.surface, border: `1px solid ${isDunning ? C.blue : C.border}` }}>{typeLabel}</span>
+                      {/* Type badge — dunning emphasized, poc muted. Dunning rows
+                          get an Edit control (4b); poc rows stay read-only. */}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", padding: "2px 8px", borderRadius: 10, color: isDunning ? C.blue : C.textMid, background: isDunning ? C.blueBg : C.surface, border: `1px solid ${isDunning ? C.blue : C.border}` }}>{typeLabel}</span>
+                        {isDunning && (
+                          <button onClick={() => setContactEditor({ mode: "edit", contact: ct })} style={{ fontSize: 12, fontWeight: 600, color: C.blue, background: "transparent", border: "none", cursor: "pointer", padding: "2px 4px" }}>Edit</button>
+                        )}
+                      </div>
 
                       {/* Email — the live channel, rendered normally */}
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -243,6 +259,28 @@ export default function DetailScreen({ client, invoiceSet, contacts }: Props) {
 
       {selectedInvoiceForExchanges && (
         <ExchangeDrawer invoiceId={selectedInvoiceForExchanges} onClose={() => setSelectedInvoiceForExchanges(null)} />
+      )}
+
+      {/* Contact editor drawer (Brick 4b). client.id is the real clients.id uuid
+          in real mode (the only mode the Contacts card renders in). The success
+          Toast lives here so it survives the drawer's unmount + router.refresh(). */}
+      {contactEditor && (
+        <ContactEditorDrawer
+          clientId={String(client.id)}
+          contact={contactEditor.mode === "edit" ? contactEditor.contact : undefined}
+          existingContacts={contacts ?? []}
+          onClose={() => setContactEditor(null)}
+          onSaved={() => {
+            setContactToast(true);
+            router.refresh();
+          }}
+        />
+      )}
+
+      {contactToast && (
+        <Toast icon={<ToastSuccessDot />} onDismiss={() => setContactToast(false)}>
+          Contact saved.
+        </Toast>
       )}
     </div>
   );
