@@ -23,10 +23,10 @@ const contact = (over: Partial<ContactRow>): ContactRow => ({
   opt_out_email: false,
   opt_out_sms: false,
   opt_out_voice: false,
-  contact_type: null,
-  email_rank: null,
-  sms_rank: null,
-  voice_rank: null,
+  contact_type: "poc",
+  email_rank: 1,
+  sms_rank: 1,
+  voice_rank: 1,
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-01T00:00:00.000Z",
   ...over,
@@ -51,7 +51,7 @@ const vars: RenderVars = {
 // Fully-stubbed port; each op is a spy so we can assert what was/wasn't called.
 function makePort(over: Partial<SendEmailPort> = {}): SendEmailPort {
   return {
-    loadPrimaryContact: vi.fn(async () => contact({})),
+    loadRecipientContact: vi.fn(async () => contact({})),
     loadActiveSystemDefaultEmailTemplate: vi.fn(async () => template),
     loadRenderVars: vi.fn(async () => vars),
     loadExistingAttemptNumbers: vi.fn(async () => [] as number[]),
@@ -108,7 +108,7 @@ describe("nextAttemptNumber", () => {
 
 describe("sendEmailStep — gating", () => {
   it("email-less client (no primary) → clean no-op, nothing written", async () => {
-    const port = makePort({ loadPrimaryContact: vi.fn(async () => null) });
+    const port = makePort({ loadRecipientContact: vi.fn(async () => null) });
     const res = await sendEmailStep(CTX, "dry_run", port);
     expect(res.outcome).toBe("no_primary_contact");
     expect(port.insertPendingCommunication).not.toHaveBeenCalled();
@@ -117,7 +117,7 @@ describe("sendEmailStep — gating", () => {
   });
 
   it("opt-out gate denied → no communications row, no send", async () => {
-    const port = makePort({ loadPrimaryContact: vi.fn(async () => contact({ opt_out_email: true })) });
+    const port = makePort({ loadRecipientContact: vi.fn(async () => contact({ opt_out_email: true })) });
     const res = await sendEmailStep(CTX, "dry_run", port);
     expect(res.outcome).toBe("channel_denied");
     expect(port.insertPendingCommunication).not.toHaveBeenCalled();

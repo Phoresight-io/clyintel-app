@@ -1,6 +1,6 @@
 import { getSupabase } from "@/lib/supabase";
 import { sendEmail } from "@/lib/email";
-import { selectFromContacts, type ContactRow } from "@/lib/outreach/selectRecipients";
+import { selectForChannel, EMAIL_CHANNEL, type ContactRow } from "@/lib/outreach/selectRecipients";
 import { isChannelAllowed } from "@/lib/outreach/isChannelAllowed";
 import type { Database } from "@/types/supabase";
 
@@ -158,7 +158,7 @@ export function renderHtmlBody(text: string, vars: RenderVars): string {
 
 // ── Port: the I/O this step needs. Real impl below; tests inject a fake. ──────
 export interface SendEmailPort {
-  loadPrimaryContact(clientId: string): Promise<ContactRow | null>;
+  loadRecipientContact(clientId: string): Promise<ContactRow | null>;
   loadActiveSystemDefaultEmailTemplate(): Promise<TemplateRow | null>;
   loadRenderVars(ctx: SendEmailStepContext): Promise<RenderVars | null>;
   loadExistingAttemptNumbers(invoiceId: string): Promise<number[]>;
@@ -208,16 +208,19 @@ export async function sendEmailStep(
     mailersendMessageId: null,
   };
 
-  // 1. Primary contact (email-less client → clean no-op, nothing written).
-  const contact = await port.loadPrimaryContact(ctx.clientId);
+  // 1. Recipient contact — channel-aware selection (dunning rank-1 → poc), already
+  //    opt-out/address-filtered. None selectable → clean no-op, nothing written.
+  const contact = await port.loadRecipientContact(ctx.clientId);
   if (!contact) return empty;
 
   // 2. Compliance gate — deterministic, fail-closed. Denied → write nothing.
+  //    Redundant safety net: selectForChannel already filtered opt-out + address,
+  //    so these should never fire on a real selection — kept fail-closed anyway.
   if (!isChannelAllowed(contact, "email")) {
     return { ...empty, outcome: "channel_denied" };
   }
   if (!contact.email || contact.email.trim() === "") {
-    // Primary exists but has no email address → not sendable on this channel.
+    // Chosen contact has no email address → not sendable on this channel.
     return { ...empty, outcome: "channel_denied" };
   }
 
@@ -318,7 +321,7 @@ export async function sendEmailStep(
 function createDefaultPort(): SendEmailPort {
   const service = getSupabase();
   return {
-    async loadPrimaryContact(clientId) {
+    async loadRecipientContact(clientId) {
       const { data, error } = await service
         .from("client_contacts")
         .select("*")
@@ -327,7 +330,10 @@ function createDefaultPort(): SendEmailPort {
         console.error("sendEmailStep: client_contacts read failed", error);
         return null; // fail closed → treated as unsendable
       }
-      return selectFromContacts(data ?? [])[0] ?? null;
+      // Channel-aware selection (email): dunning rank-1 → poc, opt-out/address
+      // filtered. A backfilled PoC (contact_type='poc', email_rank=1) returns as
+      // the poc fallback when no eligible dunning contact exists.
+      return selectForChannel(data ?? [], EMAIL_CHANNEL);
     },
     async loadActiveSystemDefaultEmailTemplate() {
       const { data, error } = await service
