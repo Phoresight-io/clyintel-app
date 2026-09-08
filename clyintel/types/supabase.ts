@@ -238,6 +238,7 @@ export type Database = {
           email_rank: number | null
           id: string
           is_primary: boolean
+          name: string | null
           opt_out_email: boolean
           opt_out_sms: boolean
           opt_out_voice: boolean
@@ -255,6 +256,7 @@ export type Database = {
           email_rank?: number | null
           id?: string
           is_primary?: boolean
+          name?: string | null
           opt_out_email?: boolean
           opt_out_sms?: boolean
           opt_out_voice?: boolean
@@ -272,6 +274,7 @@ export type Database = {
           email_rank?: number | null
           id?: string
           is_primary?: boolean
+          name?: string | null
           opt_out_email?: boolean
           opt_out_sms?: boolean
           opt_out_voice?: boolean

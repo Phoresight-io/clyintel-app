@@ -13,6 +13,7 @@ const contact = (over: Partial<ContactRow>): ContactRow => ({
   phone: null,
   is_primary: false,
   role: null,
+  name: null,
   opt_out_email: false,
   opt_out_sms: false,
   opt_out_voice: false,
