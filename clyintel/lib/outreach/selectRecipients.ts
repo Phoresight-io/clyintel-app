@@ -37,14 +37,21 @@ export const EMAIL_CHANNEL: ChannelDescriptor = {
 /**
  * Channel-aware, opt-out-aware selection of the ONE contact to reach on `ch`.
  * A contact is eligible for the channel only if it has that channel's address
- * (non-empty, trimmed) AND is not opted out of that channel. Precedence (v1, NO
- * rank-walking — deferred to Agent-2 escalation per D3):
- *   a. contact_type='dunning' with rankColumn===1 AND eligible → that contact
+ * (non-empty, trimmed) AND is not opted out of that channel. Precedence:
+ *   a. contact_type='dunning', ranked for this channel (rankColumn non-null) AND
+ *      eligible → the LOWEST such rank (deterministic eligibility-walk).
  *   b. else contact_type='poc' AND eligible → that contact
  *   c. else null (unsendable on this channel)
- * An INELIGIBLE rank-1 dunning falls straight to poc — never to a rank-2 dunning.
- * Pure, no I/O. There is at most one rank-1 per (client, channel) via the partial
- * unique index, but `find` is defensive regardless.
+ *
+ * This is a DETERMINISTIC single-pass eligibility-walk: scan ascending rank and
+ * take the first eligible dunning contact, walking PAST ineligible/opted-out
+ * ranks (a backfilled PoC holds email_rank=1, so a user's first dunning contact
+ * is Secondary — it must still be reached before the PoC). A dunning contact with
+ * a NULL rank for this channel does not participate in that channel and is skipped
+ * (it has no rank to order by). This is NOT strategic/outcome-based escalation
+ * (escalate after N failed sends, score-weighted) — that remains Agent-2's job.
+ * See DECISION_RECORD_D3 §2.4 (amended).
+ * Pure, no I/O.
  */
 export function selectForChannel(
   contacts: ContactRow[],
@@ -54,10 +61,10 @@ export function selectForChannel(
     const addr = c[ch.addressField];
     return typeof addr === "string" && addr.trim() !== "" && c[ch.optOutField] === false;
   };
-  const dunning = contacts.find(
-    (c) => c.contact_type === "dunning" && c[ch.rankColumn] === 1 && eligible(c),
-  );
-  if (dunning) return dunning;
+  const rankedDunning = contacts
+    .filter((c) => c.contact_type === "dunning" && c[ch.rankColumn] !== null && eligible(c))
+    .sort((a, b) => (a[ch.rankColumn] as number) - (b[ch.rankColumn] as number));
+  if (rankedDunning.length > 0) return rankedDunning[0];
   const poc = contacts.find((c) => c.contact_type === "poc" && eligible(c));
   return poc ?? null;
 }
