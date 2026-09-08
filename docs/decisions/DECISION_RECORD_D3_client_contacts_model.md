@@ -43,6 +43,20 @@ channel-effectiveness does **not** live.
    escalate down the ranks is not defined now (Agent-2 / strategist territory). The executor
    uses **rank = 1 (Primary) only** until Agent 2 defines escalation.
 
+   > **Amendment (2026-09-08).** The original "rank = 1 (Primary) only" rule was
+   > unsound once a QBO-backfilled PoC holds `email_rank = 1`: a user's first dunning
+   > contact is necessarily Secondary (rank 2), so a rank-1-only executor never reached
+   > it and fell through to the PoC. The executor now performs a **deterministic
+   > single-pass eligibility-walk**: for a channel it selects the **lowest-ranked
+   > *eligible* dunning contact** (scanning ascending rank, walking past ranks that are
+   > opted-out or lack the channel address; a contact with a null rank for the channel
+   > does not participate), then falls back to the PoC, then to none. This is a bounded,
+   > deterministic *precedence* rule — **not** strategic escalation. Outcome-based
+   > escalation (escalate after N failed sends, score-weighted channel/contact strategy)
+   > **remains deferred to Agent 2**. Implemented in `lib/outreach/selectRecipients.ts`
+   > (`selectForChannel`). This supersedes the "no rank-walking" phrasing in §3 and §5
+   > below, which is retained as original-decision history.
+
 5. **THE BOUNDARY (load-bearing).** Channel-**propensity** — which channel a given customer
    pays faster through — is **Client Score / Agent-2 data, NOT a contacts column.** It is a
    per-customer-per-channel effectiveness score that **feeds** channel choice. It **must NOT**

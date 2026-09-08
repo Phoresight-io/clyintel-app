@@ -46,7 +46,7 @@ describe("selectFromContacts — v1 primary-only", () => {
   });
 });
 
-describe("selectForChannel — email: channel-aware, opt-out-aware, no rank-walking", () => {
+describe("selectForChannel — email: eligibility-walk (lowest-ranked eligible dunning), then poc", () => {
   const poc = (over: Partial<ContactRow> = {}) =>
     contact({ id: "poc", contact_type: "poc", email: "poc@x.com", email_rank: 1, ...over });
   const dunning1 = (over: Partial<ContactRow> = {}) =>
@@ -58,20 +58,53 @@ describe("selectForChannel — email: channel-aware, opt-out-aware, no rank-walk
     expect(selectForChannel([poc(), dunning1()], EMAIL_CHANNEL)?.id).toBe("d1");
   });
 
-  it("rank-1 dunning opted-out of email → falls to poc, NOT to a rank-2 dunning (no rank-walking)", () => {
+  it("rank-2 dunning (no rank-1 dunning), eligible → chosen over an eligible poc (THE Brick-4b bug: PoC holds email_rank=1, user's dunning is Secondary)", () => {
+    // Regression: previously the rank-2 dunning fell through to the poc.
+    expect(selectForChannel([poc(), dunning2()], EMAIL_CHANNEL)?.id).toBe("d2");
+  });
+
+  it("lowest rank wins: rank-1 dunning beats rank-2 dunning (both eligible)", () => {
+    expect(selectForChannel([dunning2(), dunning1()], EMAIL_CHANNEL)?.id).toBe("d1");
+  });
+
+  it("rank-1 dunning opted-out of email + rank-2 dunning eligible → walks to rank-2 (eligibility-walk)", () => {
     const chosen = selectForChannel(
       [poc(), dunning1({ opt_out_email: true }), dunning2()],
+      EMAIL_CHANNEL,
+    );
+    expect(chosen?.id).toBe("d2");
+  });
+
+  it("rank-1 dunning with no email address + rank-2 dunning eligible → walks to rank-2", () => {
+    const chosen = selectForChannel(
+      [poc(), dunning1({ email: null }), dunning2()],
+      EMAIL_CHANNEL,
+    );
+    expect(chosen?.id).toBe("d2");
+  });
+
+  it("all dunning ineligible (opted-out) → falls to eligible poc", () => {
+    const chosen = selectForChannel(
+      [poc(), dunning1({ opt_out_email: true }), dunning2({ opt_out_email: true })],
       EMAIL_CHANNEL,
     );
     expect(chosen?.id).toBe("poc");
   });
 
-  it("rank-1 dunning with no email address → falls to poc (not rank-2 dunning)", () => {
+  it("dunning eligible but with NULL email_rank → does not participate in email; falls to poc", () => {
     const chosen = selectForChannel(
-      [poc(), dunning1({ email: null }), dunning2()],
+      [poc(), contact({ id: "dnull", contact_type: "dunning", email: "dn@x.com", email_rank: null })],
       EMAIL_CHANNEL,
     );
     expect(chosen?.id).toBe("poc");
+  });
+
+  it("only a NULL-email_rank dunning (no poc) → none (unranked for this channel)", () => {
+    const chosen = selectForChannel(
+      [contact({ id: "dnull", contact_type: "dunning", email: "dn@x.com", email_rank: null })],
+      EMAIL_CHANNEL,
+    );
+    expect(chosen).toBeNull();
   });
 
   it("no dunning, eligible poc → poc selected (the backfill case: contact_type='poc', email_rank=1)", () => {
