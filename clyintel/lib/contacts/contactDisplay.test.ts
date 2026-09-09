@@ -7,6 +7,7 @@ import {
 
 const contact = (over: Partial<ClientContactDisplay>): ClientContactDisplay => ({
   id: "c",
+  name: null,
   contact_type: "poc",
   email: "x@y.com",
   phone: null,

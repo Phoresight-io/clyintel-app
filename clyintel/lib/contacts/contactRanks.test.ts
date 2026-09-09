@@ -4,6 +4,7 @@ import type { ClientContactDisplay } from "./contactDisplay";
 
 const contact = (over: Partial<ClientContactDisplay>): ClientContactDisplay => ({
   id: "c",
+  name: null,
   contact_type: "dunning",
   email: "x@y.com",
   phone: null,

@@ -143,6 +143,12 @@ export default function DetailScreen({ client, invoiceSet, contacts }: Props) {
                         )}
                       </div>
 
+                      {/* Contact person's name (Fix 2b) — heads the block when set;
+                          null renders nothing (no empty line). */}
+                      {ct.name && (
+                        <div style={{ fontSize: 15, fontWeight: 600, color: C.text }}>{ct.name}</div>
+                      )}
+
                       {/* Email — the live channel, rendered normally */}
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 11, fontWeight: 600, color: C.navy, textTransform: "uppercase", letterSpacing: "0.05em", width: 48 }}>Email</span>

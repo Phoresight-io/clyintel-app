@@ -27,6 +27,7 @@ import { validateEmail } from "../validateEmail";
 // create forces "dunning", update never changes it. is_primary is absent too — it
 // stays the DB default (false); this route never touches the retiring primary flag.
 export interface ContactWriteFields {
+  name?: string | null;
   email?: string | null;
   phone?: string | null;
   email_rank?: number | null;
@@ -103,6 +104,9 @@ function asString(v: unknown): string | null {
 // (or forbidden) by the callers explicitly.
 function pickWriteFields(obj: Record<string, unknown>): ContactWriteFields {
   const out: ContactWriteFields = {};
+  if ("name" in obj && (typeof obj.name === "string" || obj.name === null)) {
+    out.name = obj.name;
+  }
   if ("email" in obj && (typeof obj.email === "string" || obj.email === null)) {
     out.email = obj.email;
   }

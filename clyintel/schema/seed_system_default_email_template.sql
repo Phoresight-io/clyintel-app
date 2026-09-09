@@ -12,8 +12,11 @@
 --
 -- Brick B mirror: the subject and body below are the EXACT live template row
 -- (verified against the live DB), a seven-token, payment-link-bearing copy
--- (client_name, invoice_number, amount_due, invoice_date, due_date,
--- payment_link, subscriber_name). This file is the repo CATCHING UP to the live
+-- (contact_name, invoice_number, amount_due, invoice_date, due_date,
+-- payment_link, subscriber_name). The greeting uses {{contact_name}} (the person
+-- reached; Fix 2b) — the live row is switched from {{client_name}} to
+-- {{contact_name}} by update_template_greeting_to_contact_name.sql. This file is
+-- the repo CATCHING UP to the live
 -- DB — it is NOT applied (the DB is already this exact row). It only takes
 -- effect on a fresh environment where no system-default email template exists.
 -- The {{payment_link}} slot is what the send step's payment-link gate requires.
@@ -26,7 +29,7 @@ select
   'email',
   'invoice_overdue',
   'Regarding invoice {{invoice_number}} — {{amount_due}} outstanding',
-  E'Hi {{client_name}},\n\n'
+  E'Hi {{contact_name}},\n\n'
   || E'Our records show invoice {{invoice_number}} for {{amount_due}}, issued on {{invoice_date}}, '
   || E'is now past its due date of {{due_date}}.\n\n'
   || E'If this has already been taken care of, please disregard this message and accept our thanks. '
