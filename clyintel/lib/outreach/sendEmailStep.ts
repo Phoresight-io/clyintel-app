@@ -71,7 +71,8 @@ export interface SendEmailStepResult {
 // references all of these; `payment_link` is the raw resolved URL ("" when none,
 // which the payment-link gate treats as no-link).
 export interface RenderVars {
-  client_name: string;
+  client_name: string; // the CLIENT (company) — clients.name
+  contact_name: string; // the recipient PERSON reached — set from the selected contact
   invoice_number: string;
   amount_due: string;
   due_date: string;
@@ -229,6 +230,7 @@ export async function sendEmailStep(
   if (!template) return { ...empty, outcome: "no_template" };
   const vars = (await port.loadRenderVars(ctx)) ?? {
     client_name: "",
+    contact_name: "",
     invoice_number: "",
     amount_due: "",
     due_date: "",
@@ -236,6 +238,11 @@ export async function sendEmailStep(
     subscriber_name: "",
     payment_link: "",
   };
+  // Greeting targets the PERSON actually reached: the selected contact's name,
+  // else the client (company) name, else "there". Set here (not in loadRenderVars,
+  // which has no contact) so it applies to both the real and fallback vars, using
+  // the contact chosen at step 1. `contact` is guaranteed non-null past step 1.
+  vars.contact_name = contact.name ?? vars.client_name ?? "there";
 
   // 3b. Payment-link gate — a resolved link is REQUIRED. None → suppress: write
   //     NOTHING, mirror the compliance-gate no-op. loadRenderVars already ran
@@ -369,6 +376,9 @@ function createDefaultPort(): SendEmailPort {
       const cents = inv?.amount_outstanding_cents ?? 0;
       return {
         client_name: client?.name ?? "there",
+        // Placeholder — the orchestrator overwrites contact_name from the selected
+        // contact (this port has no contact). client_name stays the company.
+        contact_name: "",
         invoice_number: inv?.invoice_number ?? "",
         amount_due: `$${(cents / 100).toFixed(2)}`,
         due_date: inv?.due_date ?? "",

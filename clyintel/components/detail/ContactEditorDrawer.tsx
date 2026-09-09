@@ -41,6 +41,7 @@ export default function ContactEditorDrawer({
   const rankOptions = Array.from({ length: maxRank }, (_, i) => i + 1);
   const firstFree = rankOptions.find((r) => !taken.has(r)) ?? 1;
 
+  const [name, setName] = useState(contact?.name ?? "");
   const [email, setEmail] = useState(contact?.email ?? "");
   const [emailRank, setEmailRank] = useState<number>(contact?.email_rank ?? firstFree);
   const [saving, setSaving] = useState(false);
@@ -54,14 +55,18 @@ export default function ContactEditorDrawer({
     }
     setSaving(true);
     setError(null);
+    // Name is optional: trim, and send null when empty so the greeting falls
+    // back to the company name rather than storing an empty string.
+    const trimmedName = name.trim();
+    const nameValue = trimmedName === "" ? null : trimmedName;
     try {
       const res = await fetch("/api/clients/contacts", {
         method: isEdit ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           isEdit
-            ? { id: contact!.id, email: result.email, email_rank: emailRank }
-            : { client_id: clientId, email: result.email, email_rank: emailRank },
+            ? { id: contact!.id, name: nameValue, email: result.email, email_rank: emailRank }
+            : { client_id: clientId, name: nameValue, email: result.email, email_rank: emailRank },
         ),
       });
       if (!res.ok) {
@@ -108,6 +113,18 @@ export default function ContactEditorDrawer({
 
           {/* Body — form */}
           <div style={{ flex: 1, overflowY: "auto", padding: "24px 28px" }}>
+            <label htmlFor="contact-name" style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 6 }}>
+              Contact name (optional)
+            </label>
+            <input
+              id="contact-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Jordan Reyes"
+              style={{ width: "100%", padding: "9px 12px", fontSize: 14, fontWeight: 500, color: C.text, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, outline: "none", boxSizing: "border-box", marginBottom: 18 }}
+            />
+
             <label htmlFor="contact-email" style={{ display: "block", fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 6 }}>
               Email
             </label>

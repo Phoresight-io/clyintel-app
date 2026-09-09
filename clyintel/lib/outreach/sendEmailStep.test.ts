@@ -41,6 +41,7 @@ const template = {
 
 const vars: RenderVars = {
   client_name: "Acme",
+  contact_name: "Ada Lovelace",
   invoice_number: "INV-9",
   amount_due: "$100.00",
   due_date: "2026-06-01",
