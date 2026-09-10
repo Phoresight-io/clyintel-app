@@ -148,10 +148,11 @@ export async function getClientContacts(
   const { data, error } = await supabase
     .from("client_contacts")
     .select(
-      "id, name, contact_type, email, phone, email_rank, sms_rank, voice_rank, opt_out_email, opt_out_sms, opt_out_voice, clients!inner(subscriber_id)",
+      "id, client_id, name, role, contact_type, is_primary, email, phone, email_rank, sms_rank, voice_rank, opt_out_email, opt_out_sms, opt_out_voice, clients!inner(subscriber_id)",
     )
     .eq("client_id", clientId)
-    .eq("clients.subscriber_id", userId);
+    .eq("clients.subscriber_id", userId)
+    .order("is_primary", { ascending: false });
   if (error) {
     console.error("getClientContacts error", error);
     return []; // fail closed → no contacts shown
@@ -159,8 +160,11 @@ export async function getClientContacts(
   // Strip the join-only `clients` embed; return the plain display shape.
   return (data ?? []).map((r) => ({
     id: r.id,
+    client_id: r.client_id,
     name: r.name,
+    role: r.role,
     contact_type: r.contact_type,
+    is_primary: r.is_primary,
     email: r.email,
     phone: r.phone,
     email_rank: r.email_rank,
