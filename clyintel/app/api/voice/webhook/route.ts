@@ -99,19 +99,22 @@ async function resolveVoiceCall(
   vapiCallId: string | null,
 ): Promise<{ id: string | null; via: string | null }> {
   if (voiceCallId) {
-    const { data } = await service
+    const { data, error } = await service
       .from("voice_calls")
       .select("id")
       .eq("id", voiceCallId)
       .maybeSingle();
+    // supabase-js returns errors, it does not throw — inspect and log, never swallow.
+    if (error) console.error("voice/webhook: voice_calls lookup by id failed", error);
     if (data) return { id: data.id, via: "metadata.voiceCallId" };
   }
   if (vapiCallId) {
-    const { data } = await service
+    const { data, error } = await service
       .from("voice_calls")
       .select("id")
       .eq("vapi_call_id", vapiCallId)
       .maybeSingle();
+    if (error) console.error("voice/webhook: voice_calls lookup by vapi_call_id failed", error);
     if (data) return { id: data.id, via: "call.id→vapi_call_id" };
   }
   return { id: null, via: null };
@@ -150,16 +153,21 @@ export async function POST(req: NextRequest) {
     const match = await resolveVoiceCall(service, voiceCallId, vapiCallId);
 
     // 1. Persist the raw event ALWAYS, for every event type. Best-effort: an
-    //    audit failure must never block the update below.
+    //    audit failure must never block the update below — but it must be LOGGED.
+    //    supabase-js returns { error } (it does NOT throw on a REST error), so the
+    //    returned error is inspected here; the try/catch only guards network throws.
     try {
-      await service.from("voice_call_events").insert({
+      const { error: auditError } = await service.from("voice_call_events").insert({
         event_type: eventType,
         vapi_call_id: vapiCallId,
         matched_voice_call_id: match.id,
         raw: (parsed ?? { _unparsed: rawText.slice(0, 10000) }) as never,
       });
-    } catch (auditErr) {
-      console.error("voice/webhook: voice_call_events insert failed", auditErr);
+      if (auditError) {
+        console.error("voice/webhook: voice_call_events insert error", auditError);
+      }
+    } catch (auditThrow) {
+      console.error("voice/webhook: voice_call_events insert threw", auditThrow);
     }
 
     if (!match.id) {
