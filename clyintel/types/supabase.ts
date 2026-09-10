@@ -1517,6 +1517,33 @@ export type Database = {
           },
         ]
       }
+      voice_call_events: {
+        Row: {
+          event_type: string | null
+          id: string
+          matched_voice_call_id: string | null
+          raw: Json
+          received_at: string
+          vapi_call_id: string | null
+        }
+        Insert: {
+          event_type?: string | null
+          id?: string
+          matched_voice_call_id?: string | null
+          raw: Json
+          received_at?: string
+          vapi_call_id?: string | null
+        }
+        Update: {
+          event_type?: string | null
+          id?: string
+          matched_voice_call_id?: string | null
+          raw?: Json
+          received_at?: string
+          vapi_call_id?: string | null
+        }
+        Relationships: []
+      }
       voice_calls: {
         Row: {
           assistant_id: string | null
