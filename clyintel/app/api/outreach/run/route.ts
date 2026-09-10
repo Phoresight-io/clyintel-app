@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
 // `subscriberId`, when set, fences the candidate scan to that subscriber;
 // `invoiceId`, when set, further fences it to that one invoice (single-invoice
 // live send). Both fences are opt-in and additive.
-function createDefaultPort(
+export function createDefaultPort(
   mode: RunMode,
   subscriberId: string | undefined,
   invoiceId: string | undefined,
