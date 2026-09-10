@@ -1,18 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { checkCronAuth } from "@/lib/qbo/worker";
 import { runCadence } from "@/lib/outreach/runCadence";
 import { type RunMode } from "@/lib/outreach/parseRunRequest";
 import { createDefaultPort } from "@/app/api/outreach/run/route";
 
-// ⚠️ UNAUTHENTICATED, TEST-ONLY on-demand trigger for the cadence engine. There is
-// deliberately NO auth here — it can be fired by a plain browser GET (no
-// Authorization header) so a single test send can be triggered by hitting the URL.
+// On-demand trigger for the cadence engine. Bearer-authed via OUTREACH_CRON_SECRET
+// (fail-closed, mirrors app/api/outreach/run) and ADDITIONALLY env-fenced for scope:
 //
-// The SCOPE GUARD is the ENV FENCE, not a secret: OUTREACH_CRON_SUBSCRIBER_ID +
-// OUTREACH_CRON_INVOICE_ID must pin the run to exactly one subscriber's one
-// invoice. That fence is what keeps this endpoint safe while public — so:
-//   ‼️ DO NOT widen this to an unfenced live run. A live mode without both fences
-//      set would let an anonymous GET fire outreach broadly. The
-//      live-requires-subscriber 400 below is the floor, NOT the ceiling: for the
+// The SCOPE GUARD is the ENV FENCE, layered on top of bearer auth:
+// OUTREACH_CRON_SUBSCRIBER_ID + OUTREACH_CRON_INVOICE_ID must pin the run to
+// exactly one subscriber's one invoice. Auth stops who can call; the fence bounds
+// what a call can do — so:
+//   ‼️ DO NOT widen this to an unfenced live run. Even behind bearer auth, a live
+//      mode without both fences set would fire outreach broadly on any authed hit.
+//      The live-requires-subscriber 400 below is the floor, NOT the ceiling: for the
 //      test, ALSO set OUTREACH_CRON_INVOICE_ID. When the test is done, flip
 //      OUTREACH_CRON_MODE off live (or remove this route) so no anonymous hit can
 //      re-trigger a live run.
@@ -29,7 +30,7 @@ import { createDefaultPort } from "@/app/api/outreach/run/route";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Fireable by a plain browser GET (no auth); POST accepted too.
+// Bearer-authed (see runOutreachCron); GET and POST are both accepted.
 export async function GET(req: NextRequest) {
   return runOutreachCron(req);
 }
@@ -39,7 +40,16 @@ export async function POST(req: NextRequest) {
 }
 
 async function runOutreachCron(req: NextRequest) {
-  void req; // unauthenticated (test-only) — no header/auth check by design.
+  // Fail-closed bearer auth FIRST — before any env/config read or runCadence.
+  // A missing OUTREACH_CRON_SECRET rejects every request (never runs unguarded).
+  const auth = checkCronAuth(req.headers.get("authorization"), process.env.OUTREACH_CRON_SECRET);
+  if (auth === "missing_secret") {
+    console.error("outreach/cron: OUTREACH_CRON_SECRET not configured — rejecting (fail-closed)");
+    return new NextResponse("server error", { status: 500 });
+  }
+  if (auth === "unauthorized") {
+    return new NextResponse("unauthorized", { status: 401 });
+  }
 
   // A. Config from env (never hardcoded). Default dry_run — a misconfigured or
   // absent OUTREACH_CRON_MODE never silently goes live.
