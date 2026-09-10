@@ -121,7 +121,7 @@ async function processEmailReply(payload: unknown) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.MAILERSEND_API_KEY!}`,
+        Authorization: `Bearer ${process.env.APP_MAILERSEND_API_KEY!}`,
       },
       body: JSON.stringify(mailerPayload),
     });
