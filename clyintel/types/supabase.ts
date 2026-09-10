@@ -1517,6 +1517,106 @@ export type Database = {
           },
         ]
       }
+      voice_calls: {
+        Row: {
+          assistant_id: string | null
+          client_id: string
+          committed_amount: number | null
+          committed_date: string | null
+          cost_usd: number | null
+          created_at: string
+          duration_seconds: number | null
+          ended_at: string | null
+          ended_reason: string | null
+          from_number: string | null
+          id: string
+          invoice_id: string | null
+          outcome: string | null
+          payment_committed: boolean
+          recording_url: string | null
+          started_at: string | null
+          status: string
+          subscriber_id: string
+          summary: string | null
+          to_number: string | null
+          transcript: string | null
+          updated_at: string
+          vapi_call_id: string | null
+        }
+        Insert: {
+          assistant_id?: string | null
+          client_id: string
+          committed_amount?: number | null
+          committed_date?: string | null
+          cost_usd?: number | null
+          created_at?: string
+          duration_seconds?: number | null
+          ended_at?: string | null
+          ended_reason?: string | null
+          from_number?: string | null
+          id?: string
+          invoice_id?: string | null
+          outcome?: string | null
+          payment_committed?: boolean
+          recording_url?: string | null
+          started_at?: string | null
+          status?: string
+          subscriber_id: string
+          summary?: string | null
+          to_number?: string | null
+          transcript?: string | null
+          updated_at?: string
+          vapi_call_id?: string | null
+        }
+        Update: {
+          assistant_id?: string | null
+          client_id?: string
+          committed_amount?: number | null
+          committed_date?: string | null
+          cost_usd?: number | null
+          created_at?: string
+          duration_seconds?: number | null
+          ended_at?: string | null
+          ended_reason?: string | null
+          from_number?: string | null
+          id?: string
+          invoice_id?: string | null
+          outcome?: string | null
+          payment_committed?: boolean
+          recording_url?: string | null
+          started_at?: string | null
+          status?: string
+          subscriber_id?: string
+          summary?: string | null
+          to_number?: string | null
+          transcript?: string | null
+          updated_at?: string
+          vapi_call_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "voice_calls_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "voice_calls_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "voice_calls_subscriber_id_fkey"
+            columns: ["subscriber_id"]
+            isOneToOne: false
+            referencedRelation: "subscribers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       webhook_events: {
         Row: {
           attempts: number
