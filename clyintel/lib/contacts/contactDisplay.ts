@@ -6,8 +6,11 @@
 // Row). Kept as a plain interface so this module stays pure and portable.
 export interface ClientContactDisplay {
   id: string;
+  client_id: string;
   name: string | null; // person's name; null → greeting falls back to company
+  role: string | null; // free-text role/title; null when unset
   contact_type: string | null; // 'poc' | 'dunning' | (null legacy)
+  is_primary: boolean; // header "Primary" badge
   email: string | null;
   phone: string | null;
   email_rank: number | null;
