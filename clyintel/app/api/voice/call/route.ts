@@ -24,6 +24,9 @@ interface CallRequestBody {
   invoiceId?: unknown;
   toNumber?: unknown;
   variables?: unknown;
+  // When true, route to the test assistant (VAPI_ASSISTANT_ID_TEST) instead of
+  // the production one (VAPI_ASSISTANT_ID).
+  test?: unknown;
 }
 
 interface VapiCallResponse {
@@ -42,14 +45,12 @@ function vapiErrorReason(body: VapiCallResponse | null, status: number): string 
 
 export async function POST(req: NextRequest) {
   // Provider config is required — never place (or record) a call we can't
-  // actually dial. Missing config is a deploy error, surfaced as 500.
+  // actually dial. Missing config is a deploy error, surfaced as 500. The
+  // assistant id is resolved per-request below (production vs test).
   const apiKey = process.env.VAPI_API_KEY;
-  const assistantId = process.env.VAPI_ASSISTANT_ID;
   const phoneNumberId = process.env.VAPI_PHONE_NUMBER_ID;
-  if (!apiKey || !assistantId || !phoneNumberId) {
-    console.error(
-      "voice/call: VAPI_API_KEY, VAPI_ASSISTANT_ID or VAPI_PHONE_NUMBER_ID not configured",
-    );
+  if (!apiKey || !phoneNumberId) {
+    console.error("voice/call: VAPI_API_KEY or VAPI_PHONE_NUMBER_ID not configured");
     return NextResponse.json({ error: "Voice calling not configured" }, { status: 500 });
   }
 
@@ -74,6 +75,26 @@ export async function POST(req: NextRequest) {
       { error: "subscriberId, clientId and toNumber are required" },
       { status: 400 },
     );
+  }
+
+  // Resolve the outbound assistant: test mode routes to VAPI_ASSISTANT_ID_TEST,
+  // otherwise production's VAPI_ASSISTANT_ID (unchanged default behavior).
+  const test = body.test === true;
+  const assistantId = test ? process.env.VAPI_ASSISTANT_ID_TEST : process.env.VAPI_ASSISTANT_ID;
+
+  // Requesting test mode without a configured test assistant is a caller/config
+  // error — surface it (400) rather than silently dialing the production one.
+  if (test && !assistantId) {
+    return NextResponse.json(
+      { error: "test mode requested but VAPI_ASSISTANT_ID_TEST is not set" },
+      { status: 400 },
+    );
+  }
+  // Missing production assistant is a deploy misconfiguration (500), same as
+  // the other required provider config above.
+  if (!assistantId) {
+    console.error("voice/call: VAPI_ASSISTANT_ID not configured");
+    return NextResponse.json({ error: "Voice calling not configured" }, { status: 500 });
   }
 
   const service = getSupabase();
