@@ -121,6 +121,19 @@ async function resolveVoiceCall(
 }
 
 export async function POST(req: NextRequest) {
+  // Diagnostic: logs on EVERY request, before the auth check, so an auth
+  // mismatch is never silent. Reads only headers/env (safe anytime) — the body
+  // is consumed later via req.text(), so it is NOT read here (no double-read),
+  // and `type` is omitted because the body isn't available yet.
+  console.error(
+    "WEBHOOK_DIAG",
+    JSON.stringify({
+      hasSecret: !!req.headers.get("x-vapi-secret"),
+      secretMatches: req.headers.get("x-vapi-secret") === process.env.VAPI_WEBHOOK_SECRET,
+      secretPresentInEnv: !!process.env.VAPI_WEBHOOK_SECRET,
+    }),
+  );
+
   const expectedSecret = process.env.VAPI_WEBHOOK_SECRET;
   if (!expectedSecret) {
     // Deploy misconfiguration — never accept unverified webhook traffic.
