@@ -25,9 +25,9 @@ export interface SendEmailResult {
 }
 
 export async function sendEmail(params: SendEmailParams): Promise<SendEmailResult> {
-  const apiKey = process.env.MAILERSEND_API_KEY;
+  const apiKey = process.env.APP_MAILERSEND_API_KEY;
   if (!apiKey) {
-    throw new Error("MAILERSEND_API_KEY is not set");
+    throw new Error("APP_MAILERSEND_API_KEY is not set");
   }
 
   const body = {
