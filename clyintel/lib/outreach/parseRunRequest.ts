@@ -11,14 +11,14 @@
 export type RunMode = "dry_run" | "live";
 
 export type ParsedRunRequest =
-  | { ok: true; mode: RunMode; subscriberId: string | undefined }
+  | { ok: true; mode: RunMode; subscriberId: string | undefined; invoiceId: string | undefined }
   | { ok: false; status: 400; error: string };
 
 export function parseRunRequest(rawBody: string): ParsedRunRequest {
   const trimmed = rawBody.trim();
   // Body-less request → today's exact defaults: dry-run, unfenced.
   if (trimmed === "") {
-    return { ok: true, mode: "dry_run", subscriberId: undefined };
+    return { ok: true, mode: "dry_run", subscriberId: undefined, invoiceId: undefined };
   }
 
   let parsed: unknown;
@@ -49,12 +49,24 @@ export function parseRunRequest(rawBody: string): ParsedRunRequest {
     subscriberId = body.subscriberId;
   }
 
+  // Optional single-invoice fence: scope the candidate scan to one invoice (used
+  // for a single-invoice live send). Absent → undefined (unchanged behavior).
+  let invoiceId: string | undefined;
+  if (body.invoiceId !== undefined) {
+    if (typeof body.invoiceId !== "string" || body.invoiceId.trim() === "") {
+      return { ok: false, status: 400, error: "invoiceId must be a non-empty string" };
+    }
+    invoiceId = body.invoiceId;
+  }
+
   // Belt-and-suspenders: a live run MUST be fenced to a subscriber. There is no
   // legitimate unfenced live run yet; requiring the fence structurally prevents
-  // an accidental live blast to all subscribers.
+  // an accidental live blast to all subscribers. This fires regardless of
+  // invoiceId — an invoiceId does NOT substitute for the subscriber fence, so a
+  // live single-invoice run must still carry both.
   if (mode === "live" && subscriberId === undefined) {
     return { ok: false, status: 400, error: "live runs must be fenced to a subscriberId" };
   }
 
-  return { ok: true, mode, subscriberId };
+  return { ok: true, mode, subscriberId, invoiceId };
 }

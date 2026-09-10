@@ -66,15 +66,21 @@ export async function POST(req: NextRequest) {
 
   const summary = await runCadence(
     new Date(),
-    createDefaultPort(parsed.mode, parsed.subscriberId),
+    createDefaultPort(parsed.mode, parsed.subscriberId, parsed.invoiceId),
   );
   return NextResponse.json({ ok: true, summary }, { status: 200 });
 }
 
 // ── Default (real) port over Supabase + the send seam ────────────────────────
 // `mode` is threaded into sendEmailStep (default "dry_run" behaves as before);
-// `subscriberId`, when set, fences the candidate scan to that subscriber.
-function createDefaultPort(mode: RunMode, subscriberId: string | undefined): RunCadencePort {
+// `subscriberId`, when set, fences the candidate scan to that subscriber;
+// `invoiceId`, when set, further fences it to that one invoice (single-invoice
+// live send). Both fences are opt-in and additive.
+function createDefaultPort(
+  mode: RunMode,
+  subscriberId: string | undefined,
+  invoiceId: string | undefined,
+): RunCadencePort {
   const service = getSupabase();
   return {
     async loadActiveCadence(): Promise<CadenceDef | null> {
@@ -118,6 +124,11 @@ function createDefaultPort(mode: RunMode, subscriberId: string | undefined): Run
       // Opt-in subscriber fence: absent → unchanged (all subscribers).
       if (subscriberId) {
         query = query.eq("subscriber_id", subscriberId);
+      }
+      // Opt-in single-invoice fence: absent → unchanged. Additive to the
+      // subscriber fence, so a live run with both scopes to exactly that invoice.
+      if (invoiceId) {
+        query = query.eq("id", invoiceId);
       }
       const { data, error } = await query;
       if (error) {
