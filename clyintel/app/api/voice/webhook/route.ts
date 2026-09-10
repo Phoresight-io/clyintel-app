@@ -121,18 +121,59 @@ async function resolveVoiceCall(
 }
 
 export async function POST(req: NextRequest) {
-  // Diagnostic: logs on EVERY request, before the auth check, so an auth
-  // mismatch is never silent. Reads only headers/env (safe anytime) — the body
-  // is consumed later via req.text(), so it is NOT read here (no double-read),
-  // and `type` is omitted because the body isn't available yet.
-  console.error(
-    "WEBHOOK_DIAG",
-    JSON.stringify({
-      hasSecret: !!req.headers.get("x-vapi-secret"),
-      secretMatches: req.headers.get("x-vapi-secret") === process.env.VAPI_WEBHOOK_SECRET,
-      secretPresentInEnv: !!process.env.VAPI_WEBHOOK_SECRET,
-    }),
-  );
+  // Read the raw body ONCE, up front — the ENTRY diagnostic below needs it, and
+  // the main handler reuses it (a second req.text() would return an empty stream).
+  let bodyText = "";
+  try {
+    bodyText = await req.text();
+  } catch {
+    // Leave bodyText empty; the entry row still records reach + auth.
+  }
+
+  const parsedType = (() => {
+    try {
+      return (JSON.parse(bodyText) as { message?: { type?: string } })?.message?.type ?? null;
+    } catch {
+      return "parse-fail";
+    }
+  })();
+  const parsedCallId = (() => {
+    try {
+      return (JSON.parse(bodyText) as { message?: { call?: { id?: string } } })?.message?.call?.id ?? null;
+    } catch {
+      return null;
+    }
+  })();
+
+  // Supabase-routed diagnostics: Vercel runtime logs are unreadable from here, so
+  // leave a trail in voice_call_events instead. This ENTRY row is written BEFORE
+  // the auth check and before ANY early return (including the 401), so Charles can
+  // read from the DB: (a) whether the function is reached, (b) the auth result,
+  // (c) the event type — for every incoming event.
+  try {
+    const diagService = getSupabase();
+    const { error: entryError } = await diagService.from("voice_call_events").insert({
+      event_type: typeof parsedType === "string" ? parsedType : null,
+      vapi_call_id: parsedCallId,
+      raw: {
+        _diag: "entry",
+        secretPresentInEnv: !!process.env.VAPI_WEBHOOK_SECRET,
+        hasSecretHeader: !!req.headers.get("x-vapi-secret"),
+        secretMatches: req.headers.get("x-vapi-secret") === process.env.VAPI_WEBHOOK_SECRET,
+        eventType: parsedType,
+      } as never,
+    });
+    if (entryError) {
+      // Capture WHY the entry insert failed into a second diagnostic row.
+      await diagService.from("voice_call_events").insert({
+        raw: { _diag: "entry-insert-failed", error: String(entryError) } as never,
+      });
+    }
+  } catch (entryThrow) {
+    // getSupabase() threw (no service key) or a network throw — no client to
+    // record with; fall back to a log.
+    console.error("voice/webhook: entry diagnostic insert threw", entryThrow);
+  }
 
   const expectedSecret = process.env.VAPI_WEBHOOK_SECRET;
   if (!expectedSecret) {
@@ -146,8 +187,9 @@ export async function POST(req: NextRequest) {
 
   // Past auth, always ACK 200 so Vapi never retry-storms; log any failure.
   try {
-    // Read raw text first so we can audit even a body that fails to parse.
-    const rawText = await req.text();
+    // Reuse the body read above — the stream was already consumed, so do NOT
+    // call req.text() again (it would return empty).
+    const rawText = bodyText;
     let parsed: ({ message?: VapiMessage } & Record<string, unknown>) | null = null;
     try {
       parsed = JSON.parse(rawText) as { message?: VapiMessage } & Record<string, unknown>;
@@ -235,6 +277,21 @@ export async function POST(req: NextRequest) {
             `(id=${match.id} via=${match.via} type=${eventType})`,
         );
       }
+
+      // Supabase-routed diagnostic: record the UPDATE outcome so a 0-row or
+      // errored update is visible directly in voice_call_events.
+      await service.from("voice_call_events").insert({
+        event_type: eventType,
+        vapi_call_id: vapiCallId,
+        matched_voice_call_id: match.id,
+        raw: {
+          _diag: "update-result",
+          stage: eventType,
+          matchedId: match.id,
+          updateError: error ? String(error) : null,
+          rowcount: data?.length ?? 0,
+        } as never,
+      });
     }
   } catch (err) {
     console.error("voice/webhook: processing error", err);
