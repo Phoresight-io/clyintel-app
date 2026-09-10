@@ -69,4 +69,47 @@ describe("parseRunRequest", () => {
     expect(parseRunRequest(JSON.stringify({ subscriberId: "  " }))).toMatchObject({ ok: false, status: 400 });
     expect(parseRunRequest(JSON.stringify({ subscriberId: 123 }))).toMatchObject({ ok: false, status: 400 });
   });
+
+  it("body-less → invoiceId undefined (unchanged default)", () => {
+    expect(parseRunRequest("")).toEqual({
+      ok: true,
+      mode: "dry_run",
+      subscriberId: undefined,
+      invoiceId: undefined,
+    });
+  });
+
+  it("{ invoiceId } alone → dry-run + invoice-fenced (mode/subscriber default)", () => {
+    expect(parseRunRequest(JSON.stringify({ invoiceId: "inv-1" }))).toEqual({
+      ok: true,
+      mode: "dry_run",
+      subscriberId: undefined,
+      invoiceId: "inv-1",
+    });
+  });
+
+  it("{ mode:'live', subscriberId, invoiceId } → live + both fences", () => {
+    expect(
+      parseRunRequest(JSON.stringify({ mode: "live", subscriberId: "sub-9", invoiceId: "inv-9" })),
+    ).toEqual({
+      ok: true,
+      mode: "live",
+      subscriberId: "sub-9",
+      invoiceId: "inv-9",
+    });
+  });
+
+  it("{ mode:'live', invoiceId } WITHOUT subscriberId → 400 (invoiceId does not bypass the subscriber fence)", () => {
+    expect(parseRunRequest(JSON.stringify({ mode: "live", invoiceId: "inv-9" }))).toEqual({
+      ok: false,
+      status: 400,
+      error: "live runs must be fenced to a subscriberId",
+    });
+  });
+
+  it("empty / non-string invoiceId → 400", () => {
+    expect(parseRunRequest(JSON.stringify({ invoiceId: "" }))).toMatchObject({ ok: false, status: 400 });
+    expect(parseRunRequest(JSON.stringify({ invoiceId: "  " }))).toMatchObject({ ok: false, status: 400 });
+    expect(parseRunRequest(JSON.stringify({ invoiceId: 123 }))).toMatchObject({ ok: false, status: 400 });
+  });
 });
