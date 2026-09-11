@@ -161,6 +161,17 @@ export async function POST(req: NextRequest) {
         hasSecretHeader: !!req.headers.get("x-vapi-secret"),
         secretMatches: req.headers.get("x-vapi-secret") === process.env.VAPI_WEBHOOK_SECRET,
         eventType: parsedType,
+        // TEMPORARY secret-mismatch debug — lengths + masked fragments ONLY, never
+        // the full secret. Private, service-role-only table. Revert after use.
+        headerLen: (req.headers.get("x-vapi-secret") ?? "").length,
+        envLen: (process.env.VAPI_WEBHOOK_SECRET ?? "").length,
+        headerFirst4: (req.headers.get("x-vapi-secret") ?? "").slice(0, 4),
+        headerLast4: (req.headers.get("x-vapi-secret") ?? "").slice(-4),
+        envFirst4: (process.env.VAPI_WEBHOOK_SECRET ?? "").slice(0, 4),
+        envLast4: (process.env.VAPI_WEBHOOK_SECRET ?? "").slice(-4),
+        headerTrimmedMatches:
+          (req.headers.get("x-vapi-secret") ?? "").trim() ===
+          (process.env.VAPI_WEBHOOK_SECRET ?? "").trim(),
       } as never,
     });
     if (entryError) {
