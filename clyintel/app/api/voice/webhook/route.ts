@@ -120,6 +120,24 @@ async function resolveVoiceCall(
   return { id: null, via: null };
 }
 
+// Serialize a Supabase/PostgREST error for storage + logging. String(err) on the
+// error object yields "[object Object]", which hid the real cause here — pull the
+// useful fields explicitly, with a JSON fallback.
+function serializeError(err: unknown): string {
+  if (err && typeof err === "object") {
+    const e = err as { message?: string; code?: string; details?: string; hint?: string };
+    if (e.message || e.code || e.details || e.hint) {
+      return JSON.stringify({ message: e.message, code: e.code, details: e.details, hint: e.hint });
+    }
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return String(err);
+    }
+  }
+  return String(err);
+}
+
 export async function POST(req: NextRequest) {
   // Read the raw body ONCE, up front — the ENTRY diagnostic below needs it, and
   // the main handler reuses it (a second req.text() would return an empty stream).
@@ -247,8 +265,13 @@ export async function POST(req: NextRequest) {
         transcript: message?.transcript ?? null,
         summary: message?.analysis?.summary ?? null,
         recording_url: message?.recordingUrl ?? message?.stereoRecordingUrl ?? null,
+        // voice_calls.duration_seconds is an INTEGER column, but Vapi sends
+        // durationSeconds as a float (e.g. 75.244) — round it, or Postgres rejects
+        // the whole UPDATE ("invalid input syntax for type integer").
         duration_seconds:
-          typeof message?.durationSeconds === "number" ? message.durationSeconds : null,
+          typeof message?.durationSeconds === "number"
+            ? Math.round(message.durationSeconds)
+            : null,
         cost_usd: typeof message?.cost === "number" ? message.cost : null,
         ended_at: new Date().toISOString(),
       };
@@ -270,7 +293,7 @@ export async function POST(req: NextRequest) {
         .eq("id", match.id)
         .select("id");
       if (error) {
-        console.error("voice/webhook: voice_calls update failed", error);
+        console.error("voice/webhook: voice_calls update failed", serializeError(error));
       } else {
         console.log(
           `voice/webhook: updated ${data?.length ?? 0} row(s) ` +
@@ -288,7 +311,7 @@ export async function POST(req: NextRequest) {
           _diag: "update-result",
           stage: eventType,
           matchedId: match.id,
-          updateError: error ? String(error) : null,
+          updateError: error ? serializeError(error) : null,
           rowcount: data?.length ?? 0,
         } as never,
       });
