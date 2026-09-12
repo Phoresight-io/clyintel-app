@@ -3,10 +3,11 @@ import { getSupabase } from "@/lib/supabase";
 import type { Database } from "@/types/supabase";
 
 // Inbound Vapi webhook: status-update and end-of-call-report events for a call
-// placed by app/api/voice/call. Verifies the shared secret, then:
-//   1. persists the RAW event to voice_call_events (always, before correlation)
-//   2. resolves the voice_calls row (metadata.voiceCallId → id, else the Vapi
-//      call id → vapi_call_id)
+// placed by app/api/voice/call. After verifying the shared secret it:
+//   1. correlates to the voice_calls row (metadata.voiceCallId → id, else the
+//      Vapi call id → vapi_call_id)
+//   2. writes one lightweight audit row to voice_call_events (the raw Vapi
+//      payload + matched id) — no secret material is ever stored
 //   3. applies the status/end-of-call update to the resolved row (by primary key)
 //
 // It ALWAYS returns 200 once the secret checks out — even on a parse/DB error —
@@ -105,7 +106,7 @@ async function resolveVoiceCall(
       .eq("id", voiceCallId)
       .maybeSingle();
     // supabase-js returns errors, it does not throw — inspect and log, never swallow.
-    if (error) console.error("voice/webhook: voice_calls lookup by id failed", error);
+    if (error) console.error("voice/webhook: voice_calls lookup by id failed", serializeError(error));
     if (data) return { id: data.id, via: "metadata.voiceCallId" };
   }
   if (vapiCallId) {
@@ -114,7 +115,7 @@ async function resolveVoiceCall(
       .select("id")
       .eq("vapi_call_id", vapiCallId)
       .maybeSingle();
-    if (error) console.error("voice/webhook: voice_calls lookup by vapi_call_id failed", error);
+    if (error) console.error("voice/webhook: voice_calls lookup by vapi_call_id failed", serializeError(error));
     if (data) return { id: data.id, via: "call.id→vapi_call_id" };
   }
   return { id: null, via: null };
@@ -139,60 +140,6 @@ function serializeError(err: unknown): string {
 }
 
 export async function POST(req: NextRequest) {
-  // Read the raw body ONCE, up front — the ENTRY diagnostic below needs it, and
-  // the main handler reuses it (a second req.text() would return an empty stream).
-  let bodyText = "";
-  try {
-    bodyText = await req.text();
-  } catch {
-    // Leave bodyText empty; the entry row still records reach + auth.
-  }
-
-  const parsedType = (() => {
-    try {
-      return (JSON.parse(bodyText) as { message?: { type?: string } })?.message?.type ?? null;
-    } catch {
-      return "parse-fail";
-    }
-  })();
-  const parsedCallId = (() => {
-    try {
-      return (JSON.parse(bodyText) as { message?: { call?: { id?: string } } })?.message?.call?.id ?? null;
-    } catch {
-      return null;
-    }
-  })();
-
-  // Supabase-routed diagnostics: Vercel runtime logs are unreadable from here, so
-  // leave a trail in voice_call_events instead. This ENTRY row is written BEFORE
-  // the auth check and before ANY early return (including the 401), so Charles can
-  // read from the DB: (a) whether the function is reached, (b) the auth result,
-  // (c) the event type — for every incoming event.
-  try {
-    const diagService = getSupabase();
-    const { error: entryError } = await diagService.from("voice_call_events").insert({
-      event_type: typeof parsedType === "string" ? parsedType : null,
-      vapi_call_id: parsedCallId,
-      raw: {
-        _diag: "entry",
-        secretPresentInEnv: !!process.env.VAPI_WEBHOOK_SECRET,
-        hasSecretHeader: !!req.headers.get("x-vapi-secret"),
-        secretMatches: req.headers.get("x-vapi-secret") === process.env.VAPI_WEBHOOK_SECRET,
-        eventType: parsedType,
-      } as never,
-    });
-    if (entryError) {
-      // Capture WHY the entry insert failed into a second diagnostic row.
-      await diagService.from("voice_call_events").insert({
-        raw: { _diag: "entry-insert-failed", error: String(entryError) } as never,
-      });
-    }
-  } catch (entryThrow) {
-    // getSupabase() threw (no service key) or a network throw — no client to
-    // record with; fall back to a log.
-    console.error("voice/webhook: entry diagnostic insert threw", entryThrow);
-  }
-
   const expectedSecret = process.env.VAPI_WEBHOOK_SECRET;
   if (!expectedSecret) {
     // Deploy misconfiguration — never accept unverified webhook traffic.
@@ -205,9 +152,7 @@ export async function POST(req: NextRequest) {
 
   // Past auth, always ACK 200 so Vapi never retry-storms; log any failure.
   try {
-    // Reuse the body read above — the stream was already consumed, so do NOT
-    // call req.text() again (it would return empty).
-    const rawText = bodyText;
+    const rawText = await req.text();
     let parsed: ({ message?: VapiMessage } & Record<string, unknown>) | null = null;
     try {
       parsed = JSON.parse(rawText) as { message?: VapiMessage } & Record<string, unknown>;
@@ -225,10 +170,11 @@ export async function POST(req: NextRequest) {
     // Correlate FIRST so the audit row records the match outcome.
     const match = await resolveVoiceCall(service, voiceCallId, vapiCallId);
 
-    // 1. Persist the raw event ALWAYS, for every event type. Best-effort: an
-    //    audit failure must never block the update below — but it must be LOGGED.
-    //    supabase-js returns { error } (it does NOT throw on a REST error), so the
-    //    returned error is inspected here; the try/catch only guards network throws.
+    // Lightweight audit: one row per event with the raw Vapi payload + matched
+    // id. No secret material is written (the shared secret is a header, never in
+    // the body). Best-effort — an audit failure must never block the update below,
+    // but it is logged. supabase-js returns { error } (it does NOT throw on a REST
+    // error), so the returned error is inspected here; the catch guards network throws.
     try {
       const { error: auditError } = await service.from("voice_call_events").insert({
         event_type: eventType,
@@ -237,7 +183,7 @@ export async function POST(req: NextRequest) {
         raw: (parsed ?? { _unparsed: rawText.slice(0, 10000) }) as never,
       });
       if (auditError) {
-        console.error("voice/webhook: voice_call_events insert error", auditError);
+        console.error("voice/webhook: voice_call_events insert error", serializeError(auditError));
       }
     } catch (auditThrow) {
       console.error("voice/webhook: voice_call_events insert threw", auditThrow);
@@ -285,8 +231,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (patch) {
-      // .select() so we can log whether the update actually hit a row — a silent
-      // 0-row update is the failure mode this whole change exists to surface.
+      // .select() so we can log whether the update actually hit a row.
       const { data, error } = await service
         .from("voice_calls")
         .update(patch)
@@ -300,21 +245,6 @@ export async function POST(req: NextRequest) {
             `(id=${match.id} via=${match.via} type=${eventType})`,
         );
       }
-
-      // Supabase-routed diagnostic: record the UPDATE outcome so a 0-row or
-      // errored update is visible directly in voice_call_events.
-      await service.from("voice_call_events").insert({
-        event_type: eventType,
-        vapi_call_id: vapiCallId,
-        matched_voice_call_id: match.id,
-        raw: {
-          _diag: "update-result",
-          stage: eventType,
-          matchedId: match.id,
-          updateError: error ? serializeError(error) : null,
-          rowcount: data?.length ?? 0,
-        } as never,
-      });
     }
   } catch (err) {
     console.error("voice/webhook: processing error", err);
