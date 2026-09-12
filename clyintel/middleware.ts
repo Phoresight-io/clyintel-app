@@ -1,9 +1,33 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
-const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/stripe-webhook'];
+const PUBLIC_PATHS = ['/login', '/auth/callback'];
+
+// Inbound webhooks / external callbacks. These are invoked by external services
+// (Vapi, Stripe, Intuit/QBO, MailerSend, Twilio) that never carry a session
+// cookie, and each route verifies its own signature/secret. They MUST bypass the
+// session-auth redirect entirely — otherwise the app's /login page swallows the
+// request (returning 200) and the handler never runs.
+//
+// Deliberately NOT included: /api/voice/call — it has no self-authentication and
+// triggers outbound calls, so it stays behind session auth (app-internal only).
+const WEBHOOK_PATHS = [
+  '/api/voice/webhook',
+  '/api/stripe-webhook',
+  '/api/qbo/webhook',
+  '/api/webhooks/mailersend',
+  '/api/sms-reply',
+  '/api/email-reply',
+];
 
 export async function middleware(request: NextRequest) {
+  // Early bypass: webhooks self-authenticate and have no session, so skip the
+  // entire session-auth flow (no getUser, no /login redirect).
+  const { pathname: webhookPathname } = request.nextUrl;
+  if (WEBHOOK_PATHS.some((p) => webhookPathname === p || webhookPathname.startsWith(p + '/'))) {
+    return NextResponse.next();
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
