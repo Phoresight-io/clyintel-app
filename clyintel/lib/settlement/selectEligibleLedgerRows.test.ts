@@ -15,7 +15,7 @@ function makeFake(queues: Record<string, Result[]>) {
   const calls: { table: string; method: string; args: unknown[] }[] = [];
   const from = (table: string) => {
     const builder: Record<string, unknown> = {};
-    for (const m of ["select", "eq", "lte", "not", "in", "upsert", "single", "maybeSingle"]) {
+    for (const m of ["select", "eq", "lte", "not", "in", "upsert", "single", "maybeSingle", "order", "range"]) {
       builder[m] = (...args: unknown[]) => {
         calls.push({ table, method: m, args });
         return builder;
@@ -120,5 +120,73 @@ describe("selectEligibleLedgerRows", () => {
     const rows = await selectEligibleLedgerRows({ boundary: BOUNDARY }, client);
     expect(rows).toEqual([]);
     expect(calls.some((c) => c.table === "rev_share_ledger")).toBe(false);
+  });
+});
+
+/**
+ * Pagination-aware stub: from(table) slices datasets[table] by the requested
+ * .range(from, to) window, so a backing set larger than one PostgREST page (1000)
+ * is only fully read if the caller pages through it. Records each range window so
+ * we can assert multiple pages were fetched.
+ */
+function makePagingFake(datasets: Record<string, unknown[]>) {
+  const rangeCalls: Record<string, [number, number][]> = {};
+  const from = (table: string) => {
+    let rFrom = 0;
+    let rTo = Number.MAX_SAFE_INTEGER;
+    const builder: Record<string, unknown> = {};
+    for (const m of ["select", "eq", "lte", "not", "in", "order"]) {
+      builder[m] = () => builder;
+    }
+    builder.range = (f: number, t: number) => {
+      rFrom = f;
+      rTo = t;
+      (rangeCalls[table] ??= []).push([f, t]);
+      return builder;
+    };
+    builder.then = (onF: (v: { data: unknown[]; error: null }) => unknown, onR?: (e: unknown) => unknown) => {
+      const ds = datasets[table] ?? [];
+      const slice = ds.slice(rFrom, rTo + 1); // inclusive upper bound, like PostgREST
+      return Promise.resolve({ data: slice, error: null }).then(onF, onR);
+    };
+    return builder;
+  };
+  return { client: { from } as never, rangeCalls };
+}
+
+describe("selectEligibleLedgerRows — pagination (row-cap safety)", () => {
+  it("reads ALL rows past the 1000-row cap for BOTH the ledger and the linked set", async () => {
+    // 2500 eligible-shaped ledger rows for one active subscriber; 1500 of them
+    // already linked. If either read stopped at one page (1000), the result would
+    // be wrong: a truncated ledger read → < 1000 kept; a truncated linked read →
+    // stale exclusions leaving linked rows in. Correct answer: led-1500..led-2499.
+    const LEDGER = 2500;
+    const LINKED = 1500;
+    const ledgerRows = Array.from({ length: LEDGER }, (_, i) => ({
+      id: `led-${i}`,
+      subscriber_id: "subA",
+      fee_amount: 1,
+      cycle_close: "2026-07-15",
+      source: "qbo",
+    }));
+    const linkedRows = Array.from({ length: LINKED }, (_, i) => ({ ledger_row_id: `led-${i}` }));
+
+    const { client, rangeCalls } = makePagingFake({
+      subscribers: [{ id: "subA" }],
+      fee_settlement_lines: linkedRows,
+      rev_share_ledger: ledgerRows,
+    });
+
+    const rows = await selectEligibleLedgerRows({ boundary: BOUNDARY }, client);
+
+    // Exactly the unlinked tail, none dropped by the cap.
+    expect(rows).toHaveLength(LEDGER - LINKED); // 1000
+    expect(rows.every((r) => !r.id.startsWith("led-") || Number(r.id.slice(4)) >= LINKED)).toBe(true);
+    expect(rows[0].id).toBe(`led-${LINKED}`);
+    expect(rows[rows.length - 1].id).toBe(`led-${LEDGER - 1}`);
+
+    // Proof that paging actually happened (multiple windows per big read).
+    expect(rangeCalls["rev_share_ledger"].length).toBe(3); // 1000 + 1000 + 500
+    expect(rangeCalls["fee_settlement_lines"].length).toBe(2); // 1000 + 500
   });
 });
