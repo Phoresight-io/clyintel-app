@@ -13,14 +13,17 @@
 --   fee_settlement_lines  — the ledger rows folded into that settlement, with the
 --                           per-row fee frozen to integer cents at sweep time.
 --
--- RLS posture mirrors ledger_sync / webhook_events exactly: these are INTERNAL
--- tables written only by the settlement worker via the service role (which
--- bypasses RLS). RLS is ENABLED with an explicit deny-all policy for anon +
--- authenticated (the g2 "Deny all access to anon and authenticated" pattern from
--- rls_hardening_g2_deny_all_internal_tables). No subscriber-facing SELECT policy
--- and no FORCE ROW LEVEL SECURITY — matching the internal-queue posture (g3
--- deliberately excludes ledger_sync / webhook_events from FORCE; a deny-all
--- policy already covers anon/authenticated and service_role has BYPASSRLS).
+-- RLS posture: SUBSCRIBER-OWNED READ + SERVICE-ROLE WRITE. These hold a
+-- subscriber's fee billing history, so a subscriber must be able to read their
+-- OWN rows — but only the settlement worker (service_role, which has BYPASSRLS)
+-- ever writes them. So RLS is ENABLED with a SELECT-only ownership policy and NO
+-- insert/update/delete policy for anon/authenticated (writes stay closed), and
+-- FORCE ROW LEVEL SECURITY per rls_hardening_g3_force_rls_subscriber_owned.
+-- Mapping is the house standard `subscriber_id = auth.uid()` (same as invoices /
+-- rev_share_ledger); fee_settlement_lines has no subscriber_id, so it scopes
+-- through its parent settlement with the EXISTS idiom invoice_cadence_progress
+-- uses. (This replaces the g2 internal deny-all these tables shipped with in the
+-- first cut of this migration.)
 --
 -- Additive + replay-safe: create table / index / trigger all guarded, DDL only,
 -- no changes to existing tables (rev_share_ledger untouched).
@@ -85,20 +88,29 @@ create unique index if not exists uq_fee_settlement_lines_ledger_row
 create index if not exists idx_fee_settlement_lines_settlement
   on public.fee_settlement_lines (settlement_id);
 
--- ── RLS — internal tables, deny-all (mirror ledger_sync / webhook_events) ─────
+-- ── RLS — subscriber-owned read + service-role write (mirror g3 posture) ──────
 alter table public.fee_settlements      enable row level security;
 alter table public.fee_settlement_lines enable row level security;
 
-create policy "Deny all access to anon and authenticated"
-  on public.fee_settlements
-  for all
-  to anon, authenticated
-  using (false)
-  with check (false);
+-- FORCE so the policies apply even to an owner-role connection (g3 rationale).
+alter table public.fee_settlements      force row level security;
+alter table public.fee_settlement_lines force row level security;
 
-create policy "Deny all access to anon and authenticated"
-  on public.fee_settlement_lines
-  for all
-  to anon, authenticated
-  using (false)
-  with check (false);
+-- fee_settlements: subscriber reads their OWN billing history. SELECT-only, same
+-- auth→subscriber mapping invoices / rev_share_ledger use. No insert/update/delete
+-- policy for authenticated ⇒ writes stay closed; the sweep writes via service_role.
+create policy subscriber_isolation_select on public.fee_settlements
+  for select to authenticated
+  using (subscriber_id = auth.uid());
+
+-- fee_settlement_lines: no subscriber_id of its own, so scope through the parent
+-- settlement (mirrors invoice_cadence_progress's EXISTS-through-parent idiom).
+create policy subscriber_isolation_select on public.fee_settlement_lines
+  for select to authenticated
+  using (
+    exists (
+      select 1 from public.fee_settlements s
+      where s.id = fee_settlement_lines.settlement_id
+        and s.subscriber_id = auth.uid()
+    )
+  );
