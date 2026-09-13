@@ -13,6 +13,9 @@ interface Props {
   balanceEvents?: BalanceEventDisplay[];
   communications?: CommunicationDisplay[];
   voiceCalls?: VoiceCallDisplay[];
+  // When true, history is still being fetched (dashboard opens the drawer, then
+  // loads via the history API) — show a loading state instead of empty states.
+  loading?: boolean;
   onClose: () => void;
 }
 
@@ -23,6 +26,7 @@ export default function ExchangeDrawer({
   balanceEvents = [],
   communications = [],
   voiceCalls = [],
+  loading = false,
   onClose,
 }: Props) {
   return (
@@ -41,14 +45,20 @@ export default function ExchangeDrawer({
           </div>
 
           <div style={{ flex: 1, overflowY: "auto", padding: "24px 28px" }}>
-            {/* Distinct Transactions section, above the timeline */}
-            <TransactionLog transactions={transactions} balanceEvents={balanceEvents} />
+            {loading ? (
+              <div style={{ textAlign: "center", padding: "40px 20px", color: C.textMid, fontSize: 14 }}>Loading…</div>
+            ) : (
+              <>
+                {/* Distinct Transactions section, above the timeline */}
+                <TransactionLog transactions={transactions} balanceEvents={balanceEvents} />
 
-            {/* Chronological exchanges timeline (existing design) */}
-            <div style={{ marginTop: 8 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: C.navy, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 16 }}>Exchanges</div>
-              <ExchangeTimeline communications={communications} voiceCalls={voiceCalls} clientName={clientName} />
-            </div>
+                {/* Chronological exchanges timeline (existing design) */}
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: C.navy, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 16 }}>Exchanges</div>
+                  <ExchangeTimeline communications={communications} voiceCalls={voiceCalls} clientName={clientName} />
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

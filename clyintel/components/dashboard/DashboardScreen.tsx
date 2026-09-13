@@ -1,8 +1,10 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 import type { Invoice, Client, NegotiationRec, ClientInvoiceSet, Exchange } from "@/lib/mock-data";
+import type { VoiceCallDisplay } from "@/lib/voice-calls";
+import type { CommunicationDisplay, TransactionDisplay, BalanceEventDisplay } from "@/lib/data";
 import ExchangeDrawer from "@/components/shared/ExchangeDrawer";
 import NegotiationActions from "./NegotiationActions";
 import { RecCard } from "./RecoveryRecModal";
@@ -20,6 +22,13 @@ interface ActiveFilters {
 interface FlatInvoice extends Invoice {
   clientName: string;
   clientId: string | number;
+}
+
+interface HistoryData {
+  voiceCalls: VoiceCallDisplay[];
+  communications: CommunicationDisplay[];
+  transactions: TransactionDisplay[];
+  balanceEvents: BalanceEventDisplay[];
 }
 
 interface DashboardScreenProps {
@@ -43,6 +52,28 @@ export default function DashboardScreen({ initialClients, initialClientInvoices 
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({ status: [], dueDate: [], customer: [], invoiceNumber: [] });
   const [searchText, setSearchText] = useState("");
   const [selectedInvoiceForHistory, setSelectedInvoiceForHistory] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryData | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  // The dashboard is client-rendered and cross-client, so it can't call the
+  // service-role fetches directly; load this invoice's history from the API route
+  // (same lib fetches + invoice_id filtering as the client-detail page).
+  useEffect(() => {
+    if (!selectedInvoiceForHistory) {
+      setHistory(null);
+      setHistoryLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setHistory(null);
+    setHistoryLoading(true);
+    fetch(`/api/invoices/${encodeURIComponent(selectedInvoiceForHistory)}/history`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`history ${r.status}`))))
+      .then((data: HistoryData) => { if (!cancelled) setHistory(data); })
+      .catch(() => { if (!cancelled) setHistory(null); })
+      .finally(() => { if (!cancelled) setHistoryLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedInvoiceForHistory]);
   const [recCards, setRecCards] = useState<RecCard[]>(
     negotiationRecs.map(r => ({ ...r, editAmount: r.suggestedAmount, status: "pending" as const }))
   );
@@ -260,7 +291,16 @@ export default function DashboardScreen({ initialClients, initialClientInvoices 
       </div>
 
       {selectedInvoiceForHistory && (
-        <ExchangeDrawer invoiceId={selectedInvoiceForHistory} onClose={() => setSelectedInvoiceForHistory(null)} />
+        <ExchangeDrawer
+          invoiceId={selectedInvoiceForHistory}
+          clientName={allInvoices.find((inv) => inv.id === selectedInvoiceForHistory)?.clientName}
+          voiceCalls={history?.voiceCalls}
+          communications={history?.communications}
+          transactions={history?.transactions}
+          balanceEvents={history?.balanceEvents}
+          loading={historyLoading}
+          onClose={() => setSelectedInvoiceForHistory(null)}
+        />
       )}
     </div>
   );
