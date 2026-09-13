@@ -601,7 +601,7 @@ async function handleChargeRefunded(charge: Record<string, unknown>, eventId: st
 // transition out of a terminal state. The audit_log dedup (same pattern the
 // subscription/refund handlers use) makes a redelivered Stripe event a no-op.
 
-function isFeeSettlementInvoice(object: Record<string, unknown>): boolean {
+export function isFeeSettlementInvoice(object: Record<string, unknown>): boolean {
   const meta = object["metadata"] as Record<string, unknown> | undefined;
   return meta?.["kind"] === "fee_settlement";
 }
@@ -627,7 +627,7 @@ async function settlementEventAlreadyReconciled(
   );
 }
 
-async function handleSettlementInvoicePaid(object: Record<string, unknown>, eventId: string) {
+export async function handleSettlementInvoicePaid(object: Record<string, unknown>, eventId: string) {
   const supabase = getSupabase();
   const settlementId = settlementIdFromInvoice(object);
   const invoiceId = typeof object["id"] === "string" ? (object["id"] as string) : null;
@@ -672,7 +672,7 @@ async function handleSettlementInvoicePaid(object: Record<string, unknown>, even
   });
 }
 
-async function handleSettlementInvoiceFailed(object: Record<string, unknown>, eventId: string) {
+export async function handleSettlementInvoiceFailed(object: Record<string, unknown>, eventId: string) {
   const supabase = getSupabase();
   const settlementId = settlementIdFromInvoice(object);
   const invoiceId = typeof object["id"] === "string" ? (object["id"] as string) : null;
