@@ -603,6 +603,104 @@ export type Database = {
         }
         Relationships: []
       }
+      fee_settlement_lines: {
+        Row: {
+          created_at: string
+          fee_cents: number
+          id: string
+          ledger_row_id: string
+          settlement_id: string
+        }
+        Insert: {
+          created_at?: string
+          fee_cents: number
+          id?: string
+          ledger_row_id: string
+          settlement_id: string
+        }
+        Update: {
+          created_at?: string
+          fee_cents?: number
+          id?: string
+          ledger_row_id?: string
+          settlement_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fee_settlement_lines_ledger_row_id_fkey"
+            columns: ["ledger_row_id"]
+            isOneToOne: false
+            referencedRelation: "rev_share_ledger"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fee_settlement_lines_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "fee_settlements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fee_settlements: {
+        Row: {
+          attempts: number
+          created_at: string
+          currency: string
+          cycle_close: string
+          id: string
+          last_error: string | null
+          line_count: number
+          max_attempts: number
+          status: string
+          stripe_idempotency_key: string | null
+          stripe_invoice_id: string | null
+          subscriber_id: string
+          total_fee_cents: number
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          currency?: string
+          cycle_close: string
+          id?: string
+          last_error?: string | null
+          line_count?: number
+          max_attempts?: number
+          status?: string
+          stripe_idempotency_key?: string | null
+          stripe_invoice_id?: string | null
+          subscriber_id: string
+          total_fee_cents?: number
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          currency?: string
+          cycle_close?: string
+          id?: string
+          last_error?: string | null
+          line_count?: number
+          max_attempts?: number
+          status?: string
+          stripe_idempotency_key?: string | null
+          stripe_invoice_id?: string | null
+          subscriber_id?: string
+          total_fee_cents?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fee_settlements_subscriber_id_fkey"
+            columns: ["subscriber_id"]
+            isOneToOne: false
+            referencedRelation: "subscribers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoice_cadence_progress: {
         Row: {
           cadence_id: string
