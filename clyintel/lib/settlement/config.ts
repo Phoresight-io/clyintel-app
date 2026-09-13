@@ -27,6 +27,14 @@ export const CHARGING_ENABLED_KEY = "settlement_charging_enabled";
 /** Stripe's USD card minimum is 50¢; used when settlement_min_charge_cents is unset. */
 export const DEFAULT_MIN_CHARGE_CENTS = 50;
 
+// The monthly settlement sweep bills ONLY sources whose rev-share fee is NOT
+// collected at capture time. 'qbo' fees are collected solely by this sweep.
+// 'stripe_recovery' collects its fee at capture via Stripe application_fee_amount
+// and is ALREADY SETTLED — it must NEVER appear here or the customer is double-billed.
+// Polarity is OPT-IN: a source not listed here is excluded from the sweep. When adding
+// a new capture source, answer "is its fee collected at capture?" — if yes, do NOT add it.
+export const SWEEP_BILLABLE_SOURCES = ["qbo"] as const;
+
 // Minimal typed reader — returns the raw jsonb value or null when the key is
 // absent. Uses a permissive client type so tests can inject a stub.
 async function readValue(

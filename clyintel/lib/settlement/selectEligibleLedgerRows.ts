@@ -10,7 +10,9 @@
 //                                                                   -- (void releases lines)
 //   • subscriber subscription_status = 'active'
 //   • subscriber test_user = false           (live; PREVIEW may include test users)
-//   • source-agnostic (qbo + stripe_recovery both land here — no source filter)
+//   • source IN SWEEP_BILLABLE_SOURCES (opt-in allowlist: bill only sources whose
+//     fee is NOT collected at capture — 'qbo' only today; 'stripe_recovery' is
+//     already settled via its Stripe application_fee and MUST be excluded here)
 //
 // Uses the service-role client (cross-subscriber; rev_share_ledger is
 // service-role-write, and this reads across every subscriber). PostgREST can't
@@ -30,6 +32,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabase } from "@/lib/supabase";
 import type { EligibleLedgerRow } from "./computeSettlements";
+import { SWEEP_BILLABLE_SOURCES } from "./config";
 
 /** PostgREST per-response row cap; each read pages in windows of this size. */
 export const PAGE = 1000;
@@ -94,7 +97,8 @@ export async function selectEligibleLedgerRows(
   );
   const linkedRowIds = new Set(linked.map((l) => l.ledger_row_id));
 
-  // 3. Ledger rows accrued on/before the boundary (source-agnostic) — all pages.
+  // 3. Ledger rows accrued on/before the boundary, restricted to sweep-billable
+  //    sources (opt-in allowlist; excludes capture-time-settled sources) — all pages.
   type LedgerRow = {
     id: string;
     subscriber_id: string;
@@ -108,6 +112,7 @@ export async function selectEligibleLedgerRows(
         .from("rev_share_ledger")
         .select("id, subscriber_id, fee_amount, cycle_close, source")
         .lte("cycle_close", boundary)
+        .in("source", [...SWEEP_BILLABLE_SOURCES])
         .order("id", { ascending: true })
         .range(from, to),
     "rev_share_ledger",
