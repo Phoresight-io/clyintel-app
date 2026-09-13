@@ -65,7 +65,7 @@ const summarize = (p: SettlementPlan): PlanSummary => ({
 
 export async function runSettlementSweep(
   options: RunSweepOptions = {},
-  service: Pick<SupabaseClient, "from"> = getSupabase(),
+  service: Pick<SupabaseClient, "from" | "rpc"> = getSupabase(),
 ): Promise<RunSweepResult> {
   const dryRun = options.dryRun ?? true;
   const boundary =

@@ -1786,7 +1786,21 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      persist_fee_settlement: {
+        Args: {
+          p_currency: string
+          p_cycle_close: string
+          p_line_count: number
+          p_lines: Json
+          p_stripe_idempotency_key: string
+          p_subscriber_id: string
+          p_total_fee_cents: number
+        }
+        Returns: {
+          created: boolean
+          settlement_id: string
+        }[]
+      }
     }
     Enums: {
       billing_path: "revenue_share"

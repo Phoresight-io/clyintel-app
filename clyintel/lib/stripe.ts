@@ -39,17 +39,19 @@ function encode(params: Record<string, unknown>): string {
 async function stripeRequest<T>(
   path: string,
   method: "GET" | "POST",
-  params?: Record<string, unknown>
+  params?: Record<string, unknown>,
+  opts?: { idempotencyKey?: string }
 ): Promise<T> {
   const base = `${STRIPE_API}${path}`;
   const url = method === "GET" && params ? `${base}?${encode(params)}` : base;
-  const init: RequestInit = {
-    method,
-    headers: {
-      Authorization: `Bearer ${getKey()}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${getKey()}`,
+    "Content-Type": "application/x-www-form-urlencoded",
   };
+  // Idempotency-Key makes a POST safe to retry: Stripe replays the original
+  // response instead of creating a second object (invoice / invoice item).
+  if (opts?.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
+  const init: RequestInit = { method, headers };
   if (method === "POST" && params) init.body = encode(params);
 
   const res = await fetch(url, init);
@@ -291,4 +293,74 @@ export async function createRecoveryCheckoutSession(
   }
 
   return { ok: true, url: session.url, sessionId: session.id };
+}
+
+// ── Fee-settlement invoicing (Monthly Settlement Sweep) ──────────────────────
+// Charge a subscriber for rev-share fees already accrued, via a Stripe Invoice on
+// their own customer (NOT Connect — this is the platform billing the subscriber).
+// Same hand-rolled fetch style; no `stripe` npm package. Each call takes an
+// Idempotency-Key so a retried settlement never creates a duplicate invoice/item
+// or double-charges.
+//
+// Flow (see lib/settlement/chargeSettlement.ts): createInvoice (draft) →
+// addInvoiceItem per fee_settlement_line (bound to that invoice) → finalizeInvoice
+// → payInvoice. Amounts are integer cents; currency is lowercase ISO (Stripe).
+
+export interface StripeInvoice {
+  id: string;
+  status: string; // draft | open | paid | uncollectible | void
+  paid?: boolean;
+  amount_due?: number;
+  total?: number;
+}
+
+// Draft invoice on the customer. charge_automatically = Stripe attempts payment
+// against the customer's default source when finalized/paid. auto_advance=false
+// so WE drive finalize+pay explicitly (no surprise async collection).
+export async function createInvoice(
+  customerId: string,
+  idempotencyKey: string
+): Promise<StripeInvoice> {
+  return stripeRequest<StripeInvoice>(
+    "/invoices",
+    "POST",
+    { customer: customerId, collection_method: "charge_automatically", auto_advance: false },
+    { idempotencyKey }
+  );
+}
+
+// One line item bound to the draft invoice (pass the invoice id so it can never
+// sweep in unrelated pending items on the customer). `amountCents` is integer
+// minor units; `description` is the subscriber-facing transparency statement.
+export async function addInvoiceItem(args: {
+  customerId: string;
+  invoiceId: string;
+  amountCents: number;
+  currency: string;
+  description: string;
+  idempotencyKey: string;
+}): Promise<{ id: string }> {
+  return stripeRequest<{ id: string }>(
+    "/invoiceitems",
+    "POST",
+    {
+      customer: args.customerId,
+      invoice: args.invoiceId,
+      amount: args.amountCents,
+      currency: args.currency,
+      description: args.description,
+    },
+    { idempotencyKey: args.idempotencyKey }
+  );
+}
+
+// Finalize the draft → an open invoice with a fixed amount_due.
+export async function finalizeInvoice(invoiceId: string): Promise<StripeInvoice> {
+  return stripeRequest<StripeInvoice>(`/invoices/${invoiceId}/finalize`, "POST");
+}
+
+// Attempt payment. On a decline Stripe returns a non-2xx and stripeRequest throws
+// (the caller records it as a failed settlement attempt).
+export async function payInvoice(invoiceId: string): Promise<StripeInvoice> {
+  return stripeRequest<StripeInvoice>(`/invoices/${invoiceId}/pay`, "POST");
 }
