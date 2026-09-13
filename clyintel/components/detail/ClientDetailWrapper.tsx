@@ -3,7 +3,7 @@ import dynamic from "next/dynamic";
 import type { Client, ClientInvoiceSet } from "@/lib/mock-data";
 import type { ClientContactDisplay } from "@/lib/contacts/contactDisplay";
 import type { VoiceCallDisplay } from "@/lib/voice-calls";
-import type { CommunicationDisplay, TransactionDisplay } from "@/lib/data";
+import type { CommunicationDisplay, TransactionDisplay, BalanceEventDisplay } from "@/lib/data";
 
 const DetailScreen = dynamic(() => import("./DetailScreen"), { ssr: false });
 
@@ -14,6 +14,7 @@ export default function ClientDetailWrapper({
   voiceCalls,
   communications,
   transactions,
+  balanceEvents,
 }: {
   client: Client;
   invoiceSet?: ClientInvoiceSet;
@@ -21,6 +22,7 @@ export default function ClientDetailWrapper({
   voiceCalls?: VoiceCallDisplay[];
   communications?: CommunicationDisplay[];
   transactions?: TransactionDisplay[];
+  balanceEvents?: BalanceEventDisplay[];
 }) {
   return (
     <DetailScreen
@@ -30,6 +32,7 @@ export default function ClientDetailWrapper({
       voiceCalls={voiceCalls}
       communications={communications}
       transactions={transactions}
+      balanceEvents={balanceEvents}
     />
   );
 }

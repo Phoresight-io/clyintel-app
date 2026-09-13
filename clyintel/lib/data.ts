@@ -66,6 +66,20 @@ export interface TransactionDisplay {
   payment_amount_cents: number | null;
 }
 
+// A balance-decrease event on an invoice (an off-Stripe payment, e.g. detected
+// from QBO). `delta_cents` is new_outstanding - prev_outstanding (negative for a
+// payment); callers display its magnitude. invoice_number is joined for matching.
+export interface BalanceEventDisplay {
+  id: string;
+  invoice_id: string;
+  invoice_number: string | null;
+  source: string;
+  delta_cents: number;
+  prev_outstanding_cents: number;
+  new_outstanding_cents: number;
+  detected_at: string;
+}
+
 // Subscriber row + joined plan.
 export async function getSubscriber(userId: string): Promise<SubscriberWithPlan | null> {
   const supabase = getSupabase();
@@ -331,6 +345,46 @@ export async function getInvoicePaymentsByClient(
       payment_amount_cents: payment?.amount_cents ?? null,
     };
   });
+}
+
+// Off-Stripe payments for a client's invoices, detected as invoice balance
+// decreases (e.g. QBO). balance_events carries subscriber_id directly; ownership
+// is additionally enforced through the invoices!inner embed. Only rows where the
+// outstanding balance dropped (new < prev) count as a payment. Newest first;
+// fail closed → [].
+export async function getBalanceEventsByClient(
+  userId: string,
+  clientId: string,
+): Promise<BalanceEventDisplay[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("balance_events")
+    .select(
+      "id, invoice_id, source, prev_outstanding_cents, new_outstanding_cents, delta_cents, detected_at, invoice:invoices!inner(client_id, subscriber_id, invoice_number)",
+    )
+    .eq("subscriber_id", userId)
+    .eq("invoice.client_id", clientId)
+    .eq("invoice.subscriber_id", userId)
+    .order("detected_at", { ascending: false });
+  if (error) {
+    console.error("getBalanceEventsByClient error", error);
+    return [];
+  }
+  return (data ?? [])
+    .filter((r) => r.new_outstanding_cents < r.prev_outstanding_cents)
+    .map((r) => {
+      const invoice = Array.isArray(r.invoice) ? r.invoice[0] : r.invoice;
+      return {
+        id: r.id,
+        invoice_id: r.invoice_id,
+        invoice_number: invoice?.invoice_number ?? null,
+        source: r.source,
+        delta_cents: r.delta_cents,
+        prev_outstanding_cents: r.prev_outstanding_cents,
+        new_outstanding_cents: r.new_outstanding_cents,
+        detected_at: r.detected_at,
+      };
+    });
 }
 
 // Recovery history for a single invoice (scoped to subscriber).

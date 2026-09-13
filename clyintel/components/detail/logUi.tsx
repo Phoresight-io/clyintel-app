@@ -138,6 +138,22 @@ export function fmtDay(value: string | null): string {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
+// Compact exchange-timeline stamp matching the design sample, e.g. "3/8/26 11:15 AM".
+export function fmtExchangeTs(value: string | null): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "—";
+  const mo = d.getMonth() + 1;
+  const day = d.getDate();
+  const yy = String(d.getFullYear()).slice(2);
+  let h = d.getHours();
+  const min = String(d.getMinutes()).padStart(2, "0");
+  const ampm = h >= 12 ? "PM" : "AM";
+  h = h % 12;
+  if (h === 0) h = 12;
+  return `${mo}/${day}/${yy} ${h}:${min} ${ampm}`;
+}
+
 // Seconds → "m:ss".
 export function fmtDuration(seconds: number | null): string {
   if (seconds === null || seconds === undefined || isNaN(seconds)) return "—";

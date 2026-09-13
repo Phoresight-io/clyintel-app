@@ -5,7 +5,7 @@ import { C } from "@/lib/theme";
 import type { Client, NegotiationRec, ClientInvoiceSet } from "@/lib/mock-data";
 import type { ClientContactDisplay } from "@/lib/contacts/contactDisplay";
 import type { VoiceCallDisplay } from "@/lib/voice-calls";
-import type { CommunicationDisplay, TransactionDisplay } from "@/lib/data";
+import type { CommunicationDisplay, TransactionDisplay, BalanceEventDisplay } from "@/lib/data";
 import type { Database } from "@/types/supabase";
 import { createSupabaseBrowser } from "@/lib/supabase-browser";
 import ExchangeDrawer from "@/components/shared/ExchangeDrawer";
@@ -148,6 +148,7 @@ interface Props {
   voiceCalls?: VoiceCallDisplay[];
   communications?: CommunicationDisplay[];
   transactions?: TransactionDisplay[];
+  balanceEvents?: BalanceEventDisplay[];
 }
 
 export default function DetailScreen({
@@ -157,6 +158,7 @@ export default function DetailScreen({
   voiceCalls,
   communications,
   transactions,
+  balanceEvents,
 }: Props) {
   const realMode = invoiceSet !== undefined;
   // Mock data flushed (D2 closeout): real invoice set when present, else empty.
@@ -436,7 +438,9 @@ export default function DetailScreen({
       {selectedInvoiceForExchanges && (
         <ExchangeDrawer
           invoiceId={selectedInvoiceForExchanges}
+          clientName={client.name}
           transactions={(transactions ?? []).filter((t) => (t.invoice_number ?? t.invoice_id) === selectedInvoiceForExchanges)}
+          balanceEvents={(balanceEvents ?? []).filter((b) => (b.invoice_number ?? b.invoice_id) === selectedInvoiceForExchanges)}
           communications={(communications ?? []).filter((c) => (c.invoice_number ?? c.invoice_id) === selectedInvoiceForExchanges)}
           voiceCalls={(voiceCalls ?? []).filter((v) => (v.invoice_number ?? v.invoice_id) === selectedInvoiceForExchanges)}
           onClose={() => setSelectedInvoiceForExchanges(null)}

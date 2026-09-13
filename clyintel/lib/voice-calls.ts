@@ -24,12 +24,14 @@ export interface VoiceCallDisplay {
   committed_amount: number | null;
   committed_date: string | null;
   created_at: string;
+  started_at: string | null;
   ended_at: string | null;
+  to_number: string | null;
   invoice_number: string | null;
 }
 
 const VOICE_CALL_SELECT =
-  "id, invoice_id, status, outcome, ended_reason, transcript, summary, recording_url, duration_seconds, cost_usd, payment_committed, committed_amount, committed_date, created_at, ended_at, invoice:invoices(invoice_number)";
+  "id, invoice_id, status, outcome, ended_reason, transcript, summary, recording_url, duration_seconds, cost_usd, payment_committed, committed_amount, committed_date, created_at, started_at, ended_at, to_number, invoice:invoices(invoice_number)";
 
 // Voice calls for an invoice and/or a client, newest first. Both filters are
 // optional; pass whichever is relevant. RLS restricts rows to the caller.
@@ -65,7 +67,9 @@ export async function getVoiceCalls(
       committed_amount: row.committed_amount,
       committed_date: row.committed_date,
       created_at: row.created_at,
+      started_at: row.started_at,
       ended_at: row.ended_at,
+      to_number: row.to_number,
       invoice_number: invoice?.invoice_number ?? null,
     };
   });

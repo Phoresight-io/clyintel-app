@@ -8,6 +8,7 @@ import {
   getClientContacts,
   getCommunicationsByClient,
   getInvoicePaymentsByClient,
+  getBalanceEventsByClient,
 } from "@/lib/data";
 import { getVoiceCalls } from "@/lib/voice-calls";
 import { toUIClient, toUIClientInvoiceSet } from "@/lib/adapters";
@@ -34,13 +35,14 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
     // getClient already proved ownership; getClientContacts also self-scopes by
     // the client's subscriber_id, so it's safe alongside the other per-client reads.
-    const [invoices, ptr, contacts, voiceCalls, communications, transactions] = await Promise.all([
+    const [invoices, ptr, contacts, voiceCalls, communications, transactions, balanceEvents] = await Promise.all([
       getInvoicesByClient(user.id, id),
       getPtrScores(user.id, id),
       getClientContacts(user.id, id),
       getVoiceCalls({ clientId: id }),
       getCommunicationsByClient(user.id, id),
       getInvoicePaymentsByClient(user.id, id),
+      getBalanceEventsByClient(user.id, id),
     ]);
     const uiClient = toUIClient(client, ptr, invoices);
     const invoiceSet = toUIClientInvoiceSet(invoices);
@@ -54,6 +56,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           voiceCalls={voiceCalls}
           communications={communications}
           transactions={transactions}
+          balanceEvents={balanceEvents}
         />
       </Suspense>
     );
