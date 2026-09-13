@@ -6,18 +6,26 @@ type Result = { data: unknown; error: unknown };
 /**
  * Recording Supabase stub. from(table) returns a chainable, thenable builder;
  * chain methods record their call and return the builder; awaiting yields the
- * next queued Result for that table (FIFO). Filters don't actually run — canned
- * results stand in for what the DB would return once its SQL filters applied —
- * so behavioural assertions test the in-memory join, and `calls` lets us assert
- * which SQL filters were requested.
+ * next queued Result for that table (FIFO). Most filters don't actually run —
+ * canned results stand in for what the DB would return once its SQL filters
+ * applied — so behavioural assertions test the in-memory join, and `calls` lets
+ * us assert which SQL filters were requested. EXCEPTION: `.in(column, values)`
+ * IS honored (the queued data is filtered to rows whose column value is in the
+ * set), so the source allowlist predicate is genuinely exercised rather than
+ * assumed — a source filter left OUT of the query would surface as excluded rows
+ * still appearing in the result.
  */
 function makeFake(queues: Record<string, Result[]>) {
   const calls: { table: string; method: string; args: unknown[] }[] = [];
   const from = (table: string) => {
     const builder: Record<string, unknown> = {};
+    const inPredicates: { column: string; values: unknown[] }[] = [];
     for (const m of ["select", "eq", "lte", "not", "in", "upsert", "single", "maybeSingle", "order", "range"]) {
       builder[m] = (...args: unknown[]) => {
         calls.push({ table, method: m, args });
+        if (m === "in" && typeof args[0] === "string" && Array.isArray(args[1])) {
+          inPredicates.push({ column: args[0] as string, values: args[1] as unknown[] });
+        }
         return builder;
       };
     }
@@ -26,7 +34,16 @@ function makeFake(queues: Record<string, Result[]>) {
       if (!q || q.length === 0) {
         return Promise.reject(new Error(`no queued result for ${table}`)).then(onF, onR);
       }
-      return Promise.resolve(q.shift() as Result).then(onF, onR);
+      const result = q.shift() as Result;
+      // Honor .in(column, values) so an allowlist predicate is actually applied,
+      // mirroring what the DB would return post-filter.
+      let data = result.data;
+      if (Array.isArray(data) && inPredicates.length > 0) {
+        data = (data as Record<string, unknown>[]).filter((row) =>
+          inPredicates.every((p) => p.values.includes(row[p.column])),
+        );
+      }
+      return Promise.resolve({ ...result, data } as Result).then(onF, onR);
     };
     return builder;
   };
@@ -62,22 +79,40 @@ describe("selectEligibleLedgerRows", () => {
     ]);
   });
 
-  it("is source-agnostic (qbo + stripe_recovery both eligible)", async () => {
-    const { client } = makeFake({
+  it("bills only sweep-billable sources: qbo kept, stripe_recovery + unknown source excluded", async () => {
+    const { client, calls } = makeFake({
       subscribers: [{ data: [{ id: "subA" }], error: null }],
       fee_settlement_lines: [{ data: [], error: null }],
       rev_share_ledger: [
         {
           data: [
             { id: "l1", subscriber_id: "subA", fee_amount: 1.0, cycle_close: "2026-08-01", source: "qbo" },
+            // Fee already collected at capture via Stripe application_fee — billing it
+            // here would double-charge the customer.
             { id: "l2", subscriber_id: "subA", fee_amount: 2.0, cycle_close: "2026-08-01", source: "stripe_recovery" },
+            // Not on the allowlist — proves OPT-IN polarity (absent ⇒ excluded).
+            { id: "l3", subscriber_id: "subA", fee_amount: 3.0, cycle_close: "2026-08-01", source: "some_future_source" },
           ],
           error: null,
         },
       ],
     });
     const rows = await selectEligibleLedgerRows({ boundary: BOUNDARY }, client);
-    expect(rows.map((r) => r.source).sort()).toEqual(["qbo", "stripe_recovery"]);
+
+    // Only the qbo row survives: stripe_recovery is the double-bill guard; the
+    // unknown source is excluded by opt-in polarity.
+    expect(rows.map((r) => r.id)).toEqual(["l1"]);
+    expect(rows.map((r) => r.source)).toEqual(["qbo"]);
+    // The exclusion is a server-side predicate on the ledger query (not in-memory).
+    expect(
+      calls.some(
+        (c) =>
+          c.table === "rev_share_ledger" &&
+          c.method === "in" &&
+          c.args[0] === "source" &&
+          JSON.stringify(c.args[1]) === JSON.stringify(["qbo"]),
+      ),
+    ).toBe(true);
   });
 
   it("live (default): filters subscribers by test_user = false and ledger by cycle_close <= boundary", async () => {
