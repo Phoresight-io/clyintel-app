@@ -2,29 +2,20 @@
 //
 // Writes one fee_settlements row (status 'pending') per BILLABLE plan plus its
 // fee_settlement_lines. NO Stripe here — status stays 'pending'; charging is
-// Prompt 3.
+// Prompt 3's chargeSettlement.
 //
-// Idempotency rests on the two unique guards from the schema, used with
-// ON CONFLICT DO NOTHING (supabase-js upsert + ignoreDuplicates):
-//   • unique (subscriber_id, cycle_close) on fee_settlements  — one settlement per
-//     subscriber per cycle. A repeat run conflicts and inserts nothing.
-//   • unique (ledger_row_id) on fee_settlement_lines          — a ledger row links
-//     to at most one settlement, so a repeat run neither duplicates nor
-//     double-links.
-// A newly-created settlement gets its lines written in the same call; an
-// already-existing settlement is left untouched (we never mutate a settlement's
-// lines/total after creation — that keeps sum(lines) == total_fee_cents and is
-// safe once Prompt 3 advances a settlement past 'pending'). Because selection
-// only returns UNLINKED rows, the normal re-run re-selects nothing for an
-// already-settled cycle. There is no cross-statement transaction (supabase-js
-// has none); Prompt 3 must reconcile sum(fee_cents) == total_fee_cents before
-// charging, which also catches the rare create-settlement-then-crash window.
+// ATOMIC: delegates to the plpgsql RPC public.persist_fee_settlement, which does
+// the settlement insert AND the line inserts in ONE transaction (honoring
+// unique(subscriber_id, cycle_close) and unique(ledger_row_id) with ON CONFLICT
+// DO NOTHING). This replaces Prompt 2's two-call upsert, closing the
+// "settlement created, crash before lines" window. A repeat run is a no-op — the
+// settlement conflict short-circuits and no line is re-linked.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabase } from "@/lib/supabase";
 import type { SettlementPlan } from "./computeSettlements";
 
-/** Deterministic key for the Stripe call in Prompt 3 — stable per subscriber+cycle. */
+/** Deterministic key for the Stripe call — stable per subscriber+cycle. */
 export function settlementIdempotencyKey(subscriberId: string, cycleClose: string): string {
   return `settle_${subscriberId}_${cycleClose}`;
 }
@@ -40,90 +31,45 @@ export interface PersistedSettlement {
 
 export async function persistSettlements(
   plans: readonly SettlementPlan[],
-  service: Pick<SupabaseClient, "from"> = getSupabase(),
+  service: Pick<SupabaseClient, "rpc"> = getSupabase(),
 ): Promise<PersistedSettlement[]> {
   const results: PersistedSettlement[] = [];
 
   for (const plan of plans) {
-    // 1. Create the settlement (ON CONFLICT (subscriber_id, cycle_close) DO NOTHING).
-    const settlementRow = {
-      subscriber_id: plan.subscriberId,
-      cycle_close: plan.cycleClose,
-      total_fee_cents: plan.totalFeeCents,
-      currency: "USD",
-      status: "pending",
-      line_count: plan.lineCount,
-      stripe_idempotency_key: settlementIdempotencyKey(plan.subscriberId, plan.cycleClose),
-    };
-
-    const { data: inserted, error: insErr } = await service
-      .from("fee_settlements")
-      .upsert(settlementRow, {
-        onConflict: "subscriber_id,cycle_close",
-        ignoreDuplicates: true,
-      })
-      .select("id");
-    if (insErr) {
+    const { data, error } = await service.rpc("persist_fee_settlement", {
+      p_subscriber_id: plan.subscriberId,
+      p_cycle_close: plan.cycleClose,
+      p_total_fee_cents: plan.totalFeeCents,
+      p_currency: "USD",
+      p_line_count: plan.lineCount,
+      p_stripe_idempotency_key: settlementIdempotencyKey(plan.subscriberId, plan.cycleClose),
+      p_lines: plan.lines.map((l) => ({ ledger_row_id: l.ledgerRowId, fee_cents: l.feeCents })),
+    });
+    if (error) {
       throw new Error(
-        `persistSettlements: settlement upsert failed for subscriber ${plan.subscriberId} ` +
-          `cycle ${plan.cycleClose}: ${insErr.message}`,
+        `persistSettlements: persist_fee_settlement RPC failed for subscriber ${plan.subscriberId} ` +
+          `cycle ${plan.cycleClose}: ${error.message}`,
       );
     }
 
-    const created = Array.isArray(inserted) && inserted.length > 0;
-
-    if (!created) {
-      // Already existed (idempotent re-run). Do not touch its lines/total.
-      const { data: existing, error: selErr } = await service
-        .from("fee_settlements")
-        .select("id")
-        .eq("subscriber_id", plan.subscriberId)
-        .eq("cycle_close", plan.cycleClose)
-        .single();
-      if (selErr || !existing) {
-        throw new Error(
-          `persistSettlements: conflict on (${plan.subscriberId}, ${plan.cycleClose}) but ` +
-            `existing-row lookup failed: ${selErr?.message ?? "no row"}`,
-        );
-      }
-      results.push({
-        subscriberId: plan.subscriberId,
-        cycleClose: plan.cycleClose,
-        settlementId: (existing as { id: string }).id,
-        created: false,
-        linesInserted: 0,
-      });
-      continue;
-    }
-
-    const settlementId = (inserted as { id: string }[])[0].id;
-
-    // 2. Link the ledger rows (ON CONFLICT (ledger_row_id) DO NOTHING).
-    let linesInserted = 0;
-    if (plan.lines.length > 0) {
-      const lineRows = plan.lines.map((l) => ({
-        settlement_id: settlementId,
-        ledger_row_id: l.ledgerRowId,
-        fee_cents: l.feeCents,
-      }));
-      const { data: insertedLines, error: lineErr } = await service
-        .from("fee_settlement_lines")
-        .upsert(lineRows, { onConflict: "ledger_row_id", ignoreDuplicates: true })
-        .select("id");
-      if (lineErr) {
-        throw new Error(
-          `persistSettlements: line upsert failed for settlement ${settlementId}: ${lineErr.message}`,
-        );
-      }
-      linesInserted = Array.isArray(insertedLines) ? insertedLines.length : 0;
+    // The RPC returns a single { settlement_id, created } row.
+    const row = (Array.isArray(data) ? data[0] : data) as
+      | { settlement_id: string; created: boolean }
+      | undefined;
+    if (!row || !row.settlement_id) {
+      throw new Error(
+        `persistSettlements: persist_fee_settlement returned no row for ` +
+          `${plan.subscriberId}/${plan.cycleClose}`,
+      );
     }
 
     results.push({
       subscriberId: plan.subscriberId,
       cycleClose: plan.cycleClose,
-      settlementId,
-      created: true,
-      linesInserted,
+      settlementId: row.settlement_id,
+      created: row.created,
+      // The RPC links all lines atomically on create; none on a re-run.
+      linesInserted: row.created ? plan.lines.length : 0,
     });
   }
 
