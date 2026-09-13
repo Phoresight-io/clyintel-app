@@ -112,7 +112,11 @@ export interface ChargeLine {
 
 /** Injected Stripe seam so tests never hit the real API. Defaults to lib/stripe.ts. */
 export interface StripeInvoicing {
-  createInvoice(customerId: string, idempotencyKey: string): Promise<{ id: string }>;
+  createInvoice(
+    customerId: string,
+    idempotencyKey: string,
+    metadata?: Record<string, string>,
+  ): Promise<{ id: string }>;
   addInvoiceItem(args: {
     customerId: string;
     invoiceId: string;
@@ -211,7 +215,16 @@ export async function chargeOneSettlement(
   let invoiceId = settlement.stripeInvoiceId;
   if (!invoiceId) {
     try {
-      const invoice = await stripe.createInvoice(customerId, key);
+      // Tag the invoice so the stripe-webhook can tell fee-settlement invoices
+      // apart from subscription invoices and reconcile them to fee_settlements
+      // (metadata.settlement_id), instead of the customer-id fallback treating
+      // this as a subscription payment.
+      const invoice = await stripe.createInvoice(customerId, key, {
+        kind: "fee_settlement",
+        settlement_id: settlement.id,
+        subscriber_id: subscriber.id,
+        cycle_close: settlement.cycleClose,
+      });
       for (const l of lines) {
         await stripe.addInvoiceItem({
           customerId,
@@ -513,10 +526,12 @@ export async function drainSettlements(
   return result;
 }
 
-// TODO(prompt-4-followup): async reconciliation via the existing stripe-webhook
-// route. On invoice.paid / invoice.payment_failed, look up fee_settlements by
-// stripe_invoice_id and move invoiced→paid/failed. Deferred here because that
-// route also serves the subscription-billing rail and would need to disambiguate
-// settlement invoices from subscription invoices — meaningful added scope. The
-// synchronous finalize+pay result above is authoritative for charge_automatically
-// card invoices, which is the current path.
+// Async reconciliation (Prompt 5): the stripe-webhook route now handles
+// invoice.payment_succeeded / invoice.payment_failed for fee-settlement invoices,
+// keyed on the metadata tag set above (metadata.kind === 'fee_settlement',
+// settlement_id). Whichever of this synchronous path and the webhook writes the
+// terminal status first wins; the other is a no-op via the
+// `status not in ('paid','void')` guard. The synchronous finalize+pay result
+// remains authoritative for the common charge_automatically card path; the
+// webhook rescues async/out-of-band outcomes (and the crash-between-finalize-and-
+// write window, filling a NULL stripe_invoice_id).
