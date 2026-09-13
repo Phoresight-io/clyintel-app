@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   chargeOneSettlement,
+  claimForCharge,
   drainSettlements,
   liveChargesAllowed,
   lineDescription,
@@ -152,15 +153,12 @@ describe("chargeOneSettlement — charge flow", () => {
       settlementId: "set1",
       update: { status: "paid", stripe_invoice_id: "in_test1", last_error: null },
     });
-    // Invoice created with the stored idempotency key.
     expect(calls.createInvoice).toEqual([{ customerId: "cus_123", key: "settle_subA_2026-08-15" }]);
-    // One item per line; amounts == fee_cents; per-line idempotency keys.
     expect(calls.addInvoiceItem.map((a) => a.amountCents)).toEqual([333, 111]);
     expect(calls.addInvoiceItem.map((a) => a.idempotencyKey)).toEqual([
       "settle_subA_2026-08-15_line_l1",
       "settle_subA_2026-08-15_line_l2",
     ]);
-    // Invoice-item amounts reconcile to total_fee_cents exactly.
     expect(calls.addInvoiceItem.reduce((s, a) => s + a.amountCents, 0)).toBe(444);
     expect(calls.finalizeInvoice).toEqual(["in_test1"]);
     expect(calls.payInvoice).toEqual(["in_test1"]);
@@ -192,31 +190,70 @@ describe("chargeOneSettlement — charge flow", () => {
   });
 });
 
-// ── drainSettlements (DB-wired) ───────────────────────────────────────────────
+// ── claimForCharge (single-flight compare-and-set) ────────────────────────────
 type Result = { data: unknown; error: unknown };
+
+describe("claimForCharge", () => {
+  function makeClaimFake(result: Result) {
+    const rec: { payload?: Record<string, unknown>; eqCol?: string; eqVal?: unknown; or?: string } = {};
+    const b: Record<string, unknown> = {};
+    b.update = (p: Record<string, unknown>) => { rec.payload = p; return b; };
+    b.eq = (c: string, v: unknown) => { rec.eqCol = c; rec.eqVal = v; return b; };
+    b.or = (e: string) => { rec.or = e; return b; };
+    b.select = () => b;
+    b.then = (onF: (v: Result) => unknown, onR?: (e: unknown) => unknown) =>
+      Promise.resolve(result).then(onF, onR);
+    return { client: { from: () => b } as never, rec };
+  }
+
+  it("true when the compare-and-set matched a row; issues the right update + predicate", async () => {
+    const { client, rec } = makeClaimFake({ data: [{ id: "set1" }], error: null });
+    const ok = await claimForCharge(client, "set1", Date.UTC(2026, 8, 13, 9, 0, 0));
+    expect(ok).toBe(true);
+    expect(rec.payload).toMatchObject({ status: "charging" });
+    expect(typeof rec.payload!.claimed_at).toBe("string");
+    expect(rec.eqCol).toBe("id");
+    expect(rec.eqVal).toBe("set1");
+    expect(rec.or).toContain("status.eq.pending");
+    expect(rec.or).toContain("status.eq.failed");
+    expect(rec.or).toMatch(/claimed_at\.lt\./);
+  });
+
+  it("false when no row matched (another run already claimed it)", async () => {
+    const { client } = makeClaimFake({ data: [], error: null });
+    expect(await claimForCharge(client, "set1")).toBe(false);
+  });
+});
+
+// ── drainSettlements (DB-wired, claim-aware stateful stub) ────────────────────
 function makeDb(tables: {
   app_config?: { value: unknown };
-  fee_settlements?: unknown[];
+  fee_settlements?: Record<string, unknown>[];
   subscribers?: unknown[];
   fee_settlement_lines?: unknown[];
   rev_share_ledger?: unknown[];
 }) {
-  const updates: { id: unknown; payload: Record<string, unknown> }[] = [];
+  const updates: { id: unknown; payload: Record<string, unknown>; kind: string }[] = [];
+  // Stateful fee_settlements so the claim compare-and-set is real.
+  const feeRows = new Map((tables.fee_settlements ?? []).map((r) => [r.id as string, { ...r }]));
+
   const from = (table: string) => {
-    const b: Record<string, unknown> = { _upd: false, _payload: undefined, _eqId: undefined };
-    b.select = () => b;
+    const b: Record<string, unknown> = { _upd: false, _sel: false, _payload: undefined, _eqId: undefined, _or: undefined };
+    b.select = () => { b._sel = true; return b; };
     b.in = () => b;
     b.limit = () => b;
-    b.eq = (col: string, val: unknown) => { if (b._upd) b._eqId = val; return b; };
+    b.eq = (col: string, val: unknown) => { if (col === "id") b._eqId = val; return b; };
+    b.or = (expr: string) => { b._or = expr; return b; };
     b.update = (payload: Record<string, unknown>) => { b._upd = true; b._payload = payload; return b; };
     b.maybeSingle = () => b;
     b.then = (onF: (v: Result) => unknown, onR?: (e: unknown) => unknown) => {
       let res: Result;
       if (b._upd) {
-        updates.push({ id: b._eqId, payload: b._payload as Record<string, unknown> });
-        res = { data: null, error: null };
+        res = resolveUpdate(b);
       } else if (table === "app_config") {
         res = { data: tables.app_config ?? null, error: null };
+      } else if (table === "fee_settlements") {
+        res = { data: [...feeRows.values()], error: null };
       } else {
         res = { data: (tables as Record<string, unknown[]>)[table] ?? [], error: null };
       }
@@ -224,100 +261,191 @@ function makeDb(tables: {
     };
     return b;
   };
-  return { client: { from } as never, updates };
+
+  function resolveUpdate(b: Record<string, unknown>): Result {
+    const id = b._eqId as string;
+    const payload = b._payload as Record<string, unknown>;
+    const row = feeRows.get(id);
+    const isClaim = payload?.status === "charging" && b._sel === true;
+    if (isClaim) {
+      const cutoff = /claimed_at\.lt\.([^,)]+)/.exec((b._or as string) ?? "")?.[1] ?? null;
+      const claimable =
+        !!row &&
+        (row.status === "pending" ||
+          row.status === "failed" ||
+          (row.status === "charging" && cutoff !== null && (row.claimed_at == null || (row.claimed_at as string) < cutoff)));
+      if (claimable && row) {
+        row.status = "charging";
+        row.claimed_at = payload.claimed_at;
+        updates.push({ id, payload, kind: "claim" });
+        return { data: [{ id }], error: null };
+      }
+      return { data: [], error: null };
+    }
+    if (row) Object.assign(row, payload);
+    updates.push({ id, payload, kind: "mark" });
+    return { data: null, error: null };
+  }
+
+  return { client: { from } as never, updates, feeRows };
 }
 
-describe("drainSettlements — gates", () => {
-  it("forced dry-run when the kill-switch is off (default dryRun): no Stripe, no DB writes", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
-    vi.stubEnv("STRIPE_SECRET_KEY", "sk_live_x");
-    const { client, updates } = makeDb({
-      app_config: { value: false }, // kill-switch OFF
-      fee_settlements: [
-        { id: "set1", subscriber_id: "subA", cycle_close: "2026-08-15", total_fee_cents: 444, line_count: 2, status: "pending", attempts: 0, max_attempts: 5, stripe_invoice_id: null, stripe_idempotency_key: "settle_subA_2026-08-15" },
-      ],
-      subscribers: [{ id: "subA", subscription_status: "active", test_user: false, stripe_customer_id: "cus_1" }],
-      fee_settlement_lines: [
-        { settlement_id: "set1", ledger_row_id: "l1", fee_cents: 333 },
-        { settlement_id: "set1", ledger_row_id: "l2", fee_cents: 111 },
-      ],
-      rev_share_ledger: [
-        { id: "l1", invoice_ref: "145", invoice_number: "1038", dollars_recovered: 3900, band: "band1", rate: 0.22 },
-        { id: "l2", invoice_ref: "146", invoice_number: null, dollars_recovered: 500, band: "band1", rate: 0.22 },
-      ],
-    });
+const feeRow = (over: Record<string, unknown> = {}) => ({
+  id: "set1",
+  subscriber_id: "subA",
+  cycle_close: "2026-08-15",
+  total_fee_cents: 444,
+  line_count: 2,
+  status: "pending",
+  attempts: 0,
+  max_attempts: 5,
+  stripe_invoice_id: null,
+  stripe_idempotency_key: "settle_subA_2026-08-15",
+  claimed_at: null,
+  ...over,
+});
+const subRow = (over: Record<string, unknown> = {}) => ({
+  id: "subA",
+  subscription_status: "active",
+  test_user: false,
+  stripe_customer_id: "cus_1",
+  ...over,
+});
+const LINE_ROWS = [
+  { settlement_id: "set1", ledger_row_id: "l1", fee_cents: 333 },
+  { settlement_id: "set1", ledger_row_id: "l2", fee_cents: 111 },
+];
+const LEDGER_ROWS = [
+  { id: "l1", invoice_ref: "145", invoice_number: "1038", dollars_recovered: 3900, band: "band1", rate: 0.22 },
+  { id: "l2", invoice_ref: "146", invoice_number: null, dollars_recovered: 500, band: "band1", rate: 0.22 },
+];
+const prodLive = () => {
+  vi.stubEnv("VERCEL_ENV", "production");
+  vi.stubEnv("STRIPE_SECRET_KEY", "sk_live_x");
+};
+const marks = (updates: { kind: string; payload: Record<string, unknown> }[]) =>
+  updates.filter((u) => u.kind === "mark");
 
+describe("drainSettlements — gates & flags", () => {
+  it("charging flag OFF (default dryRun) → forced dry-run: no Stripe, no writes", async () => {
+    prodLive();
+    const { client, updates } = makeDb({
+      app_config: { value: false }, // settlement_charging_enabled = false
+      fee_settlements: [feeRow()],
+      subscribers: [subRow()],
+      fee_settlement_lines: LINE_ROWS,
+      rev_share_ledger: LEDGER_ROWS,
+    });
     const res = await drainSettlements({}, client, neverCallStripe); // dryRun defaults true
     expect(res.charging).toBe(false);
     expect(res.candidates).toBe(1);
     expect(res.charged).toBe(0);
-    expect(updates).toHaveLength(0); // nothing written
+    expect(updates).toHaveLength(0);
     expect(res.outcomes[0]).toMatchObject({ action: "dry_run" });
   });
 
-  it("does not select a dead-lettered settlement (failed with attempts == max_attempts)", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
-    vi.stubEnv("STRIPE_SECRET_KEY", "sk_live_x");
-    const { client } = makeDb({
-      app_config: { value: true },
-      fee_settlements: [
-        { id: "dead", subscriber_id: "subA", cycle_close: "2026-08-15", total_fee_cents: 100, line_count: 1, status: "failed", attempts: 5, max_attempts: 5, stripe_invoice_id: "in_x", stripe_idempotency_key: "k" },
-      ],
-      subscribers: [{ id: "subA", subscription_status: "active", test_user: false, stripe_customer_id: "cus_1" }],
-    });
-    const res = await drainSettlements({ dryRun: false }, client, neverCallStripe);
-    expect(res.candidates).toBe(0); // dead-letter excluded → Stripe never touched
-  });
-
-  it("charging path: decline bumps attempts and dead-letters at max_attempts", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
-    vi.stubEnv("STRIPE_SECRET_KEY", "sk_live_x");
-    const { client, updates } = makeDb({
-      app_config: { value: true }, // kill-switch ON
-      fee_settlements: [
-        // attempts 4, max 5 → retryable; a decline makes attempts 5 → dead-letter.
-        { id: "set1", subscriber_id: "subA", cycle_close: "2026-08-15", total_fee_cents: 444, line_count: 2, status: "failed", attempts: 4, max_attempts: 5, stripe_invoice_id: "in_prev", stripe_idempotency_key: "settle_subA_2026-08-15" },
-      ],
-      subscribers: [{ id: "subA", subscription_status: "active", test_user: false, stripe_customer_id: "cus_1" }],
-      fee_settlement_lines: [
-        { settlement_id: "set1", ledger_row_id: "l1", fee_cents: 333 },
-        { settlement_id: "set1", ledger_row_id: "l2", fee_cents: 111 },
-      ],
-      rev_share_ledger: [
-        { id: "l1", invoice_ref: "145", invoice_number: "1038", dollars_recovered: 3900, band: "band1", rate: 0.22 },
-        { id: "l2", invoice_ref: "146", invoice_number: null, dollars_recovered: 500, band: "band1", rate: 0.22 },
-      ],
-    });
-    const declineStripe = makeStripe({ payInvoice: async () => { throw new Error("card_declined"); } }).stripe;
-
-    const res = await drainSettlements({ dryRun: false }, client, declineStripe);
-    expect(res.charging).toBe(true);
-    expect(res.failed).toBe(1);
-    expect(res.outcomes[0]).toMatchObject({ settlementId: "set1", action: "dead_letter" });
-    // attempts written as 5 (==max) → will not be re-selected next run.
-    expect(updates[0].payload).toMatchObject({ status: "failed", attempts: 5 });
-  });
-
-  it("charging path: happy path marks paid + stores stripe_invoice_id", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
-    vi.stubEnv("STRIPE_SECRET_KEY", "sk_live_x");
+  it("charging flag ON + prod + live + dryRun=false → charges, marks paid", async () => {
+    prodLive();
     const { client, updates } = makeDb({
       app_config: { value: true },
-      fee_settlements: [
-        { id: "set1", subscriber_id: "subA", cycle_close: "2026-08-15", total_fee_cents: 444, line_count: 2, status: "pending", attempts: 0, max_attempts: 5, stripe_invoice_id: null, stripe_idempotency_key: "settle_subA_2026-08-15" },
-      ],
-      subscribers: [{ id: "subA", subscription_status: "active", test_user: false, stripe_customer_id: "cus_1" }],
-      fee_settlement_lines: [
-        { settlement_id: "set1", ledger_row_id: "l1", fee_cents: 333 },
-        { settlement_id: "set1", ledger_row_id: "l2", fee_cents: 111 },
-      ],
-      rev_share_ledger: [
-        { id: "l1", invoice_ref: "145", invoice_number: "1038", dollars_recovered: 3900, band: "band1", rate: 0.22 },
-        { id: "l2", invoice_ref: "146", invoice_number: null, dollars_recovered: 500, band: "band1", rate: 0.22 },
-      ],
+      fee_settlements: [feeRow()],
+      subscribers: [subRow()],
+      fee_settlement_lines: LINE_ROWS,
+      rev_share_ledger: LEDGER_ROWS,
     });
     const res = await drainSettlements({ dryRun: false }, client, makeStripe().stripe);
+    expect(res.charging).toBe(true);
     expect(res.charged).toBe(1);
-    expect(updates[0].payload).toMatchObject({ status: "paid", stripe_invoice_id: "in_test1" });
+    expect(marks(updates)[0].payload).toMatchObject({ status: "paid", stripe_invoice_id: "in_test1" });
+  });
+
+  it("charging flag ON but NOT prod/live → forced dry-run, no charge", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_live_x");
+    const { client, updates } = makeDb({
+      app_config: { value: true },
+      fee_settlements: [feeRow()],
+      subscribers: [subRow()],
+      fee_settlement_lines: LINE_ROWS,
+      rev_share_ledger: LEDGER_ROWS,
+    });
+    const res = await drainSettlements({ dryRun: false }, client, neverCallStripe);
+    expect(res.charging).toBe(false);
+    expect(updates).toHaveLength(0);
+  });
+
+  it("test_user is never charged and is not even claimed (no write, no Stripe)", async () => {
+    prodLive();
+    const { client, updates } = makeDb({
+      app_config: { value: true },
+      fee_settlements: [feeRow()],
+      subscribers: [subRow({ test_user: true })],
+      fee_settlement_lines: LINE_ROWS,
+      rev_share_ledger: LEDGER_ROWS,
+    });
+    const res = await drainSettlements({ dryRun: false }, client, neverCallStripe);
+    expect(res.skipped).toBe(1);
+    expect(updates).toHaveLength(0); // never claimed
+    expect(res.outcomes[0]).toMatchObject({ action: "skipped", reason: "test_user" });
+  });
+
+  it("dead-lettered settlement (failed, attempts == max) is not selected", async () => {
+    prodLive();
+    const { client } = makeDb({
+      app_config: { value: true },
+      fee_settlements: [feeRow({ status: "failed", attempts: 5, max_attempts: 5, stripe_invoice_id: "in_x" })],
+      subscribers: [subRow()],
+    });
+    const res = await drainSettlements({ dryRun: false }, client, neverCallStripe);
+    expect(res.candidates).toBe(0);
+  });
+
+  it("decline bumps attempts and dead-letters at max_attempts", async () => {
+    prodLive();
+    const { client, updates } = makeDb({
+      app_config: { value: true },
+      fee_settlements: [feeRow({ status: "failed", attempts: 4, max_attempts: 5, stripe_invoice_id: "in_prev" })],
+      subscribers: [subRow()],
+      fee_settlement_lines: LINE_ROWS,
+      rev_share_ledger: LEDGER_ROWS,
+    });
+    const declineStripe = makeStripe({ payInvoice: async () => { throw new Error("card_declined"); } }).stripe;
+    const res = await drainSettlements({ dryRun: false }, client, declineStripe);
+    expect(res.failed).toBe(1);
+    expect(res.outcomes[0]).toMatchObject({ settlementId: "set1", action: "dead_letter" });
+    expect(marks(updates)[0].payload).toMatchObject({ status: "failed", attempts: 5 });
+  });
+});
+
+describe("drainSettlements — single-flight", () => {
+  it("a FRESH 'charging' claim (another run holds it) is not re-selected", async () => {
+    prodLive();
+    const { client } = makeDb({
+      app_config: { value: true },
+      fee_settlements: [feeRow({ status: "charging", claimed_at: new Date().toISOString() })],
+      subscribers: [subRow()],
+      fee_settlement_lines: LINE_ROWS,
+      rev_share_ledger: LEDGER_ROWS,
+    });
+    const res = await drainSettlements({ dryRun: false }, client, neverCallStripe);
+    expect(res.candidates).toBe(0); // fresh claim held by someone else → skipped at selection
+  });
+
+  it("a STALE 'charging' claim (crashed run) is reclaimed and charged", async () => {
+    prodLive();
+    const stale = new Date(Date.now() - 60 * 60 * 1000).toISOString(); // 1h ago
+    const { client, updates } = makeDb({
+      app_config: { value: true },
+      fee_settlements: [feeRow({ status: "charging", claimed_at: stale })],
+      subscribers: [subRow()],
+      fee_settlement_lines: LINE_ROWS,
+      rev_share_ledger: LEDGER_ROWS,
+    });
+    const res = await drainSettlements({ dryRun: false }, client, makeStripe().stripe);
+    expect(res.candidates).toBe(1);
+    expect(res.charged).toBe(1);
+    // Re-claimed (kind:'claim') then marked paid (kind:'mark').
+    expect(updates.some((u) => u.kind === "claim")).toBe(true);
+    expect(marks(updates)[0].payload).toMatchObject({ status: "paid" });
   });
 });

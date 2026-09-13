@@ -34,9 +34,39 @@ import {
   payInvoice as realPayInvoice,
 } from "@/lib/stripe";
 import { reconcileSettlement } from "./reconcileSettlement";
+import { isChargingEnabled } from "./config";
 
 // Charges settle in USD (fee_settlements.currency default). Stripe wants lowercase.
 const CURRENCY = "usd";
+
+// Single-flight: a settlement claimed into 'charging' more than this long ago is
+// assumed abandoned (a crashed run) and may be reclaimed. Comfortably longer than
+// a real charge takes; short enough that a genuine crash retries next cron.
+export const STALE_CLAIM_MS = 15 * 60 * 1000;
+
+/**
+ * Single-flight claim: compare-and-set a settlement into 'charging'. Succeeds
+ * (returns true) only if the row is still claimable at execution time — pending,
+ * failed (retryable), or a STALE 'charging' (crashed run). Two overlapping runs
+ * race here: the loser's UPDATE matches 0 rows and it skips, so finalize/pay run
+ * at most once. No DB lock is held across the Stripe calls.
+ */
+export async function claimForCharge(
+  service: Pick<SupabaseClient, "from">,
+  id: string,
+  nowMs: number = Date.now(),
+): Promise<boolean> {
+  const claimIso = new Date(nowMs).toISOString();
+  const staleCutoff = new Date(nowMs - STALE_CLAIM_MS).toISOString();
+  const { data, error } = await service
+    .from("fee_settlements")
+    .update({ status: "charging", claimed_at: claimIso })
+    .eq("id", id)
+    .or(`status.eq.pending,status.eq.failed,and(status.eq.charging,claimed_at.lt.${staleCutoff})`)
+    .select("id");
+  if (error) throw new Error(`claimForCharge failed for ${id}: ${error.message}`);
+  return Array.isArray(data) && data.length > 0;
+}
 
 /** The ONLY context in which a live Stripe charge may be created. */
 export function liveChargesAllowed(
@@ -254,7 +284,7 @@ export interface DrainResult {
   dryRun: boolean;
   /** True only when the run may actually charge (all three gates pass). */
   charging: boolean;
-  sweepEnabled: boolean;
+  chargingEnabled: boolean;
   liveEnv: boolean;
   candidates: number;
   charged: number;
@@ -274,25 +304,22 @@ export async function drainSettlements(
 ): Promise<DrainResult> {
   const dryRun = options.dryRun ?? true;
   const limit = options.limit ?? 500;
+  const staleCutoffIso = new Date(Date.now() - STALE_CLAIM_MS).toISOString();
 
-  // Kill-switch (inline read — config.ts's isSweepEnabled needs only { from }).
-  const { data: cfg } = await service
-    .from("app_config")
-    .select("value")
-    .eq("key", "settlement_sweep_enabled")
-    .maybeSingle();
-  const sweepEnabled = (cfg as { value: unknown } | null)?.value === true;
-
+  // Charge gate: the SEPARATE settlement_charging_enabled flag (not the sweep
+  // flag). Charging needs dryRun off AND this flag AND the env/live gate.
+  const chargingEnabled = await isChargingEnabled(service);
   const liveEnv = liveChargesAllowed();
-  const charging = dryRun === false && sweepEnabled && liveEnv;
+  const charging = dryRun === false && chargingEnabled && liveEnv;
 
-  // 1. Candidate settlements: pending, or failed-but-retryable.
+  // 1. Candidate settlements: pending, failed-but-retryable, or a STALE 'charging'
+  //    claim (a crashed prior run) that may be reclaimed.
   const { data: rows, error } = await service
     .from("fee_settlements")
     .select(
-      "id, subscriber_id, cycle_close, total_fee_cents, line_count, status, attempts, max_attempts, stripe_invoice_id, stripe_idempotency_key",
+      "id, subscriber_id, cycle_close, total_fee_cents, line_count, status, attempts, max_attempts, stripe_invoice_id, stripe_idempotency_key, claimed_at",
     )
-    .in("status", ["pending", "failed"])
+    .in("status", ["pending", "failed", "charging"])
     .limit(limit);
   if (error) throw new Error(`drainSettlements: fee_settlements read failed: ${error.message}`);
 
@@ -307,15 +334,19 @@ export async function drainSettlements(
     max_attempts: number;
     stripe_invoice_id: string | null;
     stripe_idempotency_key: string;
+    claimed_at: string | null;
   };
   const candidates = (rows ?? []).filter(
-    (r: Row) => r.status === "pending" || (r.status === "failed" && r.attempts < r.max_attempts),
+    (r: Row) =>
+      r.status === "pending" ||
+      (r.status === "failed" && r.attempts < r.max_attempts) ||
+      (r.status === "charging" && (r.claimed_at === null || r.claimed_at < staleCutoffIso)),
   );
 
   const result: DrainResult = {
     dryRun,
     charging,
-    sweepEnabled,
+    chargingEnabled,
     liveEnv,
     candidates: candidates.length,
     charged: 0,
@@ -421,14 +452,35 @@ export async function drainSettlements(
               : `charge($${(settlement.totalFeeCents / 100).toFixed(2)})`;
       console.log(
         `[settlement-charge] DRY-RUN settlement=${r.id} sub=${r.subscriber_id} would=${would} ` +
-          `(dryRun=${dryRun} sweepEnabled=${sweepEnabled} liveEnv=${liveEnv})`,
+          `(dryRun=${dryRun} chargingEnabled=${chargingEnabled} liveEnv=${liveEnv})`,
       );
       result.outcomes.push({ settlementId: r.id, action: "dry_run", reason: would });
       continue;
     }
 
+    // Skip states that would strand a claim — never claim a row we won't charge.
+    if (subscriber.testUser || subscriber.subscriptionStatus !== "active") {
+      result.skipped++;
+      result.outcomes.push({
+        settlementId: r.id,
+        action: "skipped",
+        reason: subscriber.testUser ? "test_user" : "subscriber_inactive",
+      });
+      continue;
+    }
+
+    // Single-flight: claim into 'charging' before touching Stripe. Lost race → skip.
+    const claimed = await claimForCharge(service, r.id);
+    if (!claimed) {
+      result.skipped++;
+      result.outcomes.push({ settlementId: r.id, action: "skipped", reason: "contended" });
+      continue;
+    }
+
     const outcome = await chargeOneSettlement({ settlement, subscriber, lines }, stripe);
     if (outcome.action === "skipped") {
+      // Pre-checked above, so this shouldn't happen — but never strand a 'charging' claim.
+      await service.from("fee_settlements").update({ status: "pending", claimed_at: null }).eq("id", r.id);
       result.skipped++;
       result.outcomes.push({ settlementId: r.id, action: "skipped", reason: outcome.reason });
       continue;
