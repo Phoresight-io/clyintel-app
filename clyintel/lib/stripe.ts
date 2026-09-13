@@ -317,16 +317,23 @@ export interface StripeInvoice {
 // Draft invoice on the customer. charge_automatically = Stripe attempts payment
 // against the customer's default source when finalized/paid. auto_advance=false
 // so WE drive finalize+pay explicitly (no surprise async collection).
+//
+// Optional `metadata` is threaded into the request as metadata[key]=value (the
+// encoder already flattens nested objects). It's how the settlement path tags an
+// invoice so the webhook can tell fee-settlement invoices apart from subscription
+// invoices. Omitting it is unchanged behaviour (no metadata sent).
 export async function createInvoice(
   customerId: string,
-  idempotencyKey: string
+  idempotencyKey: string,
+  metadata?: Record<string, string>
 ): Promise<StripeInvoice> {
-  return stripeRequest<StripeInvoice>(
-    "/invoices",
-    "POST",
-    { customer: customerId, collection_method: "charge_automatically", auto_advance: false },
-    { idempotencyKey }
-  );
+  const params: Record<string, unknown> = {
+    customer: customerId,
+    collection_method: "charge_automatically",
+    auto_advance: false,
+  };
+  if (metadata) params.metadata = metadata;
+  return stripeRequest<StripeInvoice>("/invoices", "POST", params, { idempotencyKey });
 }
 
 // One line item bound to the draft invoice (pass the invoice id so it can never

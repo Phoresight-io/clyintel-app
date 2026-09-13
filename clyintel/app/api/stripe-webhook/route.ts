@@ -589,6 +589,138 @@ async function handleChargeRefunded(charge: Record<string, unknown>, eventId: st
   }
 }
 
+// ── Fee-settlement invoice reconciliation (Monthly Settlement Sweep, Prompt 5) ─
+// Settlement invoices are tagged at creation (lib/settlement/chargeSettlement.ts →
+// createInvoice metadata: kind='fee_settlement', settlement_id, subscriber_id,
+// cycle_close). These handlers move fee_settlements between terminal states from
+// the async Stripe outcome WITHOUT touching subscription state or the payments
+// ledger. Service-role client (fee_settlements is service-role-write, RLS forced).
+//
+// Idempotency: the terminal-state guard (`status not in (paid, void)`) makes
+// whichever of the synchronous charge path and this webhook lands first win — no
+// transition out of a terminal state. The audit_log dedup (same pattern the
+// subscription/refund handlers use) makes a redelivered Stripe event a no-op.
+
+function isFeeSettlementInvoice(object: Record<string, unknown>): boolean {
+  const meta = object["metadata"] as Record<string, unknown> | undefined;
+  return meta?.["kind"] === "fee_settlement";
+}
+
+function settlementIdFromInvoice(object: Record<string, unknown>): string | null {
+  const meta = (object["metadata"] as Record<string, unknown> | undefined) ?? {};
+  return typeof meta["settlement_id"] === "string" ? (meta["settlement_id"] as string) : null;
+}
+
+async function settlementEventAlreadyReconciled(
+  supabase: ReturnType<typeof getSupabase>,
+  subscriberId: string,
+  action: string,
+  eventId: string
+): Promise<boolean> {
+  const { data } = await supabase
+    .from("audit_log")
+    .select("payload")
+    .eq("subscriber_id", subscriberId)
+    .eq("action", action);
+  return (data ?? []).some(
+    (row) => (row.payload as { stripe_event_id?: string } | null)?.stripe_event_id === eventId
+  );
+}
+
+async function handleSettlementInvoicePaid(object: Record<string, unknown>, eventId: string) {
+  const supabase = getSupabase();
+  const settlementId = settlementIdFromInvoice(object);
+  const invoiceId = typeof object["id"] === "string" ? (object["id"] as string) : null;
+  if (!settlementId) {
+    console.error(`stripe-webhook: fee_settlement paid missing settlement_id (event=${eventId})`);
+    return;
+  }
+
+  const { data: settlement } = await supabase
+    .from("fee_settlements")
+    .select("id, subscriber_id, status")
+    .eq("id", settlementId)
+    .maybeSingle();
+  if (!settlement) {
+    console.error(`stripe-webhook: settlement ${settlementId} not found (event=${eventId})`);
+    return;
+  }
+
+  if (await settlementEventAlreadyReconciled(supabase, settlement.subscriber_id, "settlement_invoice_paid", eventId)) {
+    console.log(`stripe-webhook: settlement paid event ${eventId} already reconciled (${settlementId}), skipping`);
+    return;
+  }
+
+  // Terminal write, guarded: never move out of paid/void. Also rescues the
+  // crash-between-finalize-and-write row by filling a NULL stripe_invoice_id.
+  const { data: updated, error } = await supabase
+    .from("fee_settlements")
+    .update({ status: "paid", stripe_invoice_id: invoiceId, last_error: null })
+    .eq("id", settlementId)
+    .not("status", "in", "(paid,void)")
+    .select("id");
+  if (error) {
+    console.error(`stripe-webhook: settlement paid update failed (${settlementId}, event=${eventId})`, error);
+    return;
+  }
+
+  await writeAudit(settlement.subscriber_id, "settlement_invoice_paid", settlementId, {
+    stripe_event_id: eventId,
+    settlement_id: settlementId,
+    stripe_invoice_id: invoiceId,
+    applied: (updated ?? []).length > 0,
+  });
+}
+
+async function handleSettlementInvoiceFailed(object: Record<string, unknown>, eventId: string) {
+  const supabase = getSupabase();
+  const settlementId = settlementIdFromInvoice(object);
+  const invoiceId = typeof object["id"] === "string" ? (object["id"] as string) : null;
+  if (!settlementId) {
+    console.error(`stripe-webhook: fee_settlement failed missing settlement_id (event=${eventId})`);
+    return;
+  }
+
+  const { data: settlement } = await supabase
+    .from("fee_settlements")
+    .select("id, subscriber_id, status, attempts")
+    .eq("id", settlementId)
+    .maybeSingle();
+  if (!settlement) {
+    console.error(`stripe-webhook: settlement ${settlementId} not found (event=${eventId})`);
+    return;
+  }
+
+  if (await settlementEventAlreadyReconciled(supabase, settlement.subscriber_id, "settlement_invoice_failed", eventId)) {
+    console.log(`stripe-webhook: settlement failed event ${eventId} already reconciled (${settlementId}), skipping`);
+    return;
+  }
+
+  // Guarded: never override a paid/void row (the synchronous path may have won).
+  const { data: updated, error } = await supabase
+    .from("fee_settlements")
+    .update({
+      status: "failed",
+      stripe_invoice_id: invoiceId,
+      attempts: (settlement.attempts ?? 0) + 1,
+      last_error: "webhook_payment_failed",
+    })
+    .eq("id", settlementId)
+    .not("status", "in", "(paid,void)")
+    .select("id");
+  if (error) {
+    console.error(`stripe-webhook: settlement failed update errored (${settlementId}, event=${eventId})`, error);
+    return;
+  }
+
+  await writeAudit(settlement.subscriber_id, "settlement_invoice_failed", settlementId, {
+    stripe_event_id: eventId,
+    settlement_id: settlementId,
+    stripe_invoice_id: invoiceId,
+    applied: (updated ?? []).length > 0,
+  });
+}
+
 async function processEvent(event: StripeEvent) {
   const object = event.data.object;
 
@@ -606,6 +738,13 @@ async function processEvent(event: StripeEvent) {
       break;
     }
     case "invoice.payment_succeeded": {
+      // Fee-settlement invoices (tagged metadata.kind='fee_settlement' at creation)
+      // reconcile to fee_settlements — NOT the subscription payments ledger, and
+      // NOT via the stripe_customer_id fallback in handlePaymentSucceeded.
+      if (isFeeSettlementInvoice(object)) {
+        await handleSettlementInvoicePaid(object, event.id);
+        break;
+      }
       // Capture the subscription payment into the payments ledger. (Subscription
       // status is reconciled separately by customer.subscription.created/updated,
       // which fire alongside renewals and past_due->active recovery.)
@@ -613,6 +752,12 @@ async function processEvent(event: StripeEvent) {
       break;
     }
     case "invoice.payment_failed": {
+      // Fee-settlement invoices reconcile to fee_settlements and must NOT flip the
+      // subscriber to past_due.
+      if (isFeeSettlementInvoice(object)) {
+        await handleSettlementInvoiceFailed(object, event.id);
+        break;
+      }
       const customerId = object["customer"] as string;
       if (customerId) {
         await updateSubscriberStatus(customerId, "past_due", null, event.type, event.id);
