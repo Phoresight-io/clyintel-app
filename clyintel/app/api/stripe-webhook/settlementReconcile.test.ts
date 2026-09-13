@@ -186,12 +186,12 @@ describe("handleSettlementInvoicePaid", () => {
 
 // ── failed handler ───────────────────────────────────────────────────────────
 describe("handleSettlementInvoiceFailed", () => {
-  it("marks failed, bumps attempts, stores invoice id — no payments row", async () => {
+  it("marks failed, leaves attempts untouched, stores invoice id — no payments row", async () => {
     const fake = install({ settlements: [feeRow({ status: "charging", attempts: 0 })] });
     await handleSettlementInvoiceFailed(settlementInvoice({ id: "in_f" }), "evt_f");
     const row = fake.feeRows.get("set1")!;
     expect(row.status).toBe("failed");
-    expect(row.attempts).toBe(1);
+    expect(row.attempts).toBe(0); // webhook reconciles the outcome; the sync path owns the counter
     expect(row.stripe_invoice_id).toBe("in_f");
     expect(row.last_error).toBe("webhook_payment_failed");
     expect(noPaymentsWrite(fake.writes)).toBe(true);
@@ -203,11 +203,12 @@ describe("handleSettlementInvoiceFailed", () => {
     expect(fake.feeRows.get("set1")!.status).toBe("paid"); // no regression
   });
 
-  it("failed event dedup: same event twice bumps attempts once", async () => {
+  it("failed event redelivery is idempotent: same event twice has a single effect (one audit row)", async () => {
     const fake = install({ settlements: [feeRow({ status: "charging", attempts: 0 })] });
     await handleSettlementInvoiceFailed(settlementInvoice(), "evt_ff");
     await handleSettlementInvoiceFailed(settlementInvoice(), "evt_ff");
-    expect(fake.feeRows.get("set1")!.attempts).toBe(1);
+    expect(fake.auditRows.filter((a) => a.action === "settlement_invoice_failed" && a.payload.stripe_event_id === "evt_ff")).toHaveLength(1);
+    expect(fake.feeRows.get("set1")!.attempts).toBe(0); // no bump on either delivery
   });
 });
 
@@ -229,20 +230,20 @@ describe("first-writer-wins (sync vs webhook orderings both end paid)", () => {
   });
 });
 
-// ── KNOWN BUG (do not fix in 5b) ──────────────────────────────────────────────
-// A single failed charge attempt is counted twice against max_attempts: the
-// synchronous path (chargeSettlement) bumps attempts on the payInvoice throw, and
-// the invoice.payment_failed webhook for the SAME attempt bumps it again. Two
-// write sites, no shared dedup key. This test encodes the DESIRED invariant
-// (final attempts == N+1, not N+2). It is skipped because the fix is out of scope
-// for 5b (test-only) — un-skipping it is the acceptance test for that fix.
-describe("attempts double-count across sync + webhook (KNOWN BUG)", () => {
-  it.skip("sync failure (attempts N→N+1) + invoice.payment_failed for the SAME attempt leaves attempts at N+1, not N+2", async () => {
+// ── attempts idempotency (fixed in 5c) ───────────────────────────────────────
+// A single failed charge attempt must be counted once against max_attempts. The
+// synchronous path (chargeSettlement) owns the attempt counter — it bumps attempts
+// on the payInvoice throw. The invoice.payment_failed webhook only reconciles the
+// outcome, so it no longer bumps attempts (5c removed that write). This test is the
+// acceptance test for that fix: sync failure at N+1 + the webhook for the SAME
+// attempt leaves attempts at N+1, not N+2.
+describe("attempts idempotency across sync + webhook", () => {
+  it("sync failure (attempts N→N+1) + invoice.payment_failed for the SAME attempt leaves attempts at N+1, not N+2", async () => {
     // Post-sync-failure state for attempt #1: the drainer already wrote attempts=1.
     const fake = install({ settlements: [feeRow({ status: "failed", attempts: 1, stripe_invoice_id: "in_same" })] });
     // The webhook for the SAME declined invoice arrives.
     await handleSettlementInvoiceFailed(settlementInvoice({ id: "in_same" }), "evt_same_attempt");
-    // DESIRED: idempotent on attempts for one attempt. CURRENT code bumps to 2.
+    // Idempotent on attempts for one attempt: the webhook no longer bumps, so it stays at 1.
     expect(fake.feeRows.get("set1")!.attempts).toBe(1);
   });
 });
