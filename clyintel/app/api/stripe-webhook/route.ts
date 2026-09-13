@@ -702,7 +702,6 @@ export async function handleSettlementInvoiceFailed(object: Record<string, unkno
     .update({
       status: "failed",
       stripe_invoice_id: invoiceId,
-      attempts: (settlement.attempts ?? 0) + 1,
       last_error: "webhook_payment_failed",
     })
     .eq("id", settlementId)
