@@ -1,5 +1,6 @@
 {
   "crons": [
-    { "path": "/api/qbo/worker", "schedule": "* * * * *" }
+    { "path": "/api/qbo/worker", "schedule": "* * * * *" },
+    { "path": "/api/settlement/cron", "schedule": "0 9 * * *" }
   ]
 }

@@ -645,6 +645,7 @@ export type Database = {
       fee_settlements: {
         Row: {
           attempts: number
+          claimed_at: string | null
           created_at: string
           currency: string
           cycle_close: string
@@ -661,6 +662,7 @@ export type Database = {
         }
         Insert: {
           attempts?: number
+          claimed_at?: string | null
           created_at?: string
           currency?: string
           cycle_close: string
@@ -677,6 +679,7 @@ export type Database = {
         }
         Update: {
           attempts?: number
+          claimed_at?: string | null
           created_at?: string
           currency?: string
           cycle_close?: string
