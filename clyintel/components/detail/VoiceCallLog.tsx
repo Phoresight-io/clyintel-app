@@ -27,7 +27,7 @@ function outcomeTone(outcome: string | null, paymentCommitted: boolean): Tone {
   return "gray";
 }
 
-function VoiceCallRow({ call, first, showInvoice }: { call: VoiceCallDisplay; first?: boolean; showInvoice?: boolean }) {
+function VoiceCallRow({ call, first, showInvoice, invoiceLabel }: { call: VoiceCallDisplay; first?: boolean; showInvoice?: boolean; invoiceLabel?: string | null }) {
   const [open, setOpen] = useState(false);
   const hasDetail = !!(call.summary || call.transcript || call.recording_url || call.ended_reason);
 
@@ -38,8 +38,8 @@ function VoiceCallRow({ call, first, showInvoice }: { call: VoiceCallDisplay; fi
         <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{fmtDateTime(call.created_at)}</span>
         {call.status && <Badge label={prettify(call.status)} tone="blue" />}
         <Badge label={prettify(call.outcome) === "—" ? "No outcome" : prettify(call.outcome)} tone={outcomeTone(call.outcome, call.payment_committed)} />
-        {showInvoice && call.invoice_number && (
-          <span style={{ fontSize: 12, color: C.textMid, fontFamily: C.mono }}>Invoice {call.invoice_number}</span>
+        {showInvoice && invoiceLabel && (
+          <span style={{ fontSize: 12, color: C.textMid, fontFamily: C.mono }}>Invoice {invoiceLabel}</span>
         )}
         <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ fontSize: 13, color: C.textMid, fontFamily: C.mono }}>{fmtDuration(call.duration_seconds)}</span>
@@ -132,15 +132,23 @@ export default function VoiceCallLog({
   calls,
   title = "Call History",
   showInvoice,
+  invoiceNumberByUuid,
 }: {
   calls: VoiceCallDisplay[];
   title?: string;
   showInvoice?: boolean;
+  invoiceNumberByUuid?: Record<string, string>;
 }) {
   return (
     <LogCard title={title} count={calls.length} emptyLabel="No calls yet.">
       {calls.map((call, i) => (
-        <VoiceCallRow key={call.id} call={call} first={i === 0} showInvoice={showInvoice} />
+        <VoiceCallRow
+          key={call.id}
+          call={call}
+          first={i === 0}
+          showInvoice={showInvoice}
+          invoiceLabel={call.invoice_id ? invoiceNumberByUuid?.[call.invoice_id] ?? null : null}
+        />
       ))}
     </LogCard>
   );

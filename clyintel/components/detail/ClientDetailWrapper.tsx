@@ -15,6 +15,8 @@ export default function ClientDetailWrapper({
   communications,
   transactions,
   balanceEvents,
+  invoiceUuidByUiId,
+  invoiceNumberByUuid,
 }: {
   client: Client;
   invoiceSet?: ClientInvoiceSet;
@@ -23,6 +25,8 @@ export default function ClientDetailWrapper({
   communications?: CommunicationDisplay[];
   transactions?: TransactionDisplay[];
   balanceEvents?: BalanceEventDisplay[];
+  invoiceUuidByUiId?: Record<string, string>;
+  invoiceNumberByUuid?: Record<string, string>;
 }) {
   return (
     <DetailScreen
@@ -33,6 +37,8 @@ export default function ClientDetailWrapper({
       communications={communications}
       transactions={transactions}
       balanceEvents={balanceEvents}
+      invoiceUuidByUiId={invoiceUuidByUiId}
+      invoiceNumberByUuid={invoiceNumberByUuid}
     />
   );
 }

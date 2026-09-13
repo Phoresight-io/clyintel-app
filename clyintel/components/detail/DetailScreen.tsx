@@ -143,12 +143,17 @@ interface Props {
   invoiceSet?: ClientInvoiceSet;
   // Read-only contacts for this client (Brick 3). Undefined in demo/mock mode.
   contacts?: ClientContactDisplay[];
-  // Client-level history, server-fetched. Filtered per-invoice for the drawer via
-  // the UI match key (invoice_number ?? invoice_id). Undefined in demo/mock mode.
+  // Client-level history, server-fetched. Filtered per-invoice for the drawer by
+  // invoice_id (the real UUID). Undefined in demo/mock mode.
   voiceCalls?: VoiceCallDisplay[];
   communications?: CommunicationDisplay[];
   transactions?: TransactionDisplay[];
   balanceEvents?: BalanceEventDisplay[];
+  // UI invoice id (invoice_number || uuid) → invoice UUID, and UUID → number, both
+  // built from the raw invoices. Used to resolve the selected invoice to its UUID
+  // for filtering and to label rows without relying on an embed.
+  invoiceUuidByUiId?: Record<string, string>;
+  invoiceNumberByUuid?: Record<string, string>;
 }
 
 export default function DetailScreen({
@@ -159,6 +164,8 @@ export default function DetailScreen({
   communications,
   transactions,
   balanceEvents,
+  invoiceUuidByUiId,
+  invoiceNumberByUuid,
 }: Props) {
   const realMode = invoiceSet !== undefined;
   // Mock data flushed (D2 closeout): real invoice set when present, else empty.
@@ -384,7 +391,7 @@ export default function DetailScreen({
               client with its invoice #; per-invoice history lives in the drawer. */}
           {realMode && (
             <div style={{ marginTop: 12 }}>
-              <VoiceCallLog calls={voiceCalls ?? []} showInvoice title="Call History" />
+              <VoiceCallLog calls={voiceCalls ?? []} showInvoice title="Call History" invoiceNumberByUuid={invoiceNumberByUuid} />
             </div>
           )}
         </div>
@@ -435,17 +442,23 @@ export default function DetailScreen({
         </div>
       </div>
 
-      {selectedInvoiceForExchanges && (
-        <ExchangeDrawer
-          invoiceId={selectedInvoiceForExchanges}
-          clientName={client.name}
-          transactions={(transactions ?? []).filter((t) => (t.invoice_number ?? t.invoice_id) === selectedInvoiceForExchanges)}
-          balanceEvents={(balanceEvents ?? []).filter((b) => (b.invoice_number ?? b.invoice_id) === selectedInvoiceForExchanges)}
-          communications={(communications ?? []).filter((c) => (c.invoice_number ?? c.invoice_id) === selectedInvoiceForExchanges)}
-          voiceCalls={(voiceCalls ?? []).filter((v) => (v.invoice_number ?? v.invoice_id) === selectedInvoiceForExchanges)}
-          onClose={() => setSelectedInvoiceForExchanges(null)}
-        />
-      )}
+      {selectedInvoiceForExchanges && (() => {
+        // Resolve the UI invoice id (invoice_number || uuid) to the real invoice
+        // UUID, then match every history list on invoice_id. Fallback to the raw
+        // value covers the case where the id already is a UUID.
+        const selectedInvoiceUuid = invoiceUuidByUiId?.[selectedInvoiceForExchanges] ?? selectedInvoiceForExchanges;
+        return (
+          <ExchangeDrawer
+            invoiceId={selectedInvoiceForExchanges}
+            clientName={client.name}
+            transactions={(transactions ?? []).filter((t) => t.invoice_id === selectedInvoiceUuid)}
+            balanceEvents={(balanceEvents ?? []).filter((b) => b.invoice_id === selectedInvoiceUuid)}
+            communications={(communications ?? []).filter((c) => c.invoice_id === selectedInvoiceUuid)}
+            voiceCalls={(voiceCalls ?? []).filter((v) => v.invoice_id === selectedInvoiceUuid)}
+            onClose={() => setSelectedInvoiceForExchanges(null)}
+          />
+        );
+      })()}
 
       {/* Contact editor drawer (Brick 4b). client.id is the real clients.id uuid
           in real mode (the only mode the Contacts card renders in). The success
