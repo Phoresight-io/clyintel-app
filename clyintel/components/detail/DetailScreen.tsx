@@ -4,9 +4,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { C } from "@/lib/theme";
 import type { Client, NegotiationRec, ClientInvoiceSet } from "@/lib/mock-data";
 import type { ClientContactDisplay } from "@/lib/contacts/contactDisplay";
+import type { VoiceCallDisplay } from "@/lib/voice-calls";
+import type { CommunicationDisplay, TransactionDisplay, BalanceEventDisplay } from "@/lib/data";
 import type { Database } from "@/types/supabase";
 import { createSupabaseBrowser } from "@/lib/supabase-browser";
 import ExchangeDrawer from "@/components/shared/ExchangeDrawer";
+import VoiceCallLog from "./VoiceCallLog";
 import ContactEditorDrawer from "./ContactEditorDrawer";
 import PTRWidget from "./PTRWidget";
 import NegotiationActions from "@/components/dashboard/NegotiationActions";
@@ -140,9 +143,30 @@ interface Props {
   invoiceSet?: ClientInvoiceSet;
   // Read-only contacts for this client (Brick 3). Undefined in demo/mock mode.
   contacts?: ClientContactDisplay[];
+  // Client-level history, server-fetched. Filtered per-invoice for the drawer by
+  // invoice_id (the real UUID). Undefined in demo/mock mode.
+  voiceCalls?: VoiceCallDisplay[];
+  communications?: CommunicationDisplay[];
+  transactions?: TransactionDisplay[];
+  balanceEvents?: BalanceEventDisplay[];
+  // UI invoice id (invoice_number || uuid) → invoice UUID, and UUID → number, both
+  // built from the raw invoices. Used to resolve the selected invoice to its UUID
+  // for filtering and to label rows without relying on an embed.
+  invoiceUuidByUiId?: Record<string, string>;
+  invoiceNumberByUuid?: Record<string, string>;
 }
 
-export default function DetailScreen({ client, invoiceSet, contacts }: Props) {
+export default function DetailScreen({
+  client,
+  invoiceSet,
+  contacts,
+  voiceCalls,
+  communications,
+  transactions,
+  balanceEvents,
+  invoiceUuidByUiId,
+  invoiceNumberByUuid,
+}: Props) {
   const realMode = invoiceSet !== undefined;
   // Mock data flushed (D2 closeout): real invoice set when present, else empty.
   // negotiationRecs has no real source yet — stays empty until D3.
@@ -345,7 +369,7 @@ export default function DetailScreen({ client, invoiceSet, contacts }: Props) {
                   const statusLabel = isPaid ? "Paid" : isPastDue ? "Past Due" : "Current";
                   return (
                     <div key={inv.id} style={{ display: "grid", gridTemplateColumns: "120px 120px 120px 100px 120px 1fr 36px", gap: 16, padding: "14px 16px", borderBottom: i < allInvoicesList.length - 1 ? `1px solid ${C.border}` : "none", fontSize: 15, alignItems: "center", background: isPaid ? "rgba(22,163,74,0.03)" : "transparent" }}>
-                      <div onClick={() => !isPaid && setSelectedInvoiceForExchanges(inv.id)} style={{ fontFamily: C.mono, fontSize: 14, color: isPaid ? C.textMid : C.blue, cursor: isPaid ? "default" : "pointer" }} onMouseEnter={(e) => { if (!isPaid) e.currentTarget.style.color = C.amber; }} onMouseLeave={(e) => { if (!isPaid) e.currentTarget.style.color = C.blue; }}>{inv.id}</div>
+                      <div onClick={() => setSelectedInvoiceForExchanges(inv.id)} style={{ fontFamily: C.mono, fontSize: 14, color: C.blue, cursor: "pointer" }} onMouseEnter={(e) => { e.currentTarget.style.color = C.amber; }} onMouseLeave={(e) => { e.currentTarget.style.color = C.blue; }}>{inv.id}</div>
                       <div style={{ fontFamily: C.mono, fontSize: 16, color: isPastDue ? C.red : C.text }}>${inv.amount.toLocaleString()}</div>
                       <div style={{ fontSize: 15, color: isPastDue ? C.red : C.textMid }}>{inv.dueDate}</div>
                       <div style={{ fontSize: 14, color: isPaid ? C.green : isPastDue ? C.red : C.text }}>{dueInValue}</div>
@@ -362,6 +386,14 @@ export default function DetailScreen({ client, invoiceSet, contacts }: Props) {
               </>
             )}
           </div>
+
+          {/* Client-level call history (real mode only). Shows every call for the
+              client with its invoice #; per-invoice history lives in the drawer. */}
+          {realMode && (
+            <div style={{ marginTop: 12 }}>
+              <VoiceCallLog calls={voiceCalls ?? []} showInvoice title="Call History" invoiceNumberByUuid={invoiceNumberByUuid} />
+            </div>
+          )}
         </div>
 
         {/* Right Rail - Client Score */}
@@ -410,9 +442,23 @@ export default function DetailScreen({ client, invoiceSet, contacts }: Props) {
         </div>
       </div>
 
-      {selectedInvoiceForExchanges && (
-        <ExchangeDrawer invoiceId={selectedInvoiceForExchanges} onClose={() => setSelectedInvoiceForExchanges(null)} />
-      )}
+      {selectedInvoiceForExchanges && (() => {
+        // Resolve the UI invoice id (invoice_number || uuid) to the real invoice
+        // UUID, then match every history list on invoice_id. Fallback to the raw
+        // value covers the case where the id already is a UUID.
+        const selectedInvoiceUuid = invoiceUuidByUiId?.[selectedInvoiceForExchanges] ?? selectedInvoiceForExchanges;
+        return (
+          <ExchangeDrawer
+            invoiceId={selectedInvoiceForExchanges}
+            clientName={client.name}
+            transactions={(transactions ?? []).filter((t) => t.invoice_id === selectedInvoiceUuid)}
+            balanceEvents={(balanceEvents ?? []).filter((b) => b.invoice_id === selectedInvoiceUuid)}
+            communications={(communications ?? []).filter((c) => c.invoice_id === selectedInvoiceUuid)}
+            voiceCalls={(voiceCalls ?? []).filter((v) => v.invoice_id === selectedInvoiceUuid)}
+            onClose={() => setSelectedInvoiceForExchanges(null)}
+          />
+        );
+      })()}
 
       {/* Contact editor drawer (Brick 4b). client.id is the real clients.id uuid
           in real mode (the only mode the Contacts card renders in). The success

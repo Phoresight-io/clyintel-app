@@ -23,6 +23,60 @@ type RecoveryAttemptRow = Database["public"]["Tables"]["recovery_attempts"]["Row
 export type SubscriberWithPlan = SubscriberRow & { plan: PlanRow | null };
 export type InvoiceWithClient = InvoiceRow & { client: Pick<ClientRow, "id" | "name" | "company"> | null };
 
+type CommunicationChannel = Database["public"]["Enums"]["communication_channel"];
+type CommunicationDirection = Database["public"]["Enums"]["communication_direction"];
+type PaymentStatus = Database["public"]["Enums"]["payment_status"];
+
+// Email/SMS/voice communications for a client. Every row carries invoice_id (the
+// real invoices.id UUID); callers match to the open invoice on that, so no
+// invoice_number embed is needed.
+export interface CommunicationDisplay {
+  id: string;
+  invoice_id: string | null;
+  channel: CommunicationChannel;
+  direction: CommunicationDirection;
+  subject: string | null;
+  body: string | null;
+  status: string;
+  from_address: string | null;
+  to_address: string | null;
+  sent_at: string | null;
+  delivered_at: string | null;
+  created_at: string;
+  reply_body: string | null;
+  reply_received_at: string | null;
+  ai_intent: string | null;
+}
+
+// A settled allocation of a payment to an invoice (successful captures + refunds
+// only). `amount_cents` is the ALLOCATED amount from invoice_payments;
+// `payment_amount_cents` is the parent payment's own total. Matched by invoice_id.
+export interface TransactionDisplay {
+  id: string;
+  invoice_id: string;
+  amount_cents: number;
+  allocated_at: string;
+  status: PaymentStatus | null;
+  payment_method: string | null;
+  paid_at: string | null;
+  currency: string | null;
+  refunded_amount_cents: number | null;
+  payment_amount_cents: number | null;
+}
+
+// A balance-decrease event on an invoice (an off-Stripe payment, e.g. detected
+// from QBO). `delta_cents` is new_outstanding - prev_outstanding (negative for a
+// payment); callers display its magnitude. Matched by invoice_id.
+export interface BalanceEventDisplay {
+  id: string;
+  invoice_id: string;
+  source: string;
+  delta_cents: number;
+  prev_outstanding_cents: number;
+  new_outstanding_cents: number;
+  detected_at: string;
+}
+
 // Subscriber row + joined plan.
 export async function getSubscriber(userId: string): Promise<SubscriberWithPlan | null> {
   const supabase = getSupabase();
@@ -204,6 +258,118 @@ export async function getUIPortfolio(userId: string): Promise<UIPortfolio> {
   }
 
   return { clients: uiClients, clientInvoices };
+}
+
+// All communications for a client (scoped to subscriber), newest first. Every
+// row carries invoice_id; callers match to the open invoice on that UUID, so no
+// invoice_number embed. Fail closed → [].
+export async function getCommunicationsByClient(
+  userId: string,
+  clientId: string,
+): Promise<CommunicationDisplay[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("communications")
+    .select(
+      "id, invoice_id, channel, direction, subject, body, status, from_address, to_address, sent_at, delivered_at, created_at, reply_body, reply_received_at, ai_intent",
+    )
+    .eq("subscriber_id", userId)
+    .eq("client_id", clientId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    console.error("getCommunicationsByClient error", error);
+    return [];
+  }
+  return (data ?? []).map((r) => ({
+    id: r.id,
+    invoice_id: r.invoice_id,
+    channel: r.channel,
+    direction: r.direction,
+    subject: r.subject,
+    body: r.body,
+    status: r.status,
+    from_address: r.from_address,
+    to_address: r.to_address,
+    sent_at: r.sent_at,
+    delivered_at: r.delivered_at,
+    created_at: r.created_at,
+    reply_body: r.reply_body,
+    reply_received_at: r.reply_received_at,
+    ai_intent: r.ai_intent,
+  }));
+}
+
+// Payment→invoice allocations for a client's invoices, newest first. payments has
+// NO invoice_id, so we read the invoice_payments allocation join and pull the
+// payment fields through the `payment:payments(...)` embed. Ownership is enforced
+// via the `invoices!inner(client_id, subscriber_id)` embed filtered on both —
+// invoice_payments itself carries no subscriber_id/client_id. Fail closed → [].
+export async function getInvoicePaymentsByClient(
+  userId: string,
+  clientId: string,
+): Promise<TransactionDisplay[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("invoice_payments")
+    .select(
+      "id, invoice_id, amount_cents, allocated_at, payment:payments(status, payment_method, paid_at, currency, refunded_amount_cents, amount_cents), invoice:invoices!inner(client_id, subscriber_id)",
+    )
+    .eq("invoice.client_id", clientId)
+    .eq("invoice.subscriber_id", userId)
+    .order("allocated_at", { ascending: false });
+  if (error) {
+    console.error("getInvoicePaymentsByClient error", error);
+    return [];
+  }
+  return (data ?? []).map((r) => {
+    const payment = Array.isArray(r.payment) ? r.payment[0] : r.payment;
+    return {
+      id: r.id,
+      invoice_id: r.invoice_id,
+      amount_cents: r.amount_cents,
+      allocated_at: r.allocated_at,
+      status: payment?.status ?? null,
+      payment_method: payment?.payment_method ?? null,
+      paid_at: payment?.paid_at ?? null,
+      currency: payment?.currency ?? null,
+      refunded_amount_cents: payment?.refunded_amount_cents ?? null,
+      payment_amount_cents: payment?.amount_cents ?? null,
+    };
+  });
+}
+
+// Off-Stripe payments (e.g. QBO), detected as invoice balance decreases, for a
+// given set of invoice UUIDs (the client's invoices, from getInvoicesByClient).
+// balance_events has no client_id, so scope by subscriber_id + invoice_id IN the
+// caller's invoice UUIDs — no embed. Only rows where the outstanding balance
+// dropped (new < prev) count as a payment. Newest first; fail closed → [].
+export async function getBalanceEventsByClient(
+  userId: string,
+  invoiceUuids: string[],
+): Promise<BalanceEventDisplay[]> {
+  if (invoiceUuids.length === 0) return [];
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("balance_events")
+    .select("id, invoice_id, source, prev_outstanding_cents, new_outstanding_cents, delta_cents, detected_at")
+    .eq("subscriber_id", userId)
+    .in("invoice_id", invoiceUuids)
+    .order("detected_at", { ascending: false });
+  if (error) {
+    console.error("getBalanceEventsByClient error", error);
+    return [];
+  }
+  return (data ?? [])
+    .filter((r) => r.new_outstanding_cents < r.prev_outstanding_cents)
+    .map((r) => ({
+      id: r.id,
+      invoice_id: r.invoice_id,
+      source: r.source,
+      delta_cents: r.delta_cents,
+      prev_outstanding_cents: r.prev_outstanding_cents,
+      new_outstanding_cents: r.new_outstanding_cents,
+      detected_at: r.detected_at,
+    }));
 }
 
 // Recovery history for a single invoice (scoped to subscriber).
