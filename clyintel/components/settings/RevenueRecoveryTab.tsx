@@ -14,6 +14,41 @@ import { Toast, ToastSuccessDot } from "@/components/ui/Toast";
 // input does not persist — clearing an existing link is guarded (impact-check +
 // warning) and ships separately in A′-2.
 
+/** One off-platform capture row, as rev_share_ledger hands it to the panel.
+ *  Numeric columns arrive from PostgREST as number|string — coerce on display. */
+interface CaptureRow {
+  id: string;
+  invoice_ref: string | null;
+  invoice_number: string | null;
+  dollars_recovered: number | string;
+  band: string | null;
+  rate: number | string;
+  fee_amount: number | string;
+  source: string;
+  captured_at: string;
+  cycle_close: string | null;
+}
+
+// Human labels for the capture source (kept a map, not a ternary, since
+// stripe_recovery captures may surface here once recovery links launch).
+const CAPTURE_SOURCE_LABELS: Record<string, string> = {
+  qbo: "QuickBooks",
+  stripe_recovery: "Payment link",
+};
+
+const usd = (v: number | string) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(v));
+
+// captured_at is a midnight-UTC date (from QBO TxnDate); format in UTC so the
+// calendar date never shifts under the viewer's local timezone.
+const captureDate = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+
 export default function RevenueRecoveryTab() {
   // Current input value for the default payment link. Seeded on mount from the
   // subscriber's stored value; edited freely thereafter.
@@ -21,6 +56,8 @@ export default function RevenueRecoveryTab() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showToast, setShowToast] = useState(false);
+  // Recent off-platform captures. null = still loading; [] = loaded, none.
+  const [captures, setCaptures] = useState<CaptureRow[] | null>(null);
 
   // Read the subscriber's current default payment link into local state. Scoped
   // to the caller's own row (subscribers PK = auth user id), matching the read
@@ -41,6 +78,42 @@ export default function RevenueRecoveryTab() {
       if (!active) return;
       const current = (sub as { payment_link_url?: string | null } | null)?.payment_link_url;
       if (typeof current === "string") setLinkValue(current);
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Load the subscriber's own rev_share_ledger rows (the off-platform fee
+  // captures). RLS (subscriber_isolation_select = subscriber_id = auth.uid())
+  // scopes the read; the explicit .eq is belt-and-suspenders matching house
+  // style. Read-only, subscriber-facing — no service role.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const supabase = createSupabaseBrowser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!active) return;
+      if (!user) {
+        setCaptures([]);
+        return;
+      }
+      const { data, error: readError } = await supabase
+        .from("rev_share_ledger")
+        .select(
+          "id, invoice_ref, invoice_number, dollars_recovered, band, rate, fee_amount, source, captured_at, cycle_close",
+        )
+        .eq("subscriber_id", user.id)
+        .order("captured_at", { ascending: false });
+      if (!active) return;
+      if (readError) {
+        console.error("RevenueRecoveryTab: rev_share_ledger read failed", readError);
+        setCaptures([]);
+        return;
+      }
+      setCaptures((data ?? []) as CaptureRow[]);
     })();
     return () => {
       active = false;
@@ -258,22 +331,85 @@ export default function RevenueRecoveryTab() {
         <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 12 }}>
           Recent Off-Platform Captures
         </div>
-        <div
-          style={{
-            padding: "32px 24px",
-            borderRadius: 8,
-            background: C.surface,
-            border: `1px dashed ${C.border}`,
-            textAlign: "center",
-          }}
-        >
-          <div style={{ fontSize: 14, color: C.textMid, fontWeight: 500, marginBottom: 4 }}>
-            No captures yet
+        {captures === null ? (
+          <div
+            style={{
+              padding: "32px 24px",
+              borderRadius: 8,
+              background: C.surface,
+              border: `1px dashed ${C.border}`,
+              textAlign: "center",
+              fontSize: 13,
+              color: C.textDim,
+              fontWeight: 500,
+            }}
+          >
+            Loading…
           </div>
-          <div style={{ fontSize: 13, color: C.textDim, fontWeight: 500 }}>
-            Off-platform payments will appear here once reconciliation is enabled.
+        ) : captures.length === 0 ? (
+          <div
+            style={{
+              padding: "32px 24px",
+              borderRadius: 8,
+              background: C.surface,
+              border: `1px dashed ${C.border}`,
+              textAlign: "center",
+            }}
+          >
+            <div style={{ fontSize: 14, color: C.textMid, fontWeight: 500, marginBottom: 4 }}>
+              No captures yet
+            </div>
+            <div style={{ fontSize: 13, color: C.textDim, fontWeight: 500 }}>
+              Payments recovered outside of ClyIntel payment links will appear here.
+            </div>
           </div>
-        </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {captures.map((c) => (
+              <div
+                key={c.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "12px 14px",
+                  borderRadius: 8,
+                  background: C.surface,
+                  border: `1px solid ${C.border}`,
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 600, color: C.text }}>
+                    <span>Invoice #{c.invoice_number ?? c.invoice_ref ?? "—"}</span>
+                    <span
+                      style={{
+                        padding: "2px 8px",
+                        borderRadius: 6,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: C.textMid,
+                        background: C.card,
+                        border: `1px solid ${C.border}`,
+                      }}
+                    >
+                      {CAPTURE_SOURCE_LABELS[c.source] ?? c.source}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: C.textDim, fontWeight: 500, marginTop: 2 }}>
+                    {captureDate(c.captured_at)} · {c.band ?? "—"} · {Math.round(Number(c.rate) * 100)}%
+                  </div>
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{usd(c.fee_amount)} fee</div>
+                  <div style={{ fontSize: 12, color: C.textDim, fontWeight: 500, marginTop: 2 }}>
+                    on {usd(c.dollars_recovered)} recovered
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {showToast && (
