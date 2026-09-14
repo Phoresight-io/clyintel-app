@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "crypto";
 import type { CaptureEvent } from "../capture/captureEvent";
 import type { CaptureResult } from "../capture/captureResult";
+import type { ReconcileInput, ReconcileResult } from "./reconcileInvoiceFromCapture";
 
 // Testable logic for the webhook-events worker (the HTTP handler in
 // app/api/qbo/worker/route.ts wires the real collaborators into these). Kept
@@ -103,10 +104,21 @@ export function summarizeResult(result: CaptureResult): string {
 // Per-row state machine
 // ---------------------------------------------------------------------------
 
-/** A source's wiring: how to parse its payload and how to build a CaptureEvent. */
+/** A source's wiring: how to parse its payload, how to build a CaptureEvent (+
+ *  its sibling reconcileInput), and how to reconcile the local invoice. */
 export interface RowHandler {
   parseEntities(rawPayload: unknown): PaymentEntityRef[];
-  buildEvent(realmId: string, paymentId: string): Promise<CaptureEvent>;
+  buildEvent(
+    realmId: string,
+    paymentId: string,
+  ): Promise<{ event: CaptureEvent; reconcileInput: ReconcileInput }>;
+  /**
+   * Reconcile the local operational tables to the captured payment. Called AFTER
+   * a non-'rejected' capture. Optional: a source with no local invoice to
+   * reconcile omits it. Its failure propagates (retried like any row error) —
+   * capture and reconcile are both idempotent, so a retry is safe.
+   */
+  reconcile?(input: ReconcileInput): Promise<ReconcileResult>;
 }
 
 export interface WebhookEventRow {
@@ -166,9 +178,21 @@ export async function processWebhookEventRow(
 
     const outcomes: string[] = [];
     for (const { realmId, paymentId } of entities) {
-      const event = await handler.buildEvent(realmId, paymentId);
+      const { event, reconcileInput } = await handler.buildEvent(realmId, paymentId);
       const result = await runCore(event);
       outcomes.push(summarizeResult(result));
+
+      // Reconcile the local invoice to reality on any capture that isn't
+      // 'rejected' (written / duplicate / no_fee): the payment landed in QBO
+      // regardless of whether we earned a fee, so the invoice state — which is
+      // independent of fee outcome — must reflect it. 'rejected' means the
+      // source/subscriber didn't resolve, so there's nothing trustworthy to
+      // write; skip it. reconcileInput is populated in every branch here
+      // (buildEvent ran to completion before runCore), so no branch lacks it.
+      if (result.status !== "rejected" && handler.reconcile) {
+        const rec = await handler.reconcile(reconcileInput);
+        outcomes.push(`reconcile:${rec.status}`);
+      }
     }
     return { update: { status: "done", result: outcomes.join(";"), processed_at: nowIso() }, outcomes };
   } catch (err) {

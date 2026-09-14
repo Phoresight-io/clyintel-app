@@ -14,12 +14,14 @@ const NOW = "2026-07-01T00:00:00.000Z";
 function makeDeps(over: {
   parseEntities?: RowHandler["parseEntities"];
   buildEvent?: RowHandler["buildEvent"];
+  reconcile?: RowHandler["reconcile"];
   runCore?: RowProcessDeps["runCore"];
   handlers?: RowProcessDeps["handlers"];
 }): RowProcessDeps {
   const handler: RowHandler = {
     parseEntities: over.parseEntities ?? (() => [{ realmId: "r1", paymentId: "p1" }]),
     buildEvent: over.buildEvent ?? vi.fn(async () => ({}) as never),
+    reconcile: over.reconcile,
   };
   return {
     handlers: over.handlers ?? { qbo: handler },
@@ -158,5 +160,50 @@ describe("processWebhookEventRow — state machine", () => {
       }),
     );
     expect(out.update).toEqual({ status: "done", result: "written;duplicate", processed_at: NOW });
+  });
+});
+
+describe("processWebhookEventRow — capture-time reconcile", () => {
+  const RI = {
+    subscriberId: "sub_1",
+    qboInvoiceId: "49",
+    invoiceFaceCents: 95475,
+    invoiceBalanceCents: 0,
+    dueDate: "2026-06-26",
+  };
+  const buildEvent = async () => ({ event: { source: "qbo" } as never, reconcileInput: RI });
+
+  // The payment landed in QBO regardless of fee outcome, so reconcile runs on
+  // every non-'rejected' capture and receives the reconcileInput from buildEvent.
+  it.each([
+    ["written", { status: "written", ledgerId: "l", feeAmount: 1, band: "b", rate: 0.2 }],
+    ["duplicate", { status: "duplicate", ledgerId: "l" }],
+    ["no_fee", { status: "no_fee", reason: "no_outreach" }],
+  ] as const)("reconcile runs after a %s capture, with the reconcileInput", async (_label, coreResult) => {
+    const reconcile = vi.fn(async () => ({ status: "reconciled" as const, balanceEventEmitted: true }));
+    const out = await processWebhookEventRow(
+      row(),
+      makeDeps({ buildEvent, reconcile, runCore: async () => coreResult }),
+    );
+    expect(reconcile).toHaveBeenCalledTimes(1);
+    expect(reconcile).toHaveBeenCalledWith(RI);
+    expect(out.outcomes).toContain("reconcile:reconciled");
+  });
+
+  it("reconcile is SKIPPED on a 'rejected' capture (no trustworthy subscriber/invoice)", async () => {
+    const reconcile = vi.fn(async () => ({ status: "reconciled" as const, balanceEventEmitted: true }));
+    const out = await processWebhookEventRow(
+      row(),
+      makeDeps({ buildEvent, reconcile, runCore: async () => ({ status: "rejected", reason: "unknown_source" }) }),
+    );
+    expect(reconcile).not.toHaveBeenCalled();
+    expect(out.update).toEqual({ status: "done", result: "rejected:unknown_source", processed_at: NOW });
+  });
+
+  it("invoice_not_found reconcile outcome is surfaced (not a failure)", async () => {
+    const reconcile = vi.fn(async () => ({ status: "invoice_not_found" as const, balanceEventEmitted: false }));
+    const out = await processWebhookEventRow(row(), makeDeps({ buildEvent, reconcile }));
+    expect(out.update.status).toBe("done");
+    expect(out.outcomes).toEqual(["written", "reconcile:invoice_not_found"]);
   });
 });

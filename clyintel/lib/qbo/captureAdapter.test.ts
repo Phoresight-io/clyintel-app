@@ -52,8 +52,8 @@ beforeEach(() => {
 });
 
 describe("buildCaptureEventFromPayment", () => {
-  it("happy path → fully-populated CaptureEvent with correct mapping", async () => {
-    const event = await buildCaptureEventFromPayment(REALM, PAYMENT_ID);
+  it("happy path → fully-populated CaptureEvent + reconcileInput with correct mapping", async () => {
+    const { event, reconcileInput } = await buildCaptureEventFromPayment(REALM, PAYMENT_ID);
 
     expect(event).toEqual({
       source: "qbo",
@@ -66,6 +66,15 @@ describe("buildCaptureEventFromPayment", () => {
       connectedAccountRef: REALM, // realmId, NOT subscriberId
     });
 
+    // Sibling reconcile channel: the QBO figures in cents for the local invoice.
+    expect(reconcileInput).toEqual({
+      subscriberId: "sub_1",
+      qboInvoiceId: "130",
+      invoiceFaceCents: 120000, // TotalAmt 1200 → cents
+      invoiceBalanceCents: 120000, // Balance 1200 → cents
+      dueDate: "2026-05-01",
+    });
+
     // Provider filter is 'quickbooks'; token fetched with the resolved subscriber.
     expect(getValidAccessToken).toHaveBeenCalledWith("sub_1");
     expect(getPayment).toHaveBeenCalledWith(REALM, PAYMENT_ID, "tok");
@@ -74,13 +83,13 @@ describe("buildCaptureEventFromPayment", () => {
 
   it("invoicePastDue false when DueDate >= TxnDate", async () => {
     vi.mocked(getInvoice).mockResolvedValue({ Id: "130", TotalAmt: 1200, DueDate: "2026-06-28" });
-    const event = await buildCaptureEventFromPayment(REALM, PAYMENT_ID);
+    const { event } = await buildCaptureEventFromPayment(REALM, PAYMENT_ID);
     expect(event.invoicePastDue).toBe(false);
   });
 
   it("invoicePastDue false when DueDate is null", async () => {
     vi.mocked(getInvoice).mockResolvedValue({ Id: "130", TotalAmt: 1200, DueDate: undefined });
-    const event = await buildCaptureEventFromPayment(REALM, PAYMENT_ID);
+    const { event } = await buildCaptureEventFromPayment(REALM, PAYMENT_ID);
     expect(event.invoicePastDue).toBe(false);
   });
 
@@ -111,7 +120,7 @@ describe("buildCaptureEventFromPayment", () => {
     vi.mocked(linkedInvoiceIds).mockReturnValue(["130", "131"]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const event = await buildCaptureEventFromPayment(REALM, PAYMENT_ID);
+    const { event } = await buildCaptureEventFromPayment(REALM, PAYMENT_ID);
 
     expect(getInvoice).toHaveBeenCalledWith(REALM, "130", "tok"); // first only
     expect(getInvoice).toHaveBeenCalledTimes(1);
