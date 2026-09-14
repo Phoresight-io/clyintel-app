@@ -2,12 +2,15 @@ import type { CaptureEvent } from "../capture/captureEvent";
 import { getSupabase } from "../supabase";
 import { getValidAccessToken } from "./tokens";
 import { getPayment, getInvoice, linkedInvoiceIds } from "./client";
+import type { ReconcileInput } from "./reconcileInvoiceFromCapture";
 
 // QBO → CaptureEvent adapter. Turns a QBO Payment notification (realmId +
 // paymentId) into the platform-agnostic CaptureEvent the detection core
-// consumes. It ONLY produces the event — it does not run processCaptureEvent,
-// implement CaptureDeps, or write webhook_events / rev_share_ledger. The worker
-// (later step) calls this, then hands the result to the core.
+// consumes. It ONLY produces the event (+ a sibling reconcileInput carrying the
+// QBO figures for capture-time invoice reconciliation) — it does not run
+// processCaptureEvent, implement CaptureDeps, or write webhook_events /
+// rev_share_ledger / invoices. The worker calls this, hands the event to the
+// core, then (post-capture) hands reconcileInput to the reconcile step.
 //
 // Namespacing caution: the connected_accounts.provider enum value is
 // 'quickbooks'; the capture source slug is 'qbo'. Different namespaces — the
@@ -34,7 +37,7 @@ export function resolveInvoicePastDue(
 export async function buildCaptureEventFromPayment(
   realmId: string,
   paymentId: string,
-): Promise<CaptureEvent> {
+): Promise<{ event: CaptureEvent; reconcileInput: ReconcileInput }> {
   // 1. realm → subscriber. The webhook gives us realmId; getValidAccessToken
   //    needs a subscriberId. There is NO uniqueness constraint on
   //    connected_accounts.external_id, so defend against >1 (no maybeSingle).
@@ -112,7 +115,7 @@ export async function buildCaptureEventFromPayment(
   }
   const capturedAt = new Date(capturedAtMs).toISOString();
 
-  return {
+  const event: CaptureEvent = {
     source: "qbo",
     sourcePaymentId: payment.Id,
     sourceInvoiceId: invoice.Id,
@@ -124,4 +127,21 @@ export async function buildCaptureEventFromPayment(
     // its locked resolveSubscriber seam, keeping one source of truth for the join.
     connectedAccountRef: realmId,
   };
+
+  // Sibling channel for capture-time invoice reconciliation (Gap 1): the QBO
+  // figures already in hand, carried as a typed struct ALONGSIDE the frozen
+  // CaptureEvent (never added to it). The worker hands this to
+  // reconcileInvoiceFromCapture after a non-rejected capture. Balance → cents;
+  // a missing QBO Balance is treated as fully outstanding (= face), matching
+  // runQboSync, so the invoice never looks paid on absent data.
+  const reconcileInput: ReconcileInput = {
+    subscriberId,
+    qboInvoiceId: invoice.Id,
+    invoiceFaceCents: Math.round(invoiceFaceValue * 100),
+    invoiceBalanceCents:
+      invoice.Balance != null ? Math.round(invoice.Balance * 100) : Math.round(invoiceFaceValue * 100),
+    dueDate: invoice.DueDate ?? null,
+  };
+
+  return { event, reconcileInput };
 }

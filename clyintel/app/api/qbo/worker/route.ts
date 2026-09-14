@@ -3,6 +3,7 @@ import { getSupabase } from "@/lib/supabase";
 import { processCaptureEvent } from "@/lib/capture/processCaptureEvent";
 import { createLiveCaptureDeps } from "@/lib/capture/captureDepsLive";
 import { buildCaptureEventFromPayment } from "@/lib/qbo/captureAdapter";
+import { reconcileInvoiceFromCapture } from "@/lib/qbo/reconcileInvoiceFromCapture";
 import {
   checkCronAuth,
   parseQboPaymentEntities,
@@ -34,6 +35,9 @@ const HANDLERS: Record<string, RowHandler> = {
   qbo: {
     parseEntities: parseQboPaymentEntities,
     buildEvent: (realmId, paymentId) => buildCaptureEventFromPayment(realmId, paymentId),
+    // Capture-time invoice reconciliation (Gap 1): after a non-rejected capture,
+    // write the QBO payment back to the local invoice + balance_events.
+    reconcile: (input) => reconcileInvoiceFromCapture(input),
   },
 };
 

@@ -5,6 +5,7 @@ import { mergeClientContact } from "@/lib/qbo/mergeClientContact";
 import { planPocReconcile } from "@/lib/qbo/planPocReconcile";
 import { evaluateOutreachEligibility } from "@/lib/outreach/eligibility";
 import { computeBalanceEvent, type BalanceEventRow } from "@/lib/balanceEvents/computeBalanceEvent";
+import { deriveInvoiceStatus } from "@/lib/qbo/invoiceStatus";
 import type { QboSyncResult } from "@/lib/qbo/syncQbo";
 import type { Database, Json } from "@/types/supabase";
 
@@ -31,30 +32,9 @@ type InvoiceStatus = Database["public"]["Enums"]["invoice_status"];
 // dollar formatting beyond dollars→cents, no cron, no UI. Throws on any failure
 // (token lookup, QBO fetch, upsert) — the caller decides how to surface it.
 
-// Derive a synced invoice's status from QBO's authoritative figures at sync
-// time, rather than letting the column DEFAULT ('draft') stand — a synced QBO
-// invoice has been issued, so 'draft' is never correct for it. QBO `Balance` is
-// the outstanding amount and `TotalAmt` the face value:
-//   paid    → nothing outstanding
-//   partial → some paid, but a balance remains
-//   overdue → outstanding and past its due date
-//   sent    → outstanding, not yet due (or no due date)
-// `todayIso` and QBO DueDate are both YYYY-MM-DD, so a lexicographic compare is
-// a correct date comparison. NB: amount_paid_cents is intentionally NOT written
-// by this sync (amounts are out of scope); status is derived from QBO Balance
-// directly, so a partially/fully-paid QBO invoice could show a status that the
-// (unmapped) stored amount_paid_cents doesn't reflect — see PR notes.
-function deriveInvoiceStatus(
-  totalAmtCents: number,
-  balanceCents: number,
-  dueDate: string | null,
-  todayIso: string,
-): InvoiceStatus {
-  if (balanceCents <= 0) return "paid";
-  if (totalAmtCents - balanceCents > 0) return "partial";
-  if (dueDate && dueDate < todayIso) return "overdue";
-  return "sent";
-}
+// deriveInvoiceStatus (QBO Balance/TotalAmt → invoice_status) is shared with the
+// capture-time invoice reconcile via lib/qbo/invoiceStatus, so both paths derive
+// status with identical math and converge. See that module for the rule.
 
 export async function runQboSync(subscriberId: string): Promise<QboSyncResult> {
   // Valid access token (refreshed if needed) + the realm to query.
