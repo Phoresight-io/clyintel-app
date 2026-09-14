@@ -1,7 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
-const PUBLIC_PATHS = ['/login', '/auth/callback'];
+// Unauthenticated, session-less PAGES. /pay/[token] is debtor-facing and
+// self-authenticates via its link token (service-role read off the token), so
+// like /login it must not be bounced to the session-auth redirect.
+const PUBLIC_PATHS = ['/login', '/auth/callback', '/pay'];
 
 // Inbound webhooks / external callbacks. These are invoked by external services
 // (Vapi, Stripe, Intuit/QBO, MailerSend, Twilio) that never carry a session
@@ -20,11 +23,31 @@ const WEBHOOK_PATHS = [
   '/api/email-reply',
 ];
 
+// Scheduled cron routes. Vercel Cron issues a GET with NO session cookie, so
+// without an early bypass the session-auth redirect below 307s them to /login
+// and the handler (and its own guard) never runs. Each authenticates via its OWN
+// bearer secret in checkCronAuth (/api/qbo/worker → QBO_WORKER_CRON_SECRET;
+// /api/settlement/cron → SETTLEMENT_CRON_SECRET), so bypassing the SESSION redirect
+// does NOT make them unauthenticated — the bearer guard still gates them (401/500
+// without the correct Authorization header). Same rationale as WEBHOOK_PATHS; kept
+// as a separate list because these are crons, not inbound webhooks.
+//
+// NOT included: /api/voice/call — it has no self-authentication, so it stays behind
+// the session redirect (app-internal only), same as its exclusion from WEBHOOK_PATHS.
+const CRON_PATHS = [
+  '/api/qbo/worker',
+  '/api/settlement/cron',
+];
+
 export async function middleware(request: NextRequest) {
-  // Early bypass: webhooks self-authenticate and have no session, so skip the
-  // entire session-auth flow (no getUser, no /login redirect).
-  const { pathname: webhookPathname } = request.nextUrl;
-  if (WEBHOOK_PATHS.some((p) => webhookPathname === p || webhookPathname.startsWith(p + '/'))) {
+  // Early bypass: webhooks and crons self-authenticate (signature / bearer secret)
+  // and carry no session, so skip the entire session-auth flow (no getUser, no
+  // /login redirect). Their own guards still run in the route handler.
+  const { pathname: bypassPathname } = request.nextUrl;
+  const isSelfAuthenticating = [...WEBHOOK_PATHS, ...CRON_PATHS].some(
+    (p) => bypassPathname === p || bypassPathname.startsWith(p + '/'),
+  );
+  if (isSelfAuthenticating) {
     return NextResponse.next();
   }
 
