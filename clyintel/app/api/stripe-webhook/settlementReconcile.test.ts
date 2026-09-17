@@ -10,6 +10,8 @@ import {
   isFeeSettlementInvoice,
   handleSettlementInvoicePaid,
   handleSettlementInvoiceFailed,
+  handleSettlementRefundEvent,
+  handleSettlementInvoiceVoided,
 } from "./route";
 // The stateful in-memory fake now lives in a shared test-support module so the
 // Layer-1 charge-path integration test and this #117 suite drive one fake. It
@@ -26,7 +28,7 @@ type FeeRow = Row & {
   last_error?: string | null;
 };
 
-const install = (seed?: { settlements?: FeeRow[]; audit?: AuditRow[] }) => {
+const install = (seed?: { settlements?: FeeRow[]; audit?: AuditRow[]; refunds?: Row[] }) => {
   const fake = makeFakeSupabase(seed);
   h.client = fake.client;
   return fake;
@@ -171,5 +173,129 @@ describe("attempts idempotency across sync + webhook", () => {
     await handleSettlementInvoiceFailed(settlementInvoice({ id: "in_same" }), "evt_same_attempt");
     // Idempotent on attempts for one attempt: the webhook no longer bumps, so it stays at 1.
     expect(fake.feeRows.get("set1")!.attempts).toBe(1);
+  });
+});
+
+// ── Refund reconciliation (Part B — async settle + void rescue) ───────────────
+const refundRow = (over: Record<string, unknown> = {}): Row => ({
+  id: "rr1",
+  settlement_id: "set1",
+  kind: "refund",
+  amount_cents: 444,
+  status: "pending",
+  stripe_idempotency_key: "refund_set1",
+  stripe_refund_id: "re_1",
+  ...over,
+});
+const refundEvt = (over: Record<string, unknown> = {}) => ({ id: "re_1", status: "succeeded", ...over });
+
+describe("handleSettlementRefundEvent (async refund settle)", () => {
+  it("succeeded from refund_pending → settlement 'refunded', row 'succeeded', one audit, payments untouched", async () => {
+    const fake = install({
+      settlements: [feeRow({ status: "refund_pending" })],
+      refunds: [refundRow({ status: "pending" })],
+    });
+    const matched = await handleSettlementRefundEvent("re_1", "succeeded", "evt_rs");
+    expect(matched).toBe(true);
+    expect(fake.feeRows.get("set1")!.status).toBe("refunded");
+    expect(fake.refundRows[0]).toMatchObject({ status: "succeeded" });
+    expect(fake.auditRows.filter((a) => a.action === "settlement_refund_succeeded" && a.payload.stripe_event_id === "evt_rs")).toHaveLength(1);
+    expect(noPaymentsWrite(fake.writes)).toBe(true);
+  });
+
+  it("failed from refund_pending → settlement back to 'paid', row 'failed'", async () => {
+    const fake = install({
+      settlements: [feeRow({ status: "refund_pending" })],
+      refunds: [refundRow({ status: "pending" })],
+    });
+    const matched = await handleSettlementRefundEvent("re_1", "failed", "evt_rf");
+    expect(matched).toBe(true);
+    expect(fake.feeRows.get("set1")!.status).toBe("paid");
+    expect(fake.refundRows[0]).toMatchObject({ status: "failed" });
+  });
+
+  it("dedup: same event id replayed → no second transition, no dup audit", async () => {
+    const fake = install({
+      settlements: [feeRow({ status: "refund_pending" })],
+      refunds: [refundRow({ status: "pending" })],
+    });
+    await handleSettlementRefundEvent("re_1", "succeeded", "evt_dup");
+    await handleSettlementRefundEvent("re_1", "succeeded", "evt_dup");
+    expect(fake.auditRows.filter((a) => a.action === "settlement_refund_succeeded" && a.payload.stripe_event_id === "evt_dup")).toHaveLength(1);
+    expect(fake.feeRows.get("set1")!.status).toBe("refunded");
+  });
+
+  it("terminal guard: already 'refunded' + late event → no settlement transition (0 rows moved)", async () => {
+    const fake = install({
+      settlements: [feeRow({ status: "refunded" })],
+      refunds: [refundRow({ status: "succeeded" })],
+    });
+    await handleSettlementRefundEvent("re_1", "succeeded", "evt_late");
+    expect(fake.feeRows.get("set1")!.status).toBe("refunded"); // unchanged; positive guard matched 0 rows
+    expect(fake.writes.some((w) => w.table === "fee_settlements")).toBe(false); // no settlement mutation
+  });
+
+  it("non-terminal refund status (pending) → no-op, matched", async () => {
+    const fake = install({
+      settlements: [feeRow({ status: "refund_pending" })],
+      refunds: [refundRow({ status: "pending" })],
+    });
+    const matched = await handleSettlementRefundEvent("re_1", "pending", "evt_np");
+    expect(matched).toBe(true);
+    expect(fake.feeRows.get("set1")!.status).toBe("refund_pending"); // nothing to settle yet
+    expect(fake.writes).toHaveLength(0);
+  });
+
+  it("not a settlement refund id → returns false (charge.refunded caller falls through to payments)", async () => {
+    const fake = install({ settlements: [feeRow({ status: "refund_pending" })], refunds: [refundRow()] });
+    const matched = await handleSettlementRefundEvent("re_OTHER", "succeeded", "evt_x");
+    expect(matched).toBe(false);
+    expect(fake.writes).toHaveLength(0);
+  });
+
+  it("NULL stripe_refund_id row → event finds no match → no-op (left for resume)", async () => {
+    const fake = install({
+      settlements: [feeRow({ status: "refund_pending" })],
+      refunds: [refundRow({ stripe_refund_id: null })],
+    });
+    const matched = await handleSettlementRefundEvent("re_1", "succeeded", "evt_null");
+    expect(matched).toBe(false);
+    expect(fake.feeRows.get("set1")!.status).toBe("refund_pending");
+    expect(fake.writes).toHaveLength(0);
+  });
+});
+
+describe("handleSettlementInvoiceVoided (post-Stripe void crash rescue)", () => {
+  it("mid-void 'refund_pending' → settlement 'void', void row 'succeeded', one audit", async () => {
+    const fake = install({
+      settlements: [feeRow({ status: "refund_pending" })],
+      refunds: [refundRow({ kind: "void", status: "pending", stripe_refund_id: null, stripe_idempotency_key: "void_set1" })],
+    });
+    await handleSettlementInvoiceVoided(settlementInvoice(), "evt_void");
+    expect(fake.feeRows.get("set1")!.status).toBe("void");
+    expect(fake.refundRows[0]).toMatchObject({ kind: "void", status: "succeeded" });
+    expect(fake.auditRows.filter((a) => a.action === "settlement_void_reconciled" && a.payload.stripe_event_id === "evt_void")).toHaveLength(1);
+    expect(noPaymentsWrite(fake.writes)).toBe(true);
+  });
+
+  it("already 'void' → no-op (0 rows moved)", async () => {
+    const fake = install({
+      settlements: [feeRow({ status: "void" })],
+      refunds: [refundRow({ kind: "void", status: "succeeded", stripe_refund_id: null })],
+    });
+    await handleSettlementInvoiceVoided(settlementInvoice(), "evt_void2");
+    expect(fake.feeRows.get("set1")!.status).toBe("void");
+    expect(fake.writes.some((w) => w.table === "fee_settlements")).toBe(false);
+  });
+
+  it("dedup: same void event replayed → single effect", async () => {
+    const fake = install({
+      settlements: [feeRow({ status: "refund_pending" })],
+      refunds: [refundRow({ kind: "void", status: "pending", stripe_refund_id: null })],
+    });
+    await handleSettlementInvoiceVoided(settlementInvoice(), "evt_vd");
+    await handleSettlementInvoiceVoided(settlementInvoice(), "evt_vd");
+    expect(fake.auditRows.filter((a) => a.action === "settlement_void_reconciled" && a.payload.stripe_event_id === "evt_vd")).toHaveLength(1);
+    expect(fake.feeRows.get("set1")!.status).toBe("void");
   });
 });

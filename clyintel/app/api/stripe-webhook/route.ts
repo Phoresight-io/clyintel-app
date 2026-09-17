@@ -720,6 +720,143 @@ export async function handleSettlementInvoiceFailed(object: Record<string, unkno
   });
 }
 
+// ── Fee-settlement REFUND reconciliation (Part B, refund webhook) ─────────────
+// A refund of a settlement charge carries NO fee_settlement metadata on the
+// charge/refund object (refundSettlement sends none), so — unlike invoice events —
+// these are matched by fee_settlement_refunds.stripe_refund_id (the id
+// refundSettlement captured on the row). This webhook OWNS ONLY the ASYNC terminal
+// transition of a refund that was created 'pending' (settlement 'refund_pending').
+// Sync succeeded/void already settled inline. A NULL stripe_refund_id row (Prompt 3
+// crashed before capturing the id) finds no match here and is completed by
+// refundSettlement's RESUME path — NOT by an invoice-hop fallback.
+//
+// POSITIVE per-transition guard (`.eq("status","refund_pending")`) — NOT the charge
+// path's `.not(paid,void)`: succeeded→refunded and failed→paid fire ONLY from
+// refund_pending, so a replay or a late event on an already-terminal settlement
+// matches 0 rows and no-ops. Returns whether a settlement refund row matched (so
+// the charge.refunded caller knows whether to fall through to the payments rail).
+export async function handleSettlementRefundEvent(
+  refundId: string,
+  stripeStatus: string,
+  eventId: string
+): Promise<boolean> {
+  const supabase = getSupabase();
+
+  const { data: refundRow } = await supabase
+    .from("fee_settlement_refunds")
+    .select("id, settlement_id, status")
+    .eq("stripe_refund_id", refundId)
+    .maybeSingle();
+  if (!refundRow) return false; // not a settlement refund → caller may fall through
+
+  const isSucceeded = stripeStatus === "succeeded";
+  const isFailed = stripeStatus === "failed" || stripeStatus === "canceled";
+  if (!isSucceeded && !isFailed) return true; // non-terminal (pending/requires_action) → nothing to settle yet
+
+  const settlementId = refundRow.settlement_id as string;
+  const { data: settlement } = await supabase
+    .from("fee_settlements")
+    .select("id, subscriber_id, status")
+    .eq("id", settlementId)
+    .maybeSingle();
+  if (!settlement) {
+    console.error(`stripe-webhook: settlement ${settlementId} not found for refund ${refundId} (event=${eventId})`);
+    return true;
+  }
+
+  const action = isSucceeded ? "settlement_refund_succeeded" : "settlement_refund_failed";
+  if (await settlementEventAlreadyReconciled(supabase, settlement.subscriber_id, action, eventId)) {
+    console.log(`stripe-webhook: ${action} event ${eventId} already reconciled (${settlementId}), skipping`);
+    return true;
+  }
+
+  // Settle the settlement FIRST (the positive guard is the authority); a
+  // 'failed'/'canceled' refund frees the reservation (over-refund guard excludes
+  // 'failed' rows). Move the refund row only when the settlement actually transitioned.
+  const next = isSucceeded
+    ? { status: "refunded", last_error: null }
+    : { status: "paid", last_error: "webhook_refund_failed" };
+  const { data: updated, error } = await supabase
+    .from("fee_settlements")
+    .update(next)
+    .eq("id", settlementId)
+    .eq("status", "refund_pending")
+    .select("id");
+  if (error) {
+    console.error(`stripe-webhook: ${action} settlement update failed (${settlementId}, event=${eventId})`, error);
+    return true;
+  }
+  const applied = (updated ?? []).length > 0;
+  if (applied) {
+    await supabase
+      .from("fee_settlement_refunds")
+      .update({ status: isSucceeded ? "succeeded" : "failed" })
+      .eq("id", refundRow.id);
+  }
+
+  await writeAudit(settlement.subscriber_id, action, settlementId, {
+    stripe_event_id: eventId,
+    refund_id: refundId,
+    settlement_id: settlementId,
+    applied,
+  });
+  return true;
+}
+
+// invoice.voided rescue: refundSettlement claims the settlement into 'refund_pending'
+// before voiding (GD1), so a crash after Stripe voided the invoice but before the
+// terminal write leaves the settlement 'refund_pending' with a 'pending' kind='void'
+// row. Positive guard fires ONLY from 'refund_pending' → 'void'; an already-'void'
+// settlement matches 0 rows (no-op). This closes the POST-Stripe void crash window
+// only; the PRE-Stripe one is Prompt 5's resume item.
+export async function handleSettlementInvoiceVoided(object: Record<string, unknown>, eventId: string) {
+  const supabase = getSupabase();
+  const settlementId = settlementIdFromInvoice(object);
+  if (!settlementId) {
+    console.error(`stripe-webhook: fee_settlement voided missing settlement_id (event=${eventId})`);
+    return;
+  }
+  const { data: settlement } = await supabase
+    .from("fee_settlements")
+    .select("id, subscriber_id, status")
+    .eq("id", settlementId)
+    .maybeSingle();
+  if (!settlement) {
+    console.error(`stripe-webhook: settlement ${settlementId} not found (event=${eventId})`);
+    return;
+  }
+  if (await settlementEventAlreadyReconciled(supabase, settlement.subscriber_id, "settlement_void_reconciled", eventId)) {
+    console.log(`stripe-webhook: settlement voided event ${eventId} already reconciled (${settlementId}), skipping`);
+    return;
+  }
+
+  const { data: updated, error } = await supabase
+    .from("fee_settlements")
+    .update({ status: "void", last_error: null })
+    .eq("id", settlementId)
+    .eq("status", "refund_pending")
+    .select("id");
+  if (error) {
+    console.error(`stripe-webhook: settlement voided update failed (${settlementId}, event=${eventId})`, error);
+    return;
+  }
+  const applied = (updated ?? []).length > 0;
+  if (applied) {
+    // The in-flight kind='void' refund row → succeeded (a void has no refund id).
+    await supabase
+      .from("fee_settlement_refunds")
+      .update({ status: "succeeded" })
+      .eq("settlement_id", settlementId)
+      .eq("kind", "void")
+      .eq("status", "pending");
+  }
+  await writeAudit(settlement.subscriber_id, "settlement_void_reconciled", settlementId, {
+    stripe_event_id: eventId,
+    settlement_id: settlementId,
+    applied,
+  });
+}
+
 async function processEvent(event: StripeEvent) {
   const object = event.data.object;
 
@@ -764,7 +901,37 @@ async function processEvent(event: StripeEvent) {
       break;
     }
     case "charge.refunded": {
+      // Settlement-first: a refund of a fee-settlement charge carries no
+      // fee_settlement metadata, so match each refund by
+      // fee_settlement_refunds.stripe_refund_id. If any matches, settle it and do
+      // NOT run the subscription-payments handler (whose behavior is unchanged for
+      // non-settlement charges — this stops settlement charges logging "UNRESOLVED
+      // payments row").
+      const refundList = ((object["refunds"] as { data?: unknown[] } | undefined)?.data) ?? [];
+      let matchedSettlement = false;
+      for (const r of refundList) {
+        const rr = r as { id?: unknown; status?: unknown };
+        if (typeof rr.id !== "string") continue;
+        const rstatus = typeof rr.status === "string" ? rr.status : "succeeded";
+        if (await handleSettlementRefundEvent(rr.id, rstatus, event.id)) matchedSettlement = true;
+      }
+      if (matchedSettlement) break;
       await handleChargeRefunded(object, event.id);
+      break;
+    }
+    case "refund.updated": {
+      // PRIMARY async settle for a fee-settlement refund. object = the Refund.
+      const refundId = typeof object["id"] === "string" ? (object["id"] as string) : null;
+      const rstatus = typeof object["status"] === "string" ? (object["status"] as string) : null;
+      if (refundId && rstatus) await handleSettlementRefundEvent(refundId, rstatus, event.id);
+      break;
+    }
+    case "invoice.voided": {
+      // Rescue the post-Stripe void crash for a fee-settlement invoice. Non-
+      // settlement invoice.voided has no existing behavior (acknowledged + ignored).
+      if (isFeeSettlementInvoice(object)) {
+        await handleSettlementInvoiceVoided(object, event.id);
+      }
       break;
     }
     case "checkout.session.completed": {
