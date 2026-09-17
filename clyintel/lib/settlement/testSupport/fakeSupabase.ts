@@ -42,6 +42,8 @@ export interface FakeSeed {
   appConfig?: Record<string, unknown>;
   /** pre-existing audit_log rows (for dedup fixtures). */
   audit?: AuditRow[];
+  /** fee_settlement_refunds rows (refund/void provenance). */
+  refunds?: Row[];
 }
 
 export interface CapturedWrite {
@@ -58,6 +60,7 @@ export interface FakeSupabase {
   ledgerRows: Map<string, Row>;
   configRows: Map<string, unknown>;
   auditRows: AuditRow[];
+  refundRows: Row[];
   writes: CapturedWrite[];
 }
 
@@ -87,6 +90,7 @@ export function makeFakeSupabase(seed: FakeSeed = {}): FakeSupabase {
   const lineRows: Row[] = (seed.lines ?? []).map((r) => ({ ...r }));
   const configRows = new Map<string, unknown>(Object.entries(seed.appConfig ?? {}));
   const auditRows: AuditRow[] = (seed.audit ?? []).map((r) => ({ ...r }));
+  const refundRows: Row[] = (seed.refunds ?? []).map((r) => ({ ...r }));
   const writes: CapturedWrite[] = [];
 
   const matchRow = (row: Row, b: Builder) =>
@@ -107,6 +111,7 @@ export function makeFakeSupabase(seed: FakeSeed = {}): FakeSupabase {
       case "fee_settlement_lines": return lineRows;
       case "rev_share_ledger": return [...ledgerRows.values()];
       case "audit_log": return auditRows as unknown as Row[];
+      case "fee_settlement_refunds": return refundRows;
       default: return [];
     }
   };
@@ -129,8 +134,20 @@ export function makeFakeSupabase(seed: FakeSeed = {}): FakeSupabase {
 
     // ── INSERT ──────────────────────────────────────────────────────────────
     if (b.op === "insert") {
-      const payload = (b.payload ?? {}) as Record<string, unknown>;
-      if (b.table === "audit_log") auditRows.push(payload as unknown as AuditRow);
+      const payload = { ...(b.payload ?? {}) } as Record<string, unknown>;
+      if (b.table === "audit_log") {
+        auditRows.push(payload as unknown as AuditRow);
+        writes.push({ table: b.table, op: "insert", payload });
+        return { data: null, error: null };
+      }
+      if (b.table === "fee_settlement_refunds") {
+        // Postgres assigns id default gen_random_uuid(); mirror that so a
+        // subsequent update-by-id and a `.select().maybeSingle()` return the row.
+        if (payload.id == null) payload.id = `refund_row_${refundRows.length + 1}`;
+        refundRows.push(payload);
+        writes.push({ table: b.table, op: "insert", payload });
+        return { data: b.ret ? (b.single ? payload : [payload]) : null, error: null };
+      }
       writes.push({ table: b.table, op: "insert", payload });
       return { data: null, error: null };
     }
@@ -141,18 +158,22 @@ export function makeFakeSupabase(seed: FakeSeed = {}): FakeSupabase {
       if (b.table === "fee_settlements") {
         const id = b.eqf["id"] as string;
         const row = feeRows.get(id);
-        const isClaim = payload.status === "charging" && b.orExpr != null;
+        // A compare-and-set claim is any UPDATE carrying an `.or(...)` predicate
+        // (the charge path claims into 'charging', the refund path into
+        // 'refund_pending'). Parse the disjuncts generically:
+        //   status.eq.<S>                                → claimable at plain status S
+        //   and(status.eq.<S>,claimed_at.lt.<CUTOFF>)    → claimable if STALE
+        const isClaim = b.orExpr != null;
         if (isClaim) {
-          // Single-flight compare-and-set. Claimable iff pending, failed, or a
-          // STALE 'charging' (claimed_at older than the cutoff in the .or() expr).
-          const cutoff = /claimed_at\.lt\.([^,)]+)/.exec(b.orExpr ?? "")?.[1] ?? null;
+          const or = b.orExpr ?? "";
+          const andMatch = /and\(status\.eq\.([a-z_]+),claimed_at\.lt\.([^,)]+)\)/.exec(or);
+          const plainStatuses = [...or.replace(/and\([^)]*\)/g, "").matchAll(/status\.eq\.([a-z_]+)/g)].map((m) => m[1]);
           const claimable =
             !!row &&
-            (row.status === "pending" ||
-              row.status === "failed" ||
-              (row.status === "charging" &&
-                cutoff !== null &&
-                (row.claimed_at == null || (row.claimed_at as string) < cutoff)));
+            (plainStatuses.includes(row.status as string) ||
+              (andMatch != null &&
+                row.status === andMatch[1] &&
+                (row.claimed_at == null || (row.claimed_at as string) < andMatch[2])));
           if (claimable && row) {
             Object.assign(row, payload);
             writes.push({ table: b.table, op: "update", payload });
@@ -163,6 +184,16 @@ export function makeFakeSupabase(seed: FakeSeed = {}): FakeSupabase {
         // Guarded (terminal-state) or plain update. Guard failing / missing row →
         // no mutation and no captured write.
         if (row && passesNot(row, b.notCol, b.notVals)) {
+          Object.assign(row, payload);
+          writes.push({ table: b.table, op: "update", payload });
+          return { data: b.ret ? [{ id }] : null, error: null };
+        }
+        return { data: b.ret ? [] : null, error: null };
+      }
+      if (b.table === "fee_settlement_refunds") {
+        const id = b.eqf["id"] as string;
+        const row = refundRows.find((r) => r.id === id);
+        if (row) {
           Object.assign(row, payload);
           writes.push({ table: b.table, op: "update", payload });
           return { data: b.ret ? [{ id }] : null, error: null };
@@ -199,5 +230,5 @@ export function makeFakeSupabase(seed: FakeSeed = {}): FakeSupabase {
     return b;
   }
 
-  return { client: { from }, feeRows, subRows, lineRows, ledgerRows, configRows, auditRows, writes };
+  return { client: { from }, feeRows, subRows, lineRows, ledgerRows, configRows, auditRows, refundRows, writes };
 }

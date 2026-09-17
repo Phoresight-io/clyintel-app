@@ -312,6 +312,20 @@ export interface StripeInvoice {
   paid?: boolean;
   amount_due?: number;
   total?: number;
+  // Present on a retrieved invoice — the objects a refund targets. `payment_intent`
+  // is preferred; `charge` is the legacy fallback. Either may be null/absent.
+  payment_intent?: string | null;
+  charge?: string | null;
+}
+
+// A Stripe Refund object (subset). `status`: succeeded | pending | failed |
+// canceled | requires_action.
+export interface StripeRefund {
+  id: string;
+  status: string;
+  amount?: number;
+  charge?: string | null;
+  payment_intent?: string | null;
 }
 
 // Draft invoice on the customer. charge_automatically = Stripe attempts payment
@@ -370,4 +384,42 @@ export async function finalizeInvoice(invoiceId: string): Promise<StripeInvoice>
 // (the caller records it as a failed settlement attempt).
 export async function payInvoice(invoiceId: string): Promise<StripeInvoice> {
   return stripeRequest<StripeInvoice>(`/invoices/${invoiceId}/pay`, "POST");
+}
+
+// ── Fee-settlement refund / void (Part B, refund execution) ──────────────────
+// Reverse a settled fee. Same hand-rolled fetch style; no `stripe` npm package.
+// Each mutating call takes an Idempotency-Key so a retried refund/void never
+// creates a second refund or double-voids. See lib/settlement/refundSettlement.ts.
+
+// Retrieve an invoice to resolve the object a refund targets (payment_intent /
+// charge). fee_settlements stores only stripe_invoice_id, so we read the invoice
+// to find what to refund. Read-only GET (no idempotency key needed).
+export async function retrieveInvoice(invoiceId: string): Promise<StripeInvoice> {
+  return stripeRequest<StripeInvoice>(`/invoices/${invoiceId}`, "GET");
+}
+
+// Refund a charge. Targets `payment_intent` (preferred) or `charge`; `amountCents`
+// is integer minor units (a full or partial refund). The Idempotency-Key makes a
+// retry replay the original refund instead of creating a second one.
+export async function refundCharge(
+  target: { paymentIntent?: string | null; charge?: string | null },
+  args: { amountCents: number; idempotencyKey: string },
+): Promise<StripeRefund> {
+  const params: Record<string, unknown> = { amount: args.amountCents };
+  if (target.paymentIntent) params.payment_intent = target.paymentIntent;
+  else if (target.charge) params.charge = target.charge;
+  else throw new Error("refundCharge: no payment_intent or charge to refund");
+  return stripeRequest<StripeRefund>("/refunds", "POST", params, { idempotencyKey: args.idempotencyKey });
+}
+
+// Void a finalized-but-unpaid invoice (the reversal mechanism for an 'invoiced'
+// settlement — nothing was captured, so there is no charge to refund). Idempotent
+// via the key. A void has no refund id.
+export async function voidInvoice(
+  invoiceId: string,
+  args: { idempotencyKey: string },
+): Promise<StripeInvoice> {
+  return stripeRequest<StripeInvoice>(`/invoices/${invoiceId}/void`, "POST", undefined, {
+    idempotencyKey: args.idempotencyKey,
+  });
 }
