@@ -11,16 +11,13 @@ import {
   handleSettlementInvoicePaid,
   handleSettlementInvoiceFailed,
 } from "./route";
+// The stateful in-memory fake now lives in a shared test-support module so the
+// Layer-1 charge-path integration test and this #117 suite drive one fake. It
+// models fee_settlements (select + guarded/claim update) and audit_log
+// (select + insert), capturing every write so `payments` can be asserted absent.
+import { makeFakeSupabase, type Row, type AuditRow } from "@/lib/settlement/testSupport/fakeSupabase";
 
-// ── Stateful Supabase fake ────────────────────────────────────────────────────
-// Models exactly the calls the reconcilers + writeAudit make:
-//   fee_settlements: select(...).eq('id',_).maybeSingle()
-//                    update({...}).eq('id',_).not('status','in','(paid,void)').select('id')
-//   audit_log:       select('payload').eq('subscriber_id',_).eq('action',_)  (dedup)
-//                    insert({...})
-// It captures EVERY insert/update in `writes` so tests can assert which tables
-// were (and were not) written — e.g. `payments` must never appear.
-type FeeRow = {
+type FeeRow = Row & {
   id: string;
   subscriber_id: string;
   status: string;
@@ -28,80 +25,9 @@ type FeeRow = {
   stripe_invoice_id?: string | null;
   last_error?: string | null;
 };
-type AuditRow = { subscriber_id: string; action: string; payload: Record<string, unknown> };
-
-function makeFake(seed: { settlements?: FeeRow[]; audit?: AuditRow[] } = {}) {
-  const feeRows = new Map<string, FeeRow>((seed.settlements ?? []).map((r) => [r.id, { ...r }]));
-  const auditRows: AuditRow[] = (seed.audit ?? []).map((r) => ({ ...r }));
-  const writes: { table: string; op: string; payload: unknown }[] = [];
-
-  const matches = (row: Record<string, unknown>, filters: Record<string, unknown>) =>
-    Object.entries(filters).every(([k, v]) => row[k] === v);
-
-  const passesNot = (row: Record<string, unknown>, col: string | null, vals: string | null) => {
-    if (!col || !vals) return true;
-    const list = vals.replace(/[()]/g, "").split(",");
-    return !list.includes(row[col] as string);
-  };
-
-  function from(table: string) {
-    const b: {
-      table: string; op: string | null; payload: Record<string, unknown> | null;
-      filters: Record<string, unknown>; single: boolean; ret: boolean; notCol: string | null; notVals: string | null;
-      [k: string]: unknown;
-    } = { table, op: null, payload: null, filters: {}, single: false, ret: false, notCol: null, notVals: null };
-    b.select = () => { if (b.op === null) b.op = "select"; else b.ret = true; return b; };
-    b.eq = (col: string, val: unknown) => { b.filters[col] = val; return b; };
-    b.not = (col: string, _op: string, vals: string) => { b.notCol = col; b.notVals = vals; return b; };
-    b.insert = (payload: Record<string, unknown>) => { b.op = "insert"; b.payload = payload; return b; };
-    b.update = (payload: Record<string, unknown>) => { b.op = "update"; b.payload = payload; return b; };
-    b.maybeSingle = () => { b.single = true; return b; };
-    b.then = (onF: (v: { data: unknown; error: unknown }) => unknown, onR?: (e: unknown) => unknown) =>
-      Promise.resolve(resolve(b)).then(onF, onR);
-    return b;
-  }
-
-  function resolve(b: {
-    table: string; op: string | null; payload: Record<string, unknown> | null;
-    filters: Record<string, unknown>; single: boolean; ret: boolean; notCol: string | null; notVals: string | null;
-  }): { data: unknown; error: unknown } {
-    if (b.table === "fee_settlements") {
-      if (b.op === "select") {
-        const rows = [...feeRows.values()].filter((r) => matches(r as Record<string, unknown>, b.filters));
-        return { data: b.single ? (rows[0] ?? null) : rows, error: null };
-      }
-      if (b.op === "update") {
-        const id = b.filters.id as string;
-        const row = feeRows.get(id);
-        if (row && passesNot(row as Record<string, unknown>, b.notCol, b.notVals)) {
-          Object.assign(row, b.payload);
-          writes.push({ table: b.table, op: "update", payload: b.payload });
-          return { data: b.ret ? [{ id }] : null, error: null }; // applied
-        }
-        return { data: [], error: null }; // guard failed / missing → no-op
-      }
-    }
-    if (b.table === "audit_log") {
-      if (b.op === "select") {
-        const rows = auditRows.filter((r) => matches(r as unknown as Record<string, unknown>, b.filters)).map((r) => ({ payload: r.payload }));
-        return { data: rows, error: null };
-      }
-      if (b.op === "insert") {
-        auditRows.push(b.payload as unknown as AuditRow);
-        writes.push({ table: b.table, op: "insert", payload: b.payload });
-        return { data: null, error: null };
-      }
-    }
-    // Any other table (e.g. payments) — capture write attempts so tests can assert none.
-    if (b.op === "insert" || b.op === "update") writes.push({ table: b.table, op: b.op, payload: b.payload });
-    return { data: b.single ? null : [], error: null };
-  }
-
-  return { client: { from } as unknown, feeRows, auditRows, writes };
-}
 
 const install = (seed?: { settlements?: FeeRow[]; audit?: AuditRow[] }) => {
-  const fake = makeFake(seed);
+  const fake = makeFakeSupabase(seed);
   h.client = fake.client;
   return fake;
 };

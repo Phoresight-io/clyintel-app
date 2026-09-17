@@ -6,7 +6,7 @@
 //
 // HARD SAFETY GATES — a real charge happens ONLY when ALL hold:
 //   1. dryRun === false                        (default true — compute/log only)
-//   2. kill-switch on (app_config.settlement_sweep_enabled === true)
+//   2. kill-switch on (app_config.settlement_charging_enabled === true)
 //   3. env/live gate: VERCEL_ENV === 'production' AND STRIPE_SECRET_KEY starts
 //      with 'sk_live'  (no ambient prod-detection exists — built explicitly here)
 // Any gate failing ⇒ forced dry-run: we still select + reconcile + log, but make
@@ -291,6 +291,15 @@ export interface DrainOptions {
   dryRun?: boolean;
   /** Max candidate settlements per run (settlements are ≤ subscribers; small). */
   limit?: number;
+  /**
+   * Test-only seam for the env/live gate. Defaults to the real `liveChargesAllowed`
+   * (VERCEL_ENV==='production' AND STRIPE_SECRET_KEY starts with 'sk_live'). Left
+   * un-injected, behavior is byte-for-byte unchanged — production still requires
+   * the real gate. An integration test injects `() => true` to exercise the real
+   * charge branch against an sk_test key with no production env. This NEVER weakens
+   * the production default.
+   */
+  liveChargesAllowed?: () => boolean;
 }
 
 export interface DrainResult {
@@ -322,7 +331,8 @@ export async function drainSettlements(
   // Charge gate: the SEPARATE settlement_charging_enabled flag (not the sweep
   // flag). Charging needs dryRun off AND this flag AND the env/live gate.
   const chargingEnabled = await isChargingEnabled(service);
-  const liveEnv = liveChargesAllowed();
+  // Default is the real gate; an injected seam (tests only) never relaxes prod.
+  const liveEnv = (options.liveChargesAllowed ?? liveChargesAllowed)();
   const charging = dryRun === false && chargingEnabled && liveEnv;
 
   // 1. Candidate settlements: pending, failed-but-retryable, or a STALE 'charging'
