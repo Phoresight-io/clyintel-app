@@ -23,6 +23,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export const MIN_CHARGE_CENTS_KEY = "settlement_min_charge_cents";
 export const SWEEP_ENABLED_KEY = "settlement_sweep_enabled";
 export const CHARGING_ENABLED_KEY = "settlement_charging_enabled";
+// Refund/void execution gate (refundSettlement). DISTINCT from the charge flag —
+// a separate capability so charging and refunding are enabled independently.
+// Fail-safe: unset / non-true ⇒ disabled. (Not created in any environment yet.)
+export const REFUNDS_ENABLED_KEY = "settlement_refunds_enabled";
 
 /** Stripe's USD card minimum is 50¢; used when settlement_min_charge_cents is unset. */
 export const DEFAULT_MIN_CHARGE_CENTS = 50;
@@ -84,5 +88,17 @@ export async function isChargingEnabled(
   service: Pick<SupabaseClient, "from">,
 ): Promise<boolean> {
   const value = await readValue(service, CHARGING_ENABLED_KEY);
+  return value === true;
+}
+
+/**
+ * Refund/void gate (refundSettlement). A real Stripe refund/void requires an
+ * EXPLICIT `true`. DISTINCT from the charge gate — refunding is a separate
+ * capability from charging. Fail-safe: unset / non-true ⇒ disabled.
+ */
+export async function isRefundsEnabled(
+  service: Pick<SupabaseClient, "from">,
+): Promise<boolean> {
+  const value = await readValue(service, REFUNDS_ENABLED_KEY);
   return value === true;
 }
