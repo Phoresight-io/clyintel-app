@@ -9,6 +9,10 @@ vi.mock("@/lib/settlement/chargeSettlement", () => ({ drainSettlements: vi.fn() 
 import { GET } from "./route";
 import { runSettlementSweep } from "@/lib/settlement/runSweep";
 import { drainSettlements } from "@/lib/settlement/chargeSettlement";
+// The route derives the response `boundary` from the real clock via
+// mostRecentClosedCycleClose(); assert against the same helper (the repo's
+// injected-clock house pattern) rather than a literal that rots after each 15th.
+import { mostRecentClosedCycleClose } from "@/lib/settlement/cycleBoundary";
 
 // Minimal request stub — the route only reads the Authorization header.
 const req = (auth?: string) =>
@@ -70,7 +74,8 @@ describe("settlement cron route — run + summary", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({
-      boundary: "2026-08-15",
+      // Route computes this from mostRecentClosedCycleClose() on the real clock.
+      boundary: mostRecentClosedCycleClose(),
       persist: { sweepEnabled: true, wrote: true, eligibleRows: 3, billable: 2, carried: 1, persisted: 1 },
       charge: { chargingEnabled: true, liveEnv: true, charging: true, candidates: 2, charged: 1, failed: 1, skipped: 0 },
     });
