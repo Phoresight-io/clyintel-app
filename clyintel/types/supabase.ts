@@ -642,6 +642,56 @@ export type Database = {
           },
         ]
       }
+      fee_settlement_refunds: {
+        Row: {
+          actor: string
+          amount_cents: number
+          created_at: string
+          id: string
+          kind: string
+          reason: string
+          settlement_id: string
+          status: string
+          stripe_idempotency_key: string | null
+          stripe_refund_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          actor: string
+          amount_cents: number
+          created_at?: string
+          id?: string
+          kind: string
+          reason: string
+          settlement_id: string
+          status?: string
+          stripe_idempotency_key?: string | null
+          stripe_refund_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          actor?: string
+          amount_cents?: number
+          created_at?: string
+          id?: string
+          kind?: string
+          reason?: string
+          settlement_id?: string
+          status?: string
+          stripe_idempotency_key?: string | null
+          stripe_refund_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fee_settlement_refunds_settlement_id_fkey"
+            columns: ["settlement_id"]
+            isOneToOne: false
+            referencedRelation: "fee_settlements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       fee_settlements: {
         Row: {
           attempts: number
