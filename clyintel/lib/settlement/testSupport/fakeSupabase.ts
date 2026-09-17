@@ -104,6 +104,12 @@ export function makeFakeSupabase(seed: FakeSeed = {}): FakeSupabase {
     return !list.includes(row[col] as string);
   };
 
+  // Every accumulated `.eq()` filter must match the row — enforces POSITIVE guards
+  // on an update (e.g. the refund path's `.eq("status","refund_pending")`), not
+  // just the id lookup.
+  const allEqMatch = (row: Row, eqf: Record<string, unknown>) =>
+    Object.entries(eqf).every(([k, v]) => row[k] === v);
+
   const rowsFor = (table: string): Row[] => {
     switch (table) {
       case "fee_settlements": return [...feeRows.values()];
@@ -181,9 +187,9 @@ export function makeFakeSupabase(seed: FakeSeed = {}): FakeSupabase {
           }
           return { data: [], error: null };
         }
-        // Guarded (terminal-state) or plain update. Guard failing / missing row →
-        // no mutation and no captured write.
-        if (row && passesNot(row, b.notCol, b.notVals)) {
+        // Guarded update. Every `.eq()` filter (id AND any positive status guard)
+        // and the `.not()` terminal guard must hold, else no mutation / no write.
+        if (row && allEqMatch(row, b.eqf) && passesNot(row, b.notCol, b.notVals)) {
           Object.assign(row, payload);
           writes.push({ table: b.table, op: "update", payload });
           return { data: b.ret ? [{ id }] : null, error: null };
@@ -191,14 +197,11 @@ export function makeFakeSupabase(seed: FakeSeed = {}): FakeSupabase {
         return { data: b.ret ? [] : null, error: null };
       }
       if (b.table === "fee_settlement_refunds") {
-        const id = b.eqf["id"] as string;
-        const row = refundRows.find((r) => r.id === id);
-        if (row) {
-          Object.assign(row, payload);
-          writes.push({ table: b.table, op: "update", payload });
-          return { data: b.ret ? [{ id }] : null, error: null };
-        }
-        return { data: b.ret ? [] : null, error: null };
+        // Match by EVERY `.eq()` filter (by id, or by settlement_id+kind[+status]).
+        const matched = refundRows.filter((r) => allEqMatch(r, b.eqf));
+        for (const r of matched) Object.assign(r, payload);
+        if (matched.length > 0) writes.push({ table: b.table, op: "update", payload });
+        return { data: b.ret ? matched.map((r) => ({ id: r.id as string })) : null, error: null };
       }
       // Any other table (e.g. payments) — capture the attempt so tests can assert
       // it never happens; no row store is modeled for these.
