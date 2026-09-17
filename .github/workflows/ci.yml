@@ -1,0 +1,45 @@
+name: CI
+
+# Minimal CI: typecheck + tests on every PR into main. The app lives in
+# clyintel/, so all steps run there. No secrets: STRIPE_TEST_SMOKE stays unset,
+# so the env-gated Stripe test-mode smoke (lib/settlement/chargePathSmoke.test.ts)
+# skips — the default suite is fully hermetic (no network, no real DB/Stripe).
+on:
+  pull_request:
+    branches: [main]
+
+# Least privilege — CI only needs to read the checked-out code.
+permissions:
+  contents: read
+
+# Supersede in-flight runs for the same PR/branch.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tsc + vitest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clyintel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: clyintel/package-lock.json
+
+      - name: Install (clean, from lockfile)
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npx vitest run
