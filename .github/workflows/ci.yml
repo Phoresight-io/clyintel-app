@@ -1,12 +1,12 @@
 name: CI
 
-# Minimal CI: typecheck + tests on every PR into main. The app lives in
-# clyintel/, so all steps run there. No secrets: STRIPE_TEST_SMOKE stays unset,
+# Minimal CI: typecheck + tests on every PR into main or develop. The app lives
+# in clyintel/, so all steps run there. No secrets: STRIPE_TEST_SMOKE stays unset,
 # so the env-gated Stripe test-mode smoke (lib/settlement/chargePathSmoke.test.ts)
 # skips — the default suite is fully hermetic (no network, no real DB/Stripe).
 on:
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 # Least privilege — CI only needs to read the checked-out code.
 permissions:
