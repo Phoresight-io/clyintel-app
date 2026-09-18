@@ -12,6 +12,7 @@ import {
   DEFAULT_RETURN_TO,
 } from "@/lib/qbo/oauthState";
 import { runQboSync } from "@/lib/qbo/runQboSync";
+import { serverEnv } from "@/lib/config/env.server";
 
 // QuickBooks OAuth callback. Validates the signed state cookie, exchanges the
 // code for tokens, and upserts the encrypted token set into connected_accounts
@@ -75,7 +76,7 @@ export async function GET(req: NextRequest) {
   // /connections and never errors the flow (reauth-never-fails-reauth).
   const returnTo = sanitizeReturnTo(parseStateCookie(cookieValue)?.returnTo);
 
-  const redirectUri = process.env.QBO_REDIRECT_URI;
+  const redirectUri = serverEnv.qboRedirectUri();
   if (!redirectUri) {
     console.error("qbo/callback: QBO_REDIRECT_URI not configured");
     return finish("error");
@@ -116,7 +117,7 @@ export async function GET(req: NextRequest) {
         token_type: "bearer",
         scope: QBO_SCOPE,
         refresh_expires_at: refreshExpiresAt,
-        environment: process.env.QBO_ENVIRONMENT ?? null,
+        environment: serverEnv.qboEnvironment() ?? null,
       },
     },
     { onConflict: "subscriber_id,provider" }
@@ -139,7 +140,7 @@ export async function GET(req: NextRequest) {
       provider: "quickbooks",
       realm_id: realmId,
       scope: QBO_SCOPE,
-      environment: process.env.QBO_ENVIRONMENT ?? null,
+      environment: serverEnv.qboEnvironment() ?? null,
     } as never,
   });
 

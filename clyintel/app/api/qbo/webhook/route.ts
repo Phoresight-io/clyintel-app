@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { classifyWebhookRequest } from "@/lib/qbo/classifyWebhookRequest";
+import { serverEnv } from "@/lib/config/env.server";
 
 // Inbound QuickBooks Online webhook. This route ONLY verifies the Intuit
 // signature, persists the raw verified event to webhook_events, and ACKs 200.
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
   const signature = req.headers.get("intuit-signature");
 
   // 3 + 4. Verify, then (only if verified) parse. Pure, unit-tested classifier.
-  const token = process.env.QBO_WEBHOOK_VERIFIER_TOKEN;
+  const token = serverEnv.qboWebhookVerifierToken();
   const outcome = classifyWebhookRequest(raw, signature, token);
 
   switch (outcome.kind) {

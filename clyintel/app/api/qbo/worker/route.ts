@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
+import { serverEnv } from "@/lib/config/env.server";
 import { processCaptureEvent } from "@/lib/capture/processCaptureEvent";
 import { createLiveCaptureDeps } from "@/lib/capture/captureDepsLive";
 import { buildCaptureEventFromPayment } from "@/lib/qbo/captureAdapter";
@@ -55,7 +56,7 @@ async function runWorker(req: NextRequest) {
   // A. Auth guard FIRST — never do work before it passes.
   const auth = checkCronAuth(
     req.headers.get("authorization"),
-    process.env.QBO_WORKER_CRON_SECRET,
+    serverEnv.qboWorkerCronSecret(),
   );
   if (auth === "missing_secret") {
     console.error("qbo/worker: QBO_WORKER_CRON_SECRET not configured");

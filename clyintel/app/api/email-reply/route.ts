@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { getSupabase } from "@/lib/supabase";
+import { serverEnv } from "@/lib/config/env.server";
 
 const SYSTEM_PROMPT = `You are a professional AI collections agent for Clyintel, recovering outstanding invoice payments on behalf of small businesses. Be firm but respectful. You may offer a discount of up to 20% as goodwill — never more. Always calculate and state the discounted amount explicitly (e.g. "20% off $15,200 brings your balance to $12,160"). If the client requests a human or is hostile, include that someone will be in contact. Tone: 1-14 days overdue = friendly. 15-30 days = firm. 31-60 days = serious. 60+ = final notice. Respond in plain conversational text only — no JSON, no markdown. If asked something you don't know (e.g. specific account history, previous payments, internal notes), say: "I don't have that detail in front of me right now — let me have someone from our team follow up with you on that specifically." Do not make up information.`;
 
@@ -83,7 +84,7 @@ async function processEmailReply(payload: unknown) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY!,
+        "x-api-key": serverEnv.anthropicApiKey(),
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
@@ -121,7 +122,7 @@ async function processEmailReply(payload: unknown) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.APP_MAILERSEND_API_KEY!}`,
+        Authorization: `Bearer ${serverEnv.appMailersendApiKey()}`,
       },
       body: JSON.stringify(mailerPayload),
     });

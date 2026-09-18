@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabase } from '@/lib/supabase';
+import { serverEnv } from '@/lib/config/env.server';
 
 const INVOICE_MAP: Record<number, { number: string; amount: string; amountCents: number }> = {
   1: { number: 'INV-2024-0891', amount: '$2,400.00', amountCents: 240000 },
@@ -48,12 +49,12 @@ export async function POST(req: NextRequest) {
   const vapiRes = await fetch('https://api.vapi.ai/call/phone', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${process.env.VAPI_API_KEY}`,
+      Authorization: `Bearer ${serverEnv.vapiApiKey()}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      assistantId: process.env.VAPI_ASSISTANT_ID,
-      phoneNumberId: process.env.VAPI_PHONE_NUMBER_ID,
+      assistantId: serverEnv.vapiAssistantId(),
+      phoneNumberId: serverEnv.vapiPhoneNumberId(),
       customer: { number: phone },
       assistantOverrides: {
         variableValues: {

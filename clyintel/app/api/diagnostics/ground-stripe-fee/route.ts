@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase-server";
 import { getSupabase } from "@/lib/supabase";
+import { serverEnv } from "@/lib/config/env.server";
 
 // ⚠️ D2 PHASE 2a TEST-ONLY DIAGNOSTIC ROUTE — delete at Phase 2a close-out. ⚠️
 //
@@ -31,8 +32,7 @@ async function stripeGet(
   query: Record<string, string[] | string> = {},
   stripeAccount?: string,
 ): Promise<Record<string, unknown>> {
-  const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) throw new Error("STRIPE_SECRET_KEY is not set");
+  const key = serverEnv.stripeSecretKey();
   const parts: string[] = [];
   for (const [k, v] of Object.entries(query)) {
     if (Array.isArray(v)) v.forEach((x, i) => parts.push(`${k}[${i}]=${encodeURIComponent(x)}`));
