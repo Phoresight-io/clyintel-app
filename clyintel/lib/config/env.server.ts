@@ -1,3 +1,5 @@
+import "server-only";
+
 // Server-only environment access — secrets and server-system variables.
 //
 // This module centralizes every read of a server-side env var so the env
@@ -7,17 +9,10 @@
 // caller keep its own fail-closed guard (the shape most webhook/cron routes
 // already use, so their exact 401/500 responses are preserved).
 //
-// CLIENT-LEAK BOUNDARY: this module must never reach the browser bundle. The
-// canonical enforcement is `import "server-only"` at the top, which turns any
-// client import into a build error. That package is not a dependency of this
-// repo, and adding packages needs product sign-off (clyintel/CLAUDE.md, agent
-// rule 2), so it is intentionally NOT added here yet. Until it is, two things
-// hold the boundary: (1) Next.js never inlines a non-NEXT_PUBLIC_ var into the
-// client bundle, so these values are physically absent from browser JS, and
-// (2) env-config.test.ts statically asserts that no Client Component
-// ("use client") imports this module. Swap in `import "server-only"` once the
-// dependency is approved. NOTE: no runtime `window` guard is used on purpose —
-// it would false-positive under the jsdom test environment.
+// CLIENT-LEAK BOUNDARY: the `import "server-only"` above makes importing this
+// module from a Client Component a BUILD error, so these secrets can never reach
+// the browser bundle. env-config.test.ts additionally asserts (statically) that
+// no "use client" file imports this module, catching the mistake at test time.
 //
 // All getters read `process.env` at CALL TIME (never cached at module load) so
 // per-test env stubbing (vi.stubEnv / direct process.env writes) behaves exactly
