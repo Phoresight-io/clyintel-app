@@ -7,13 +7,13 @@
 
 import { getSupabase } from "@/lib/supabase";
 import { computeRevShareFee } from "@/lib/revshare/computeRevShareFee";
+import { serverEnv } from "@/lib/config/env.server";
 
 const STRIPE_API = "https://api.stripe.com/v1";
 
 function getKey(): string {
-  const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) throw new Error("STRIPE_SECRET_KEY is not set");
-  return key;
+  // Required — throws a clear, var-named error if STRIPE_SECRET_KEY is unset.
+  return serverEnv.stripeSecretKey();
 }
 
 // Flatten nested objects/arrays into Stripe's bracketed form-encoding, e.g.

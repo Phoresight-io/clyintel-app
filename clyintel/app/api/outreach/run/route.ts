@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { checkCronAuth } from "@/lib/qbo/worker";
+import { serverEnv } from "@/lib/config/env.server";
 import type { Database } from "@/types/supabase";
 import { sendEmailStep } from "@/lib/outreach/sendEmailStep";
 import { parseRunRequest, type RunMode } from "@/lib/outreach/parseRunRequest";
@@ -47,7 +48,7 @@ const CANDIDATE_STATUSES: Database["public"]["Enums"]["invoice_status"][] = [
 ];
 
 export async function POST(req: NextRequest) {
-  const auth = checkCronAuth(req.headers.get("authorization"), process.env.OUTREACH_RUN_SECRET);
+  const auth = checkCronAuth(req.headers.get("authorization"), serverEnv.outreachRunSecret());
   if (auth === "missing_secret") {
     console.error("outreach/run: OUTREACH_RUN_SECRET not configured — rejecting (fail-closed)");
     return new NextResponse("server error", { status: 500 });

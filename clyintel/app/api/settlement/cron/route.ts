@@ -4,6 +4,7 @@ import { checkCronAuth } from "@/lib/qbo/worker";
 import { runSettlementSweep } from "@/lib/settlement/runSweep";
 import { drainSettlements } from "@/lib/settlement/chargeSettlement";
 import { mostRecentClosedCycleClose } from "@/lib/settlement/cycleBoundary";
+import { serverEnv } from "@/lib/config/env.server";
 
 // Monthly Settlement Sweep — scheduled entry point (Prompt 4). Runs the two
 // stages back to back:
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
 
 async function runSettlementCron(req: NextRequest) {
   // Auth FIRST — never do work before it passes.
-  const auth = checkCronAuth(req.headers.get("authorization"), process.env.SETTLEMENT_CRON_SECRET);
+  const auth = checkCronAuth(req.headers.get("authorization"), serverEnv.settlementCronSecret());
   if (auth === "missing_secret") {
     console.error("settlement/cron: SETTLEMENT_CRON_SECRET not configured");
     return new NextResponse("server error", { status: 500 });

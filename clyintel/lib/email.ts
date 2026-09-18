@@ -8,6 +8,8 @@
 // non-critical path (e.g. a webhook whose primary job is a DB reconcile) should
 // wrap this in try/catch and log failures rather than failing the request.
 
+import { serverEnv } from "@/lib/config/env.server";
+
 export interface SendEmailParams {
   to: string;
   toName?: string;
@@ -25,10 +27,8 @@ export interface SendEmailResult {
 }
 
 export async function sendEmail(params: SendEmailParams): Promise<SendEmailResult> {
-  const apiKey = process.env.APP_MAILERSEND_API_KEY;
-  if (!apiKey) {
-    throw new Error("APP_MAILERSEND_API_KEY is not set");
-  }
+  // Required — throws a clear, var-named error if unset.
+  const apiKey = serverEnv.appMailersendApiKey();
 
   const body = {
     from: { email: "team@phoresight.io", name: "Clyintel" },

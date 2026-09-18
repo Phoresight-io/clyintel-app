@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
+import { serverEnv } from "@/lib/config/env.server";
 
 // Canonical at-rest secret encryption for the repo (AES-256-GCM). Any future
 // per-row secret (OAuth tokens, API keys, webhook signing secrets, …) MUST reuse
@@ -14,7 +15,9 @@ const IV_BYTES = 12; // 96-bit nonce, the GCM standard
 const KEY_BYTES = 32; // AES-256
 
 function getKey(): Buffer {
-  const raw = process.env.TOKEN_ENCRYPTION_KEY;
+  // Sourced through the config module; crypto keeps its own presence + length
+  // validation (and their exact error messages) as domain logic.
+  const raw = serverEnv.tokenEncryptionKey();
   if (!raw) {
     throw new Error(
       "TOKEN_ENCRYPTION_KEY is not set — at-rest secret encryption cannot proceed"

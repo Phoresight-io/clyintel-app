@@ -2,6 +2,8 @@
 // environment-independent for OAuth (sandbox vs production is selected by the
 // app credentials and QBO_ENVIRONMENT, not by a different OAuth host).
 
+import { serverEnv } from "@/lib/config/env.server";
+
 export const INTUIT_AUTHORIZE_URL = "https://appcenter.intuit.com/connect/oauth2";
 export const INTUIT_TOKEN_URL =
   "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
@@ -16,11 +18,9 @@ export const QBO_SCOPE = "com.intuit.quickbooks.accounting";
  * missing base must surface, not silently default to the wrong environment).
  */
 export function qboApiBaseUrl(): string {
-  const base = process.env.QBO_BASE_URL;
-  if (!base) {
-    throw new Error("QBO_BASE_URL is not set");
-  }
-  return base.replace(/\/+$/, ""); // tolerate a trailing slash
+  // Required — throws a clear, var-named error if unset (never silently defaults
+  // to the wrong environment). Trailing-slash normalization stays here.
+  return serverEnv.qboBaseUrl().replace(/\/+$/, ""); // tolerate a trailing slash
 }
 
 export interface QboTokenResponse {
@@ -32,11 +32,9 @@ export interface QboTokenResponse {
 }
 
 function basicAuthHeader(): string {
-  const id = process.env.QBO_CLIENT_ID;
-  const secret = process.env.QBO_CLIENT_SECRET;
-  if (!id || !secret) {
-    throw new Error("QBO_CLIENT_ID / QBO_CLIENT_SECRET are not set");
-  }
+  // Both required — each throws a clear, var-named error if unset.
+  const id = serverEnv.qboClientId();
+  const secret = serverEnv.qboClientSecret();
   return Buffer.from(`${id}:${secret}`).toString("base64");
 }
 

@@ -21,10 +21,13 @@ import { redirect } from "next/navigation";
 import { getSupabase } from "@/lib/supabase";
 import { getRemainingBalance } from "@/lib/recovery/balance";
 import { createRecoveryCheckoutSession, type RecoveryCheckoutResult } from "@/lib/stripe";
+import { publicEnv } from "@/lib/config/env.public";
+import { serverEnv } from "@/lib/config/env.server";
 
 function getAppUrl(): string {
-  if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL;
-  const v = process.env.VERCEL_URL;
+  const siteUrl = publicEnv.siteUrl();
+  if (siteUrl) return siteUrl;
+  const v = serverEnv.vercelUrl();
   if (v) return `https://${v}`;
   return "http://localhost:3000";
 }

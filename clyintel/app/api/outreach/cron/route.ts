@@ -3,6 +3,7 @@ import { checkCronAuth } from "@/lib/qbo/worker";
 import { runCadence } from "@/lib/outreach/runCadence";
 import { type RunMode } from "@/lib/outreach/parseRunRequest";
 import { createDefaultPort } from "@/app/api/outreach/run/route";
+import { serverEnv } from "@/lib/config/env.server";
 
 // On-demand trigger for the cadence engine. Bearer-authed via OUTREACH_CRON_SECRET
 // (fail-closed, mirrors app/api/outreach/run) and ADDITIONALLY env-fenced for scope:
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest) {
 async function runOutreachCron(req: NextRequest) {
   // Fail-closed bearer auth FIRST — before any env/config read or runCadence.
   // A missing OUTREACH_CRON_SECRET rejects every request (never runs unguarded).
-  const auth = checkCronAuth(req.headers.get("authorization"), process.env.OUTREACH_CRON_SECRET);
+  const auth = checkCronAuth(req.headers.get("authorization"), serverEnv.outreachCronSecret());
   if (auth === "missing_secret") {
     console.error("outreach/cron: OUTREACH_CRON_SECRET not configured — rejecting (fail-closed)");
     return new NextResponse("server error", { status: 500 });
@@ -53,9 +54,9 @@ async function runOutreachCron(req: NextRequest) {
 
   // A. Config from env (never hardcoded). Default dry_run — a misconfigured or
   // absent OUTREACH_CRON_MODE never silently goes live.
-  const mode: RunMode = process.env.OUTREACH_CRON_MODE === "live" ? "live" : "dry_run";
-  const subscriberId = process.env.OUTREACH_CRON_SUBSCRIBER_ID || undefined;
-  const invoiceId = process.env.OUTREACH_CRON_INVOICE_ID || undefined;
+  const mode: RunMode = serverEnv.outreachCronMode() === "live" ? "live" : "dry_run";
+  const subscriberId = serverEnv.outreachCronSubscriberId();
+  const invoiceId = serverEnv.outreachCronInvoiceId();
 
   // C. A live run MUST be fenced to a subscriber (mirrors parseRunRequest's rule).
   if (mode === "live" && !subscriberId) {

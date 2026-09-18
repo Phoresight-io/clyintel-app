@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
+import { serverEnv } from "@/lib/config/env.server";
 import type { Database } from "@/types/supabase";
 
 // Inbound Vapi webhook: status-update and end-of-call-report events for a call
@@ -140,7 +141,7 @@ function serializeError(err: unknown): string {
 }
 
 export async function POST(req: NextRequest) {
-  const expectedSecret = process.env.VAPI_WEBHOOK_SECRET;
+  const expectedSecret = serverEnv.vapiWebhookSecret();
   if (!expectedSecret) {
     // Deploy misconfiguration — never accept unverified webhook traffic.
     console.error("voice/webhook: VAPI_WEBHOOK_SECRET not configured");

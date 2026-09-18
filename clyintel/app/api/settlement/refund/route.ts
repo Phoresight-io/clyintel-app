@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { checkCronAuth } from "@/lib/qbo/worker";
 import { refundSettlement } from "@/lib/settlement/refundSettlement";
+import { serverEnv } from "@/lib/config/env.server";
 
 // Ops refund endpoint (Part B, Prompt 5) — a thin, authenticated caller of
 // refundSettlement. It ADDS no money gate and can BYPASS none: every gate
@@ -26,7 +27,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export async function POST(req: NextRequest) {
   // Auth FIRST — never parse a body or do work before it passes.
-  const auth = checkCronAuth(req.headers.get("authorization"), process.env.SETTLEMENT_REFUNDS_OPS_SECRET);
+  const auth = checkCronAuth(req.headers.get("authorization"), serverEnv.settlementRefundsOpsSecret());
   if (auth === "missing_secret") {
     console.error("settlement/refund: SETTLEMENT_REFUNDS_OPS_SECRET not configured");
     return new NextResponse("server error", { status: 500 });
