@@ -1,6 +1,6 @@
 import type { CaptureEvent } from "../capture/captureEvent";
 import { getSupabase } from "../supabase";
-import { getValidAccessToken } from "./tokens";
+import { getValidAccessToken, refreshAccessToken } from "./tokens";
 import { getPayment, getInvoice, linkedInvoiceIds } from "./client";
 import type { ReconcileInput } from "./reconcileInvoiceFromCapture";
 
@@ -68,8 +68,14 @@ export async function buildCaptureEventFromPayment(
     );
   }
 
+  // Reactive-401 recovery for the reads below: force-refresh the token once and
+  // retry if QBO rejects the (clock-valid) access token mid-flight, e.g. a
+  // server-side revocation. A dead refresh token surfaces as a typed
+  // QboReconnectRequiredError from refreshAccessToken.
+  const refresh = () => refreshAccessToken(subscriberId).then((r) => r.accessToken);
+
   // 3. fetch payment.
-  const payment = await getPayment(realmId, paymentId, accessToken);
+  const payment = await getPayment(realmId, paymentId, accessToken, refresh);
 
   // 4. resolve linked invoice.
   const invoiceIds = linkedInvoiceIds(payment);
@@ -89,7 +95,7 @@ export async function buildCaptureEventFromPayment(
   const invoiceId = invoiceIds[0];
 
   // 5. fetch invoice.
-  const invoice = await getInvoice(realmId, invoiceId, accessToken);
+  const invoice = await getInvoice(realmId, invoiceId, accessToken, refresh);
 
   // 6. resolve past-due against the payment date (adapter-owned rule).
   const invoicePastDue = resolveInvoicePastDue(invoice.DueDate, payment.TxnDate);

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { getPayment, getInvoice, linkedInvoiceIds } from "./client";
+import { getPayment, getInvoice, linkedInvoiceIds, listInvoices } from "./client";
 
 // Deterministic — global fetch is stubbed, no network. QBO_BASE_URL is env-derived
 // (via constants.qboApiBaseUrl), so set it for the run and restore afterward.
@@ -105,6 +105,76 @@ describe("qbo client", () => {
     expect((err as Error).message).toMatch(/401/);
     expect((err as Error).message).toMatch(/unauthorized|revoked|auth/i);
     expect((err as Error).message).not.toContain(TOKEN);
+  });
+
+  it("401 → force-refresh → retry succeeds → returns data (GET)", async () => {
+    // First call 401s; after the injected refresh yields a new token, the retry
+    // returns the entity. Exactly one refresh, exactly two fetches.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(errStatus(401))
+      .mockResolvedValueOnce(
+        okJson({ Payment: { Id: "500", TotalAmt: 1200, TxnDate: "2026-06-28" } }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const refresh = vi.fn().mockResolvedValue("fresh-access-token");
+
+    const payment = await getPayment(REALM, "500", TOKEN, refresh);
+
+    expect(payment.Id).toBe("500");
+    expect(payment.TotalAmt).toBe(1200);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // The retry carried the refreshed bearer token, not the stale one.
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe(`Bearer ${TOKEN}`);
+    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe("Bearer fresh-access-token");
+  });
+
+  it("401 → force-refresh → retry still 401 → throws auth error (GET)", async () => {
+    // A fresh token still rejected ⇒ bad grant. One refresh, one retry, then throw.
+    const fetchMock = vi.fn().mockResolvedValue(errStatus(401));
+    vi.stubGlobal("fetch", fetchMock);
+    const refresh = vi.fn().mockResolvedValue("fresh-access-token");
+
+    const err = await getPayment(REALM, "500", TOKEN, refresh).catch((e: Error) => e);
+
+    expect((err as Error).message).toMatch(/401/);
+    expect((err as Error).message).toMatch(/unauthorized|revoked|auth/i);
+    expect((err as Error).message).not.toContain(TOKEN);
+    expect((err as Error).message).not.toContain("fresh-access-token");
+    expect(refresh).toHaveBeenCalledTimes(1); // exactly one retry, never a loop
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("401 → force-refresh → retry succeeds → returns data (query path)", async () => {
+    // Same reactive-401 recovery on the list/query path (listInvoices → qboQuery).
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(errStatus(401))
+      .mockResolvedValueOnce(
+        okJson({ QueryResponse: { Invoice: [{ Id: "130", TotalAmt: 1200 }] } }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const refresh = vi.fn().mockResolvedValue("fresh-access-token");
+
+    const invoices = await listInvoices(REALM, TOKEN, refresh);
+
+    expect(invoices).toHaveLength(1);
+    expect(invoices[0].Id).toBe("130");
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe("Bearer fresh-access-token");
+  });
+
+  it("401 with NO refresh callback → throws immediately, no retry", async () => {
+    // Backward-compat: the frozen 3-arg call still fails fast on 401.
+    const fetchMock = vi.fn().mockResolvedValue(errStatus(401));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const err = await getInvoice(REALM, "999", TOKEN).catch((e: Error) => e);
+
+    expect((err as Error).message).toMatch(/401/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("linkedInvoiceIds: ignores non-Invoice linked txns and handles missing Line", async () => {

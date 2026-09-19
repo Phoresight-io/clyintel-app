@@ -1,5 +1,5 @@
 import { getSupabase } from "@/lib/supabase";
-import { getValidAccessToken } from "@/lib/qbo/tokens";
+import { getValidAccessToken, refreshAccessToken } from "@/lib/qbo/tokens";
 import { listCustomers, listInvoices } from "@/lib/qbo/client";
 import { mergeClientContact } from "@/lib/qbo/mergeClientContact";
 import { planPocReconcile } from "@/lib/qbo/planPocReconcile";
@@ -40,10 +40,15 @@ export async function runQboSync(subscriberId: string): Promise<QboSyncResult> {
   // Valid access token (refreshed if needed) + the realm to query.
   const { accessToken, realmId } = await getValidAccessToken(subscriberId);
 
+  // Reactive-401 recovery for the list reads below: force-refresh once + retry if
+  // QBO rejects a clock-valid token mid-sync. A dead refresh token surfaces as a
+  // typed QboReconnectRequiredError from refreshAccessToken.
+  const refresh = () => refreshAccessToken(subscriberId).then((r) => r.accessToken);
+
   // Full lists from QBO. Customers first so their ids exist before invoices,
   // which FK to clients.id.
-  const customers = await listCustomers(realmId, accessToken);
-  const invoices = await listInvoices(realmId, accessToken);
+  const customers = await listCustomers(realmId, accessToken, refresh);
+  const invoices = await listInvoices(realmId, accessToken, refresh);
 
   const service = getSupabase();
 
