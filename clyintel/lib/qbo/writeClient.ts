@@ -1,4 +1,5 @@
 import { qboApiBaseUrl } from "./constants";
+import { qboFetchWith401Retry, type RefreshAccessToken } from "./client";
 
 // Thin QBO Accounting API write client: a single generic authenticated POST to
 // `/v3/company/{realmId}/{entityPath}`. Net-new and additive — the frozen
@@ -59,30 +60,34 @@ export async function qboPostEntity<T>(
   entityPath: string,
   accessToken: string,
   body: unknown,
+  refresh?: RefreshAccessToken,
 ): Promise<T> {
   const url = `${qboApiBaseUrl()}/v3/company/${realmId}/${entityPath}`;
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
+  // Shares the GET/query client's bounded reactive-401 recovery: on a 401, IF a
+  // refresh callback is supplied, force-refresh once and retry a single time.
+  const res = await qboFetchWith401Retry(
+    (token) =>
+      fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      }),
+    accessToken,
+    refresh,
     // NEVER include the access token or the request body in the thrown message.
-    if (res.status === 401) {
-      throw new Error(
+    () =>
+      new Error(
         `QBO ${entityPath} write failed: 401 Unauthorized — ` +
           `access token rejected (may be revoked or expired; the caller must ` +
           `refresh via getValidAccessToken)`,
-      );
-    }
-    throw new Error(`QBO ${entityPath} write failed: HTTP ${res.status}`);
-  }
+      ),
+    (status) => new Error(`QBO ${entityPath} write failed: HTTP ${status}`),
+  );
 
   const parsed = await res.json();
   const inner = unwrapEnvelope(parsed);
