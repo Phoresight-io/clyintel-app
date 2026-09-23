@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { getSupabase } from "@/lib/supabase";
 import { sendEmail } from "@/lib/email";
 import { handleRecoveryCheckoutCompleted } from "@/lib/recovery/handleCheckoutCompleted";
+import { serverEnv } from "@/lib/config/env.server";
 
 // Free plan: the canonical downgrade target on cancellation. Only the id is
 // hardcoded — the plan's entitlements are read at runtime so this never drifts
@@ -947,7 +948,7 @@ async function processEvent(event: StripeEvent) {
 }
 
 export async function POST(req: NextRequest) {
-  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  const secret = serverEnv.stripeWebhookSecret();
   if (!secret) {
     console.error("stripe-webhook: STRIPE_WEBHOOK_SECRET is not set");
     return NextResponse.json({ error: "Webhook secret not configured" }, { status: 500 });

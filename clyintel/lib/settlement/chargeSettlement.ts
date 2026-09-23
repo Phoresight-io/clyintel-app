@@ -35,6 +35,7 @@ import {
 } from "@/lib/stripe";
 import { reconcileSettlement } from "./reconcileSettlement";
 import { isChargingEnabled } from "./config";
+import { serverEnv } from "@/lib/config/env.server";
 
 // Charges settle in USD (fee_settlements.currency default). Stripe wants lowercase.
 const CURRENCY = "usd";
@@ -68,9 +69,20 @@ export async function claimForCharge(
   return Array.isArray(data) && data.length > 0;
 }
 
-/** The ONLY context in which a live Stripe charge may be created. */
+/**
+ * The ONLY context in which a live Stripe charge may be created.
+ *
+ * GATE LOGIC IS FROZEN: production AND an sk_live key. Only the SOURCE of the two
+ * env reads changed — the default now pulls them through the config module's
+ * non-throwing optional getters (a missing key must keep the gate CLOSED, never
+ * throw). The injected `env` seam is unchanged, so callers/tests that pass an
+ * explicit `{ VERCEL_ENV, STRIPE_SECRET_KEY }` object behave exactly as before.
+ */
 export function liveChargesAllowed(
-  env: Record<string, string | undefined> = process.env,
+  env: Record<string, string | undefined> = {
+    VERCEL_ENV: serverEnv.vercelEnv(),
+    STRIPE_SECRET_KEY: serverEnv.stripeSecretKeyOptional(),
+  },
 ): boolean {
   return (
     env.VERCEL_ENV === "production" &&
@@ -317,7 +329,8 @@ export interface DrainResult {
 
 /**
  * Drain and (when the gates allow) charge pending/retryable settlements.
- * Reads the kill-switch from app_config; the env/live gate from process.env.
+ * Reads the kill-switch from app_config; the env/live gate via liveChargesAllowed
+ * (sourced through lib/config/env.server).
  */
 export async function drainSettlements(
   options: DrainOptions = {},

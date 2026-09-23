@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
+import { serverEnv } from "@/lib/config/env.server";
 import type { Database } from "@/types/supabase";
 
 // Outbound voice-call trigger. Creates a voice_calls row FIRST (status 'queued')
@@ -47,8 +48,8 @@ export async function POST(req: NextRequest) {
   // Provider config is required — never place (or record) a call we can't
   // actually dial. Missing config is a deploy error, surfaced as 500. The
   // assistant id is resolved per-request below (production vs test).
-  const apiKey = process.env.VAPI_API_KEY;
-  const phoneNumberId = process.env.VAPI_PHONE_NUMBER_ID;
+  const apiKey = serverEnv.vapiApiKey();
+  const phoneNumberId = serverEnv.vapiPhoneNumberId();
   if (!apiKey || !phoneNumberId) {
     console.error("voice/call: VAPI_API_KEY or VAPI_PHONE_NUMBER_ID not configured");
     return NextResponse.json({ error: "Voice calling not configured" }, { status: 500 });
@@ -80,7 +81,7 @@ export async function POST(req: NextRequest) {
   // Resolve the outbound assistant: test mode routes to VAPI_ASSISTANT_ID_TEST,
   // otherwise production's VAPI_ASSISTANT_ID (unchanged default behavior).
   const test = body.test === true;
-  const assistantId = test ? process.env.VAPI_ASSISTANT_ID_TEST : process.env.VAPI_ASSISTANT_ID;
+  const assistantId = test ? serverEnv.vapiAssistantIdTest() : serverEnv.vapiAssistantId();
 
   // Requesting test mode without a configured test assistant is a caller/config
   // error — surface it (400) rather than silently dialing the production one.

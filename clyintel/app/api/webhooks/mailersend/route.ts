@@ -8,6 +8,7 @@ import {
   classifyMailersendEvent,
   escalateAttention,
 } from "@/lib/outreach/mailersendEvents";
+import { serverEnv } from "@/lib/config/env.server";
 
 // MailerSend inbound webhook → per-contact opt-out + attention derivation (Brick 1b).
 //
@@ -108,7 +109,7 @@ export async function processMailersendEvent(
 
 export async function POST(req: NextRequest) {
   // Condition 3 — missing secret ⇒ reject (cannot verify, never skip).
-  const secret = process.env.MAILERSEND_WEBHOOK_SECRET;
+  const secret = serverEnv.mailersendWebhookSecret();
   if (!secret) {
     console.error(
       "mailersend-webhook: MAILERSEND_WEBHOOK_SECRET is not set — rejecting all requests (fail-closed)",

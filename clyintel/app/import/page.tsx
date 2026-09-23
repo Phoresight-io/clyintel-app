@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { parseCsv, type CsvRow } from '@/lib/csv-parser';
+import { publicEnv } from '@/lib/config/env.public';
 
 const NAVY = '#0A1628';
 const ACCENT = '#4A9EFF';
@@ -147,7 +148,7 @@ export default function ImportPage() {
           }
         });
 
-      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY;
+      const apiKey = publicEnv.googleApiKey();
       if (apiKey) pickerBuilder.setDeveloperKey(apiKey);
 
       pickerBuilder.build().setVisible(true);
@@ -155,7 +156,7 @@ export default function ImportPage() {
   }
 
   function openDrivePicker() {
-    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+    const clientId = publicEnv.googleClientId();
     if (!clientId) {
       setError('NEXT_PUBLIC_GOOGLE_CLIENT_ID is not configured.');
       return;

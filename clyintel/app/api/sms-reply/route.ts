@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase, DemoSession, ConversationEntry } from "@/lib/supabase";
+import { serverEnv } from "@/lib/config/env.server";
 
 const INVOICE_CONTEXT: Record<number, { number: string; amount: string; days: number }> = {
   1: { number: 'INV-2024-0891', amount: '$2,400.00', days: 7 },
@@ -79,7 +80,7 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY!,
+        "x-api-key": serverEnv.anthropicApiKey(),
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({

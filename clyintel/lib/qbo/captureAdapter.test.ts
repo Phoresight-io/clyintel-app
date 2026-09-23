@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mock every collaborator so the test exercises adapter orchestration only.
 // Relative specifiers matter — alias-less vitest can't resolve "@/...".
 vi.mock("../supabase", () => ({ getSupabase: vi.fn() }));
-vi.mock("./tokens", () => ({ getValidAccessToken: vi.fn() }));
+vi.mock("./tokens", () => ({ getValidAccessToken: vi.fn(), refreshAccessToken: vi.fn() }));
 vi.mock("./client", () => ({
   getPayment: vi.fn(),
   getInvoice: vi.fn(),
@@ -77,8 +77,9 @@ describe("buildCaptureEventFromPayment", () => {
 
     // Provider filter is 'quickbooks'; token fetched with the resolved subscriber.
     expect(getValidAccessToken).toHaveBeenCalledWith("sub_1");
-    expect(getPayment).toHaveBeenCalledWith(REALM, PAYMENT_ID, "tok");
-    expect(getInvoice).toHaveBeenCalledWith(REALM, "130", "tok");
+    // The 4th arg is the injected force-refresh callback (reactive-401 recovery).
+    expect(getPayment).toHaveBeenCalledWith(REALM, PAYMENT_ID, "tok", expect.any(Function));
+    expect(getInvoice).toHaveBeenCalledWith(REALM, "130", "tok", expect.any(Function));
   });
 
   it("invoicePastDue false when DueDate >= TxnDate", async () => {
@@ -122,7 +123,7 @@ describe("buildCaptureEventFromPayment", () => {
 
     const { event } = await buildCaptureEventFromPayment(REALM, PAYMENT_ID);
 
-    expect(getInvoice).toHaveBeenCalledWith(REALM, "130", "tok"); // first only
+    expect(getInvoice).toHaveBeenCalledWith(REALM, "130", "tok", expect.any(Function)); // first only
     expect(getInvoice).toHaveBeenCalledTimes(1);
     expect(event.sourceInvoiceId).toBe("130");
     expect(warn).toHaveBeenCalledTimes(1);

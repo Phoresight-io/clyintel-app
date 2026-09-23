@@ -1,4 +1,4 @@
-import { getValidAccessToken } from "../../qbo/tokens";
+import { getValidAccessToken, refreshAccessToken } from "../../qbo/tokens";
 import { getInvoice } from "../../qbo/client";
 import { qboPostEntity } from "../../qbo/writeClient";
 import { getSupabase } from "../../supabase";
@@ -130,9 +130,15 @@ export async function qboReflectPayment(
   try {
     const { accessToken, realmId } = await getValidAccessToken(input.subscriberId);
 
+    // Reactive-401 recovery for the read + write below: force-refresh once and
+    // retry if QBO rejects a clock-valid token mid-flight. A dead refresh token
+    // surfaces as a typed QboReconnectRequiredError, caught by this seam's
+    // try/catch and recorded on the ledger_sync row like any other failure.
+    const refresh = () => refreshAccessToken(input.subscriberId).then((r) => r.accessToken);
+
     // CustomerRef is required on a QBO Payment create. Resolve it from the live
     // invoice (also proves the invoice is reachable). getInvoice throws non-2xx.
-    const invoice = await getInvoice(realmId, input.externalInvoiceId, accessToken);
+    const invoice = await getInvoice(realmId, input.externalInvoiceId, accessToken, refresh);
     const customerId = (invoice.raw as QboInvoiceRaw | undefined)?.CustomerRef?.value;
     if (!customerId) {
       throw new Error(
@@ -161,6 +167,7 @@ export async function qboReflectPayment(
       "payment",
       accessToken,
       body,
+      refresh,
     );
     const externalPaymentId = payment.Id;
 

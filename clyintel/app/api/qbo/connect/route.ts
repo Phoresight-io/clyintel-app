@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { createSupabaseServer } from "@/lib/supabase-server";
 import { INTUIT_AUTHORIZE_URL, QBO_SCOPE } from "@/lib/qbo/constants";
+import { serverEnv } from "@/lib/config/env.server";
 import {
   QBO_STATE_COOKIE,
   QBO_STATE_COOKIE_OPTIONS,
@@ -33,8 +34,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const clientId = process.env.QBO_CLIENT_ID;
-  const redirectUri = process.env.QBO_REDIRECT_URI;
+  const clientId = serverEnv.qboClientIdOptional();
+  const redirectUri = serverEnv.qboRedirectUri();
   if (!clientId || !redirectUri) {
     console.error("qbo/connect: QBO_CLIENT_ID or QBO_REDIRECT_URI not configured");
     return NextResponse.json({ error: "QuickBooks is not configured" }, { status: 500 });

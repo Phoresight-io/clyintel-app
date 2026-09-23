@@ -61,8 +61,50 @@ export function linkedInvoiceIds(payment: QboPayment): string[] {
 // --- HTTP core ---
 
 /**
+ * A caller-injected force-refresh: returns a FRESH access token (and rotates the
+ * stored token set as a side effect). Mirrors the injected access token — this
+ * module stays a pure transport with no tokens.ts import, and the seam is
+ * trivially stubbable in tests. Backed in production by
+ * `tokens.refreshAccessToken(subscriberId)`.
+ */
+export type RefreshAccessToken = () => Promise<string>;
+
+/**
+ * Run a QBO API fetch with bounded, reactive 401 recovery. `doFetch` is called
+ * with the access token to use; on a 401, IF a `refresh` callback was provided,
+ * the token is force-refreshed exactly ONCE and the request retried a single
+ * time. A still-401 (or a 401 with no refresh available) throws `authError()`;
+ * any other non-2xx throws `otherError(status)`. Exactly one retry — never a
+ * loop. Returns the successful Response for the caller to parse.
+ */
+export async function qboFetchWith401Retry(
+  doFetch: (accessToken: string) => Promise<Response>,
+  accessToken: string,
+  refresh: RefreshAccessToken | undefined,
+  authError: () => Error,
+  otherError: (status: number) => Error,
+): Promise<Response> {
+  let res = await doFetch(accessToken);
+  if (res.ok) return res;
+
+  if (res.status === 401 && refresh) {
+    // Force-refresh once and retry a single time. If the refresh itself fails
+    // (dead refresh token / transient) it throws a typed error from tokens.ts.
+    const freshToken = await refresh();
+    res = await doFetch(freshToken);
+    if (res.ok) return res;
+  }
+
+  // NEVER include the access token in the thrown message (authError/otherError
+  // are built by the caller and carry only status + entity context).
+  if (res.status === 401) throw authError();
+  throw otherError(res.status);
+}
+
+/**
  * GET a single QBO entity and unwrap the `{ "<Wrapper>": {...} }` envelope QBO
- * uses for single-entity reads. Throws on non-2xx (auth-flavored on 401).
+ * uses for single-entity reads. Throws on non-2xx (auth-flavored on 401). When a
+ * `refresh` callback is supplied, a 401 triggers a single force-refresh + retry.
  */
 async function qboGetEntity<T>(
   realmId: string,
@@ -70,28 +112,29 @@ async function qboGetEntity<T>(
   wrapperKey: "Payment" | "Invoice",
   entityId: string,
   accessToken: string,
+  refresh?: RefreshAccessToken,
 ): Promise<T> {
   const url = `${qboApiBaseUrl()}/v3/company/${realmId}/${entityPath}/${entityId}`;
 
-  const res = await fetch(url, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json",
-    },
-  });
-
-  if (!res.ok) {
-    // NEVER include the access token in the thrown message.
-    if (res.status === 401) {
-      throw new Error(
+  const res = await qboFetchWith401Retry(
+    (token) =>
+      fetch(url, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+      }),
+    accessToken,
+    refresh,
+    () =>
+      new Error(
         `QBO ${wrapperKey} ${entityId} fetch failed: 401 Unauthorized — ` +
           `access token rejected (may be revoked or expired; the caller must ` +
           `refresh via getValidAccessToken)`,
-      );
-    }
-    throw new Error(`QBO ${wrapperKey} ${entityId} fetch failed: HTTP ${res.status}`);
-  }
+      ),
+    (status) => new Error(`QBO ${wrapperKey} ${entityId} fetch failed: HTTP ${status}`),
+  );
 
   const body = (await res.json()) as Record<string, unknown>;
   const inner = body[wrapperKey];
@@ -109,8 +152,9 @@ export async function getPayment(
   realmId: string,
   paymentId: string,
   accessToken: string,
+  refresh?: RefreshAccessToken,
 ): Promise<QboPayment> {
-  return qboGetEntity<QboPayment>(realmId, "payment", "Payment", paymentId, accessToken);
+  return qboGetEntity<QboPayment>(realmId, "payment", "Payment", paymentId, accessToken, refresh);
 }
 
 /** GET {base}/v3/company/{realmId}/invoice/{invoiceId} → unwrapped Invoice. */
@@ -118,8 +162,9 @@ export async function getInvoice(
   realmId: string,
   invoiceId: string,
   accessToken: string,
+  refresh?: RefreshAccessToken,
 ): Promise<QboInvoice> {
-  return qboGetEntity<QboInvoice>(realmId, "invoice", "Invoice", invoiceId, accessToken);
+  return qboGetEntity<QboInvoice>(realmId, "invoice", "Invoice", invoiceId, accessToken, refresh);
 }
 
 // ===========================================================================
@@ -167,28 +212,29 @@ async function qboQuery<T>(
   query: string,
   entityKey: "Invoice" | "Customer",
   accessToken: string,
+  refresh?: RefreshAccessToken,
 ): Promise<T[]> {
   const url = `${qboApiBaseUrl()}/v3/company/${realmId}/query?query=${encodeURIComponent(query)}`;
 
-  const res = await fetch(url, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json",
-    },
-  });
-
-  if (!res.ok) {
-    // NEVER include the access token in the thrown message.
-    if (res.status === 401) {
-      throw new Error(
+  const res = await qboFetchWith401Retry(
+    (token) =>
+      fetch(url, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+      }),
+    accessToken,
+    refresh,
+    () =>
+      new Error(
         `QBO ${entityKey} query failed: 401 Unauthorized — ` +
           `access token rejected (may be revoked or expired; the caller must ` +
           `refresh via getValidAccessToken)`,
-      );
-    }
-    throw new Error(`QBO ${entityKey} query failed: HTTP ${res.status}`);
-  }
+      ),
+    (status) => new Error(`QBO ${entityKey} query failed: HTTP ${status}`),
+  );
 
   const body = (await res.json()) as { QueryResponse?: Record<string, unknown> };
   const qr = body.QueryResponse ?? {};
@@ -209,12 +255,13 @@ const QBO_PAGE_SIZE = 1000;
 export async function listCustomers(
   realmId: string,
   accessToken: string,
+  refresh?: RefreshAccessToken,
 ): Promise<QboCustomerListItem[]> {
   const all: QboCustomerListItem[] = [];
   let pos = 1;
   for (let page = 0; page < QBO_MAX_PAGES; page++) {
     const query = `SELECT * FROM Customer STARTPOSITION ${pos} MAXRESULTS ${QBO_PAGE_SIZE}`;
-    const rows = await qboQuery<QboCustomerListItem>(realmId, query, "Customer", accessToken);
+    const rows = await qboQuery<QboCustomerListItem>(realmId, query, "Customer", accessToken, refresh);
     all.push(...rows);
     if (rows.length < QBO_PAGE_SIZE) return all;
     pos += rows.length;
@@ -230,12 +277,13 @@ export async function listCustomers(
 export async function listInvoices(
   realmId: string,
   accessToken: string,
+  refresh?: RefreshAccessToken,
 ): Promise<QboInvoiceListItem[]> {
   const all: QboInvoiceListItem[] = [];
   let pos = 1;
   for (let page = 0; page < QBO_MAX_PAGES; page++) {
     const query = `SELECT * FROM Invoice STARTPOSITION ${pos} MAXRESULTS ${QBO_PAGE_SIZE}`;
-    const rows = await qboQuery<QboInvoiceListItem>(realmId, query, "Invoice", accessToken);
+    const rows = await qboQuery<QboInvoiceListItem>(realmId, query, "Invoice", accessToken, refresh);
     all.push(...rows);
     if (rows.length < QBO_PAGE_SIZE) return all;
     pos += rows.length;
