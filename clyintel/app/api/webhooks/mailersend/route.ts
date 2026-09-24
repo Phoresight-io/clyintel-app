@@ -107,7 +107,35 @@ export async function processMailersendEvent(
   return cls.optOutEmail ? "opt_out" : "attention_only";
 }
 
+// MailerSend URL-validation ping. On webhook create/update MailerSend POSTs
+// {"type":"webhook.test", ...} signed with this FIXED, PUBLIC test secret (not
+// the webhook's signing secret) and refuses to save the webhook unless we 2xx.
+// Because the secret is public, a verified ping proves nothing about the sender:
+// it is acked and dropped — never processed, never written. Real activity.*
+// events can never take this branch; they fall through to the fail-closed gate.
+export const MAILERSEND_TEST_PING_SECRET = "test_Am3L1GuOIc4blLUuHqAPxxwkZaJyEk8G";
+
+function isTestPing(raw: string): boolean {
+  try {
+    return (JSON.parse(raw) as { type?: unknown } | null)?.type === "webhook.test";
+  } catch {
+    return false;
+  }
+}
+
 export async function POST(req: NextRequest) {
+  const raw = await req.text();
+
+  // Test ping: verified against the fixed test secret only. Independent of
+  // MAILERSEND_WEBHOOK_SECRET so the webhook can be registered before (or
+  // without) our secret being set. No processing, no DB access.
+  if (isTestPing(raw)) {
+    if (!verifyMailersendSignature(raw, req.headers.get("signature"), MAILERSEND_TEST_PING_SECRET)) {
+      return NextResponse.json({ error: "invalid signature" }, { status: 401 });
+    }
+    return NextResponse.json({ received: true }, { status: 200 });
+  }
+
   // Condition 3 — missing secret ⇒ reject (cannot verify, never skip).
   const secret = serverEnv.mailersendWebhookSecret();
   if (!secret) {
@@ -117,7 +145,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "not configured" }, { status: 401 });
   }
 
-  const raw = await req.text();
   if (!verifyMailersendSignature(raw, req.headers.get("signature"), secret)) {
     return NextResponse.json({ error: "invalid signature" }, { status: 401 });
   }
