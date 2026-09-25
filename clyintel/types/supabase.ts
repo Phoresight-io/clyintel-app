@@ -1719,6 +1719,10 @@ export type Database = {
           ended_at: string | null
           ended_reason: string | null
           from_number: string | null
+          handoff_email_at: string | null
+          handoff_email_communication_id: string | null
+          handoff_email_reason: string | null
+          handoff_email_status: string | null
           id: string
           invoice_id: string | null
           outcome: string | null
@@ -1744,6 +1748,10 @@ export type Database = {
           ended_at?: string | null
           ended_reason?: string | null
           from_number?: string | null
+          handoff_email_at?: string | null
+          handoff_email_communication_id?: string | null
+          handoff_email_reason?: string | null
+          handoff_email_status?: string | null
           id?: string
           invoice_id?: string | null
           outcome?: string | null
@@ -1769,6 +1777,10 @@ export type Database = {
           ended_at?: string | null
           ended_reason?: string | null
           from_number?: string | null
+          handoff_email_at?: string | null
+          handoff_email_communication_id?: string | null
+          handoff_email_reason?: string | null
+          handoff_email_status?: string | null
           id?: string
           invoice_id?: string | null
           outcome?: string | null
@@ -1789,6 +1801,13 @@ export type Database = {
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "voice_calls_handoff_email_communication_id_fkey"
+            columns: ["handoff_email_communication_id"]
+            isOneToOne: false
+            referencedRelation: "communications"
             referencedColumns: ["id"]
           },
           {
