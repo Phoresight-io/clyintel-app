@@ -18,17 +18,21 @@ function formatDate(value: string | null): string {
   return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`;
 }
 
-function daysFromToday(due: string | null): number | null {
+// Exported (with an injectable `now`, default = the current time) so the Client
+// Score scorer (lib/score/computeClientScore.ts) decides "past due" with the SAME
+// convention the UI renders. Default behavior is unchanged.
+export function daysFromToday(due: string | null, now: Date = new Date()): number | null {
   if (!due) return null;
   const d = new Date(due);
   if (isNaN(d.getTime())) return null;
-  const today = new Date();
+  const today = now;
   return Math.round((d.getTime() - today.getTime()) / MS_PER_DAY);
 }
 
-function uiStatus(
+export function uiStatus(
   status: InvoiceRow["status"],
   dueDate: string | null,
+  now: Date = new Date(),
 ): "past_due" | "current" | "paid" {
   if (status === "paid") return "paid";
   if (status === "overdue" || status === "in_recovery" || status === "written_off") return "past_due";
@@ -37,7 +41,7 @@ function uiStatus(
   // Decide with the SAME daysFromToday(due) < 0 convention every other row on this
   // page already uses: past-due partial → past_due, not-yet-due partial → current.
   if (status === "partial") {
-    const delta = daysFromToday(dueDate);
+    const delta = daysFromToday(dueDate, now);
     return delta !== null && delta < 0 ? "past_due" : "current";
   }
   return "current"; // draft | sent
@@ -90,7 +94,13 @@ function deriveStatus(rows: InvoiceRow[]): ClientStatus {
   return rows.length > 0 ? "recovered" : "current";
 }
 
-export function toUIClient(client: ClientRow, ptr: PtrScoreRow | null, invoices: InvoiceRow[]): Client {
+// Latest + prior ptr_scores rows for a client (see getPtrScores in lib/data.ts).
+export interface PtrScorePair {
+  latest: PtrScoreRow | null;
+  prior: PtrScoreRow | null;
+}
+
+export function toUIClient(client: ClientRow, ptr: PtrScorePair, invoices: InvoiceRow[]): Client {
   const outstandingCents = invoices.reduce(
     (sum, inv) => (uiStatus(inv.status, inv.due_date) === "past_due" ? sum + (inv.amount_outstanding_cents ?? inv.amount_cents) : sum),
     0
@@ -102,21 +112,25 @@ export function toUIClient(client: ClientRow, ptr: PtrScoreRow | null, invoices:
     return Math.max(max, overdue);
   }, 0);
 
-  const score = ptr?.composite_score ?? 0;
+  // Never fabricate a score: no ptr_scores row (or a null composite) → null,
+  // which the UI renders as "Not yet scored" / "—".
+  const latest = ptr.latest;
+  const score = latest?.composite_score ?? null;
+  const prevScore = ptr.prior?.composite_score ?? null;
   return {
     id: client.id,
     name: client.name,
     industry: client.company || "—",
     score,
-    prevScore: score,
+    prevScore,
     status: deriveStatus(invoices),
     balance: Math.round(outstandingCents) / 100,
     daysOverdue: maxOverdue,
     invoices: invoices.length,
     lastActivity: formatDate(client.updated_at),
     nextAction: "",
-    scoreSummary: ptr?.ai_recommendation ? [ptr.ai_recommendation] : [],
-    scoreFactors: [],
-    riskDrivers: ptr?.risk_level ? [`Risk level: ${ptr.risk_level}`] : [],
+    scoreSummary: latest?.score_summary ?? [],
+    scoreFactors: latest?.score_factors ?? [],
+    riskDrivers: latest?.risk_drivers ?? [],
   };
 }

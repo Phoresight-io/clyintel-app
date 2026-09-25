@@ -1,6 +1,6 @@
 import { getSupabase } from "@/lib/supabase";
 import type { Database } from "@/types/supabase";
-import { toUIClient, toUIClientInvoiceSet } from "@/lib/adapters";
+import { toUIClient, toUIClientInvoiceSet, type PtrScorePair } from "@/lib/adapters";
 import type { Client as UIClientShape, ClientInvoiceSet } from "@/lib/mock-data";
 import type { ClientContactDisplay } from "@/lib/contacts/contactDisplay";
 
@@ -17,7 +17,6 @@ type PlanRow = Database["public"]["Tables"]["plans"]["Row"];
 type ClientRow = Database["public"]["Tables"]["clients"]["Row"];
 type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
 type CommunicationRow = Database["public"]["Tables"]["communications"]["Row"];
-type PtrScoreRow = Database["public"]["Tables"]["ptr_scores"]["Row"];
 type RecoveryAttemptRow = Database["public"]["Tables"]["recovery_attempts"]["Row"];
 
 export type SubscriberWithPlan = SubscriberRow & { plan: PlanRow | null };
@@ -170,8 +169,10 @@ export async function getCommunications(userId: string, invoiceId: string): Prom
   return data ?? [];
 }
 
-// Latest PTR score for a client (scoped to subscriber).
-export async function getPtrScores(userId: string, clientId: string): Promise<PtrScoreRow | null> {
+// Latest + prior PTR scores for a client (scoped to subscriber). ptr_scores holds
+// at most one row per (client_id, score_month), so `prior` is the previous scored
+// month. Fail closed → { latest: null, prior: null } (renders "Not yet scored").
+export async function getPtrScores(userId: string, clientId: string): Promise<PtrScorePair> {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("ptr_scores")
@@ -179,13 +180,12 @@ export async function getPtrScores(userId: string, clientId: string): Promise<Pt
     .eq("subscriber_id", userId)
     .eq("client_id", clientId)
     .order("score_date", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(2);
   if (error) {
     console.error("getPtrScores error", error);
-    return null;
+    return { latest: null, prior: null };
   }
-  return data ?? null;
+  return { latest: data?.[0] ?? null, prior: data?.[1] ?? null };
 }
 
 // Contacts for a single client (read-only display — Brick 3). client_contacts has

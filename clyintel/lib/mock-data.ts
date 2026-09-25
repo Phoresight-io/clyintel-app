@@ -9,8 +9,9 @@ export interface Client {
   id: string | number;
   name: string;
   industry: string;
-  score: number;
-  prevScore: number;
+  // null = not yet scored (no ptr_scores row). Never fabricated as 0.
+  score: number | null;
+  prevScore: number | null;
   status: ClientStatus;
   balance: number;
   daysOverdue: number;

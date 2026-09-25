@@ -32,8 +32,9 @@ export default function PTRWidget({ client }: Props) {
   // Mock data flushed (D2 closeout); no real PTR-recommendation source yet (D3).
   // Sourced via a typed call so the union survives narrowing and the empty state renders.
   const rec = ((): PTRRecommendation | undefined => undefined)();
-  const scoreColor = client.score >= 80 ? C.green : client.score >= 60 ? C.amber : C.red;
-  const scoreLabel = client.score >= 80 ? "Low risk" : client.score >= 60 ? "Medium risk" : "High risk";
+  // Unscored (null) renders "—" in a neutral color with no risk label.
+  const scoreColor = client.score === null ? C.textDim : client.score >= 80 ? C.green : client.score >= 60 ? C.amber : C.red;
+  const scoreLabel = client.score === null ? "" : client.score >= 80 ? "Low risk" : client.score >= 60 ? "Medium risk" : "High risk";
 
   const handleGenerate = () => {
     setPtrState("generating");
@@ -63,7 +64,7 @@ export default function PTRWidget({ client }: Props) {
             {/* Score snapshot */}
             <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 16px", minWidth: 120, textAlign: "center", flexShrink: 0 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Score</div>
-              <div style={{ fontSize: 30, fontWeight: 700, color: scoreColor, fontFamily: C.mono, lineHeight: 1, marginBottom: 4 }}>{client.score}</div>
+              <div style={{ fontSize: 30, fontWeight: 700, color: scoreColor, fontFamily: C.mono, lineHeight: 1, marginBottom: 4 }}>{client.score ?? "—"}</div>
               <div style={{ fontSize: 11, fontWeight: 600, color: scoreColor }}>{scoreLabel}</div>
             </div>
 

@@ -225,8 +225,33 @@ export default function DetailScreen({
   const backLabel = from === "portfolio" ? "Back to Portfolio" : "Back to Recovery";
   const backHref = from === "portfolio" ? "/portfolio" : "/";
 
-  const scoreColor = client.score >= 80 ? C.green : client.score >= 60 ? C.amber : C.red;
-  const scoreLabel = client.score >= 80 ? "Low risk" : client.score >= 60 ? "Medium risk" : "High risk";
+  // Client Score v0: score is null until the client is scored (no fabricated 0).
+  const score = client.score;
+  const scoreColor = score === null ? C.textDim : score >= 80 ? C.green : score >= 60 ? C.amber : C.red;
+  const scoreLabel = score === null ? "" : score >= 80 ? "Low risk" : score >= 60 ? "Medium risk" : "High risk";
+  const [scoring, setScoring] = useState(false);
+  const [scoreError, setScoreError] = useState<string | null>(null);
+
+  // POST computes + upserts this month's ptr_scores row, then the server page
+  // re-reads it via router.refresh(). Real (UUID) clients only.
+  async function runScore() {
+    setScoring(true);
+    setScoreError(null);
+    try {
+      const res = await fetch(`/api/clients/${encodeURIComponent(String(client.id))}/score`, { method: "POST" });
+      if (res.status === 422) {
+        setScoreError("Not enough invoice data to score yet.");
+      } else if (!res.ok) {
+        setScoreError("Scoring failed. Try again.");
+      } else {
+        router.refresh();
+      }
+    } catch {
+      setScoreError("Scoring failed. Try again.");
+    } finally {
+      setScoring(false);
+    }
+  }
 
   const allActive = invoices ? [...(invoices.outstanding || []), ...(invoices.upcoming || [])] : [];
   const allInvoicesList = invoices ? [...(invoices.outstanding || []), ...(invoices.upcoming || []), ...(invoices.paid || [])] : [];
@@ -242,7 +267,8 @@ export default function DetailScreen({
   ];
 
   const prevScore = client.prevScore;
-  const scoreDelta = client.score - prevScore;
+  // Delta only when there is a prior score to compare against.
+  const scoreDelta = score !== null && prevScore !== null ? score - prevScore : null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0, padding: "28px 36px", minHeight: 520, fontFamily: C.sans }}>
@@ -400,16 +426,31 @@ export default function DetailScreen({
         <div style={{ width: 300 }}>
           <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "18px 20px", position: "sticky", top: 20 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 12 }}>Client Score</div>
+            {score === null ? (
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: C.textDim, marginBottom: 6 }}>Not yet scored</div>
+                <div style={{ fontSize: 13, color: C.textMid, fontWeight: 500, marginBottom: 14 }}>Scores use this client&apos;s invoices, payment timing and outreach replies.</div>
+                {realMode && (
+                  <button onClick={runScore} disabled={scoring} style={{ width: "100%", padding: "10px 0", fontSize: 14, fontWeight: 600, color: "#FFFFFF", background: C.navy, border: "none", borderRadius: 7, cursor: scoring ? "default" : "pointer", opacity: scoring ? 0.6 : 1 }}>
+                    {scoring ? "Scoring…" : "Score this client"}
+                  </button>
+                )}
+                {scoreError && <div style={{ fontSize: 13, color: C.red, fontWeight: 500, marginTop: 8 }}>{scoreError}</div>}
+              </div>
+            ) : (
+              <>
             <div style={{ marginBottom: 16 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
-                <div style={{ fontSize: 48, fontWeight: 700, color: scoreColor, fontFamily: C.mono }}>{client.score}</div>
-                <div style={{ fontSize: 15, color: C.textMid, fontWeight: 500 }}>
-                  <span style={{ color: scoreColor, fontWeight: 600 }}>{scoreDelta > 0 ? "▲" : "▼"} {Math.abs(scoreDelta)}</span> (prev: {prevScore})
-                </div>
+                <div style={{ fontSize: 48, fontWeight: 700, color: scoreColor, fontFamily: C.mono }}>{score}</div>
+                {scoreDelta !== null && (
+                  <div style={{ fontSize: 15, color: C.textMid, fontWeight: 500 }}>
+                    <span style={{ color: scoreColor, fontWeight: 600 }}>{scoreDelta > 0 ? "▲" : "▼"} {Math.abs(scoreDelta)}</span> (prev: {prevScore})
+                  </div>
+                )}
               </div>
               <div style={{ fontSize: 13, color: C.textMid, fontWeight: 500, marginBottom: 10 }}>out of 100</div>
               <div style={{ height: 6, borderRadius: 3, background: "linear-gradient(to right, #DC2626 0%, #F59E0B 50%, #16A34A 100%)", marginBottom: 12, position: "relative" }}>
-                <div style={{ position: "absolute", left: `${client.score}%`, top: -2, width: 10, height: 10, borderRadius: "50%", background: scoreColor, border: "2px solid #FFFFFF" }} />
+                <div style={{ position: "absolute", left: `${score}%`, top: -2, width: 10, height: 10, borderRadius: "50%", background: scoreColor, border: "2px solid #FFFFFF" }} />
               </div>
               <div style={{ fontSize: 16, fontWeight: 700, color: scoreColor, marginBottom: 14 }}>{scoreLabel}</div>
             </div>
@@ -438,6 +479,16 @@ export default function DetailScreen({
                 ))}
               </div>
             </div>
+            {realMode && (
+              <div style={{ marginTop: 16 }}>
+                <button onClick={runScore} disabled={scoring} style={{ padding: "6px 12px", fontSize: 13, fontWeight: 600, color: C.blue, background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6, cursor: scoring ? "default" : "pointer", opacity: scoring ? 0.6 : 1 }}>
+                  {scoring ? "Scoring…" : "Rescore"}
+                </button>
+                {scoreError && <div style={{ fontSize: 13, color: C.red, fontWeight: 500, marginTop: 8 }}>{scoreError}</div>}
+              </div>
+            )}
+              </>
+            )}
           </div>
         </div>
       </div>

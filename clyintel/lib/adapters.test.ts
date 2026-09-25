@@ -1,0 +1,55 @@
+import { describe, it, expect } from "vitest";
+import { toUIClient } from "./adapters";
+import type { Database } from "@/types/supabase";
+
+type ClientRow = Database["public"]["Tables"]["clients"]["Row"];
+type PtrScoreRow = Database["public"]["Tables"]["ptr_scores"]["Row"];
+
+const client = { id: "c1", name: "Acme", company: "Acme Co", updated_at: "2026-09-01T00:00:00Z" } as unknown as ClientRow;
+
+function ptr(p: Partial<PtrScoreRow>): PtrScoreRow {
+  return {
+    composite_score: 72,
+    score_summary: ["Pays, but often late", "Based on 4 invoices since May 2026"],
+    score_factors: ["1 of 3 paid invoices were late", "No invoices past due"],
+    risk_drivers: ["Paid 1 of 3 invoices after the due date"],
+    risk_level: "medium",
+    ...p,
+  } as PtrScoreRow;
+}
+
+describe("toUIClient — Client Score mapping", () => {
+  it("no ptr_scores row → score null (not 0), prevScore null, empty lists", () => {
+    const c = toUIClient(client, { latest: null, prior: null }, []);
+    expect(c.score).toBeNull();
+    expect(c.prevScore).toBeNull();
+    expect(c.scoreSummary).toEqual([]);
+    expect(c.scoreFactors).toEqual([]);
+    expect(c.riskDrivers).toEqual([]);
+  });
+
+  it("row with null composite → score null", () => {
+    expect(toUIClient(client, { latest: ptr({ composite_score: null }), prior: null }, []).score).toBeNull();
+  });
+
+  it("scored, no prior → prevScore null; lists map from the array columns", () => {
+    const c = toUIClient(client, { latest: ptr({}), prior: null }, []);
+    expect(c.score).toBe(72);
+    expect(c.prevScore).toBeNull();
+    expect(c.scoreSummary).toEqual(["Pays, but often late", "Based on 4 invoices since May 2026"]);
+    expect(c.scoreFactors).toEqual(["1 of 3 paid invoices were late", "No invoices past due"]);
+    expect(c.riskDrivers).toEqual(["Paid 1 of 3 invoices after the due date"]);
+  });
+
+  it("prior row → prevScore from prior composite", () => {
+    const c = toUIClient(client, { latest: ptr({}), prior: ptr({ composite_score: 65 }) }, []);
+    expect(c.prevScore).toBe(65);
+  });
+
+  it("null array columns (pre-migration rows) → []", () => {
+    const c = toUIClient(client, { latest: ptr({ score_summary: null, score_factors: null, risk_drivers: null }), prior: null }, []);
+    expect(c.scoreSummary).toEqual([]);
+    expect(c.scoreFactors).toEqual([]);
+    expect(c.riskDrivers).toEqual([]);
+  });
+});

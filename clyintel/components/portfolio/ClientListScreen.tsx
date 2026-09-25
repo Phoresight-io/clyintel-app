@@ -47,9 +47,10 @@ export default function ClientListScreen({ initialClients, initialClientInvoices
           </div>
         )}
         {clients.map((client, i) => {
-          const scoreColor = client.score >= 80 ? C.green : client.score >= 60 ? C.amber : C.red;
+          // Unscored (null) renders "—" in a neutral color with no delta.
+          const scoreColor = client.score === null ? C.textDim : client.score >= 80 ? C.green : client.score >= 60 ? C.amber : C.red;
           const recoveryYTD = getRecoveryYTD(client.id);
-          const scoreDelta = client.score - client.prevScore;
+          const scoreDelta = client.score !== null && client.prevScore !== null ? client.score - client.prevScore : null;
           let statusColor = C.red, statusLabel = "Past Due";
           if (client.status === "recovered") { statusColor = C.green; statusLabel = "Paid"; }
           else if (client.status === "current") { statusColor = C.green; statusLabel = "Current"; }
@@ -62,8 +63,10 @@ export default function ClientListScreen({ initialClients, initialClientInvoices
               <div style={{ fontSize: 15, fontWeight: 600, color: C.navy }}>{client.name}</div>
               <div style={{ fontSize: 14, color: C.textMid, fontWeight: 500 }}>{client.industry}</div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 16, fontWeight: 600, color: scoreColor, fontFamily: C.mono }}>{client.score}</span>
-                <span style={{ fontSize: 13, color: scoreDelta > 0 ? C.green : C.red, fontFamily: C.mono }}>{scoreDelta > 0 ? "▲" : "▼"} {Math.abs(scoreDelta)}</span>
+                <span style={{ fontSize: 16, fontWeight: 600, color: scoreColor, fontFamily: C.mono }}>{client.score ?? "—"}</span>
+                {scoreDelta !== null && (
+                  <span style={{ fontSize: 13, color: scoreDelta > 0 ? C.green : C.red, fontFamily: C.mono }}>{scoreDelta > 0 ? "▲" : "▼"} {Math.abs(scoreDelta)}</span>
+                )}
               </div>
               <div style={{ fontSize: 14, fontWeight: 500, color: statusColor }}>{statusLabel}</div>
               <div style={{ fontSize: 15, fontFamily: C.mono }}>{currentInvoices}/{client.invoices}</div>
