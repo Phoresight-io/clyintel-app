@@ -117,12 +117,16 @@ export function toUIClient(client: ClientRow, ptr: PtrScorePair, invoices: Invoi
   const latest = ptr.latest;
   const score = latest?.composite_score ?? null;
   const prevScore = ptr.prior?.composite_score ?? null;
+  const inputs = latest?.inputs;
+  const provisional =
+    typeof inputs === "object" && inputs !== null && !Array.isArray(inputs) && inputs.provisional === true;
   return {
     id: client.id,
     name: client.name,
     industry: client.company || "—",
     score,
     prevScore,
+    provisional,
     status: deriveStatus(invoices),
     balance: Math.round(outstandingCents) / 100,
     daysOverdue: maxOverdue,

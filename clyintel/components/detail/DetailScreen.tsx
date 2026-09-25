@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { C } from "@/lib/theme";
+import { bandFor, BAND_COLOR, BAND_LABEL } from "@/lib/score/scoreBands";
 import type { Client, NegotiationRec, ClientInvoiceSet } from "@/lib/mock-data";
 import type { ClientContactDisplay } from "@/lib/contacts/contactDisplay";
 import type { VoiceCallDisplay } from "@/lib/voice-calls";
@@ -227,8 +228,9 @@ export default function DetailScreen({
 
   // Client Score v0: score is null until the client is scored (no fabricated 0).
   const score = client.score;
-  const scoreColor = score === null ? C.textDim : score >= 80 ? C.green : score >= 60 ? C.amber : C.red;
-  const scoreLabel = score === null ? "" : score >= 80 ? "Low risk" : score >= 60 ? "Medium risk" : "High risk";
+  const band = score === null ? null : bandFor(score);
+  const scoreColor = band === null ? C.textDim : BAND_COLOR[band];
+  const scoreLabel = band === null ? "" : BAND_LABEL[band];
   const [scoring, setScoring] = useState(false);
   const [scoreError, setScoreError] = useState<string | null>(null);
 
@@ -429,7 +431,7 @@ export default function DetailScreen({
             {score === null ? (
               <div>
                 <div style={{ fontSize: 20, fontWeight: 700, color: C.textDim, marginBottom: 6 }}>Not yet scored</div>
-                <div style={{ fontSize: 13, color: C.textMid, fontWeight: 500, marginBottom: 14 }}>Scores use this client&apos;s invoices, payment timing and outreach replies.</div>
+                <div style={{ fontSize: 13, color: C.textMid, fontWeight: 500, marginBottom: 14 }}>Scores use this client&apos;s invoices and payment history.</div>
                 {realMode && (
                   <button onClick={runScore} disabled={scoring} style={{ width: "100%", padding: "10px 0", fontSize: 14, fontWeight: 600, color: "#FFFFFF", background: C.navy, border: "none", borderRadius: 7, cursor: scoring ? "default" : "pointer", opacity: scoring ? 0.6 : 1 }}>
                     {scoring ? "Scoring…" : "Score this client"}
@@ -452,7 +454,12 @@ export default function DetailScreen({
               <div style={{ height: 6, borderRadius: 3, background: "linear-gradient(to right, #DC2626 0%, #F59E0B 50%, #16A34A 100%)", marginBottom: 12, position: "relative" }}>
                 <div style={{ position: "absolute", left: `${score}%`, top: -2, width: 10, height: 10, borderRadius: "50%", background: scoreColor, border: "2px solid #FFFFFF" }} />
               </div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: scoreColor, marginBottom: 14 }}>{scoreLabel}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: scoreColor }}>{scoreLabel}</div>
+                {client.provisional && (
+                  <span title="Based on fewer than 3 dated payments" style={{ fontSize: 11, fontWeight: 600, color: C.textMid, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, padding: "2px 6px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Provisional</span>
+                )}
+              </div>
             </div>
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 10 }}>Score Summary</div>

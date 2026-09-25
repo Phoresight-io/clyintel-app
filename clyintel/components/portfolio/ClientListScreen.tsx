@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
+import { bandFor, BAND_COLOR } from "@/lib/score/scoreBands";
 import type { Client, ClientInvoiceSet } from "@/lib/mock-data";
 
 interface ClientListScreenProps {
@@ -48,7 +49,7 @@ export default function ClientListScreen({ initialClients, initialClientInvoices
         )}
         {clients.map((client, i) => {
           // Unscored (null) renders "—" in a neutral color with no delta.
-          const scoreColor = client.score === null ? C.textDim : client.score >= 80 ? C.green : client.score >= 60 ? C.amber : C.red;
+          const scoreColor = client.score === null ? C.textDim : BAND_COLOR[bandFor(client.score)];
           const recoveryYTD = getRecoveryYTD(client.id);
           const scoreDelta = client.score !== null && client.prevScore !== null ? client.score - client.prevScore : null;
           let statusColor = C.red, statusLabel = "Past Due";

@@ -12,6 +12,8 @@ export interface Client {
   // null = not yet scored (no ptr_scores row). Never fabricated as 0.
   score: number | null;
   prevScore: number | null;
+  // True when the latest score rests on fewer than 3 dated payments / write-offs.
+  provisional: boolean;
   status: ClientStatus;
   balance: number;
   daysOverdue: number;

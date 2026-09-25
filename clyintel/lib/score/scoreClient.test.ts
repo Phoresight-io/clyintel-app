@@ -12,7 +12,6 @@ const inputs: ScoreInputs = {
     { id: "i1", status: "overdue", due_date: "2026-09-01", issue_date: "2026-08-01", created_at: "2026-08-01T00:00:00Z", amount_cents: 10000, amount_outstanding_cents: 10000 },
   ],
   paidTimings: [],
-  comms: [],
 };
 
 function fakePort(overrides: Partial<ScorePort> = {}) {

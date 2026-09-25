@@ -1,4 +1,4 @@
-# Client Score v0: handoff
+# Client Score v0 → v1: handoff
 
 _Branch `feat/client-score-v0` · off `main` @ 4f54965 · 2026-09-25_
 
@@ -26,25 +26,43 @@ Past-due status reuses `uiStatus()` / `daysFromToday()` from `lib/adapters.ts`. 
 are now exported and take an injectable `now`; the default is unchanged. This keeps
 the score in agreement with what the page shows.
 
-### Components and weights
+### Scoring logic: v1 (replaces the v0 scoring; route, auth, UI null state unchanged)
 
-| Component | Weight | Definition | Null when |
-|---|---|---|---|
-| paymentHistory | .40 | On-time rate over paid invoices with a known `paid_at` (last succeeded payment `::date` ≤ `due_date`). `written_off` counts as paid late. | No paid invoice has timing and nothing is written off |
-| currentDelinquency | .30 | Max days past due: 0→100, 1–15→80, 16–30→60, 31–60→35, 61–90→15, >90→0 | never (once there are non-draft invoices) |
-| exposure | .15 | `100 × (1 − pastDueOutstanding / totalBilledNonDraft)`, clamped 0–100 | total billed = 0 |
-| responsiveness | .15 | Replied outbound ÷ outbound. A reply is `reply_received_at` set, or an inbound row on the same invoice. | No outbound comms |
+The shared constants live in `lib/score/scoreBands.ts`, used by both the scorer and the UI:
+- `latenessScore(days)`: ≤0→100 · 1–7→90 · 8–15→80 · 16–30→65 · 31–45→50 ·
+  46–60→35 · 61–75→25 · 76–90→15 · 91–105→10 · 106–120→5 · >120→0
+- `bandFor(score)`: ≥85 low · ≥70 medium · ≥55 high · else critical. Labels:
+  Low / Moderate / High / Severe risk. Colors: green / amber / orange / red
+  (`C.orange` added to `lib/theme.ts`).
+- `PRIOR = 70`, `PROVISIONAL_MIN_DATED = 3`, and
+  `WEIGHTS = { paymentHistory: .55, currentDelinquency: .30, exposure: .15 }`.
 
-Composite = `round(weighted mean over the non-null components)`, with the weights
-renormalized to sum to 1. Risk bands: ≥80 low, 60–79 medium, 40–59 high,
-<40 critical. `inputs` jsonb stores the raw aggregates, each component, the base
-weights and the renormalized weights.
+**Payment dates don't depend on their source.** `lib/score/resolvePaidTimings.ts`
+turns each paid invoice's evidence into ONE `{ invoice_id, paid_date, date_source }`
+record, using this precedence:
+1. The last succeeded payment (`payments.paid_at` via `invoice_payments`) → `payment`.
+2. Otherwise, the first `balance_events` row with `new_outstanding_cents = 0`
+   (ordered by `detected_at`): `evidence.txnDate` → `qbo_txn`, or else
+   `detected_at` → `detected`.
+3. Otherwise there is no record, and the invoice counts as "paid, undated".
 
-The text lists come from fixed templates. A line appears only when its data exists:
-summary has 2–4 lines, factors 2–4, drivers 1–3 (or "No material risk drivers
-identified"). The upsert leaves out `ai_model`, `ai_recommendation`,
-`ai_recommendation_at` and `counted_toward_limit`, so a re-score never overwrites
-them.
+The scorer never branches on `date_source`; it only records it in `inputs`.
+Communications are no longer loaded (responsiveness is v2).
+
+| Component | Weight | Definition |
+|---|---|---|
+| paymentHistory | .55 | Amount-weighted mean of `latenessScore(paid_date − due_date)` over dated paid invoices, with `written_off` scoring 0. `n` = dated paid + written_off. History = `(n·mean + 70)/(n+1)`; `n = 0` → 70. Paid invoices with no due_date are excluded (counted in `no_due_date_count`). |
+| currentDelinquency | .30 | `latenessScore(max days past due)` over open past-due invoices (uiStatus/daysFromToday), **excluding written_off**. None past due → 100. |
+| exposure | .15 | `100 × (1 − pastDueOutstanding / totalBilledNonDraft)`, clamped. written_off is **excluded** from pastDueOutstanding. |
+
+- composite = `round(Σ w·c)`, with no renormalization; risk_level = `bandFor(composite)`.
+- provisional = `n < 3`. It is stored in `inputs.provisional`, and the rail shows a
+  "Provisional" badge.
+- `insufficient_data` (422, no write) when there are no non-draft invoices or
+  total billed = 0.
+
+The text lines only describe real data: the 70 prior is never cited. With zero
+dated payments the headline is timing-neutral, and the history driver requires n > 0.
 
 ## Where the live schema differs from the spec (checked read-only 2026-09-25)
 
@@ -59,15 +77,13 @@ them.
   `avg_days_overdue` numeric(6,2) (the scorer caps it at 9999.99),
   `non_response_rate` numeric(5,4). The scorer rounds to these scales.
 
-## Current state: nothing applied or written yet
+## Current state
 
-- Migration `schema/add_score_explanations_to_ptr_scores.sql` is **NOT applied**.
-- The endpoint has **not** been called against live data. `ptr_scores` = 0 rows.
-- Until the migration is applied, a POST fails with a 500 (the new columns are
-  missing). GET (dry run) works.
-
-Apply order: 1) apply the migration via MCP, 2) check the columns exist and the
-unique index is still there, 3) merge/deploy, 4) GET dry-run one client, 5) POST.
+- Per Charles, the explanation columns (`score_summary`, `score_factors`,
+  `risk_drivers`, `inputs`) are already live on Test. The migration file stays as
+  the record of that change; no further migration is needed for v1.
+- The endpoint has **not** been called against live data from this branch.
+- PR base is `develop` (feature PRs → develop; develop → main is a separate release PR).
 
 ## Follow-ups
 
@@ -79,10 +95,14 @@ unique index is still there, 3) merge/deploy, 4) GET dry-run one client, 5) POST
 - **Due-date convention**: `daysFromToday` uses `Math.round` against the current
   time, so `due_date == today` is inconsistent. The scorer inherits the UI
   convention on purpose. Fix both together.
-- **written_off is double-counted**: it counts as late in paymentHistory AND as
-  past_due via uiStatus, so it also feeds delinquency and exposure, and the
-  "Oldest open invoice" driver can cite it. QBO has no written_off status, so this
-  can't happen with today's data. Fix it before any non-QBO invoice source goes live.
+- ~~**written_off is double-counted**~~: **fixed in v1.** written_off now counts
+  only in paymentHistory (scores 0). It is excluded from delinquency, from
+  exposure's pastDueOutstanding, and from the "Oldest open invoice" driver. It is
+  still `past_due` in the UI's `uiStatus`; that UI convention is unchanged.
+- **Responsiveness (v2)**: reply rate over outreach. It was removed from v1
+  inputs and `non_response_rate` stays null.
+- **Historical backfill**: add a loader source that emits the same `PaidTiming`
+  records (a new `date_source` value). The scorer needs no change.
 - Batch / scheduled scoring (all clients, monthly) and `counted_toward_limit`
   accounting.
 - `dispute_rate` has no source (it stays null).

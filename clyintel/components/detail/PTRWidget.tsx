@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { C } from "@/lib/theme";
+import { bandFor, BAND_COLOR, BAND_LABEL } from "@/lib/score/scoreBands";
 import type { Client, PTRRecommendation } from "@/lib/mock-data";
 
 type PTRState = "idle" | "generating" | "result";
@@ -33,8 +34,9 @@ export default function PTRWidget({ client }: Props) {
   // Sourced via a typed call so the union survives narrowing and the empty state renders.
   const rec = ((): PTRRecommendation | undefined => undefined)();
   // Unscored (null) renders "—" in a neutral color with no risk label.
-  const scoreColor = client.score === null ? C.textDim : client.score >= 80 ? C.green : client.score >= 60 ? C.amber : C.red;
-  const scoreLabel = client.score === null ? "" : client.score >= 80 ? "Low risk" : client.score >= 60 ? "Medium risk" : "High risk";
+  const band = client.score === null ? null : bandFor(client.score);
+  const scoreColor = band === null ? C.textDim : BAND_COLOR[band];
+  const scoreLabel = band === null ? "" : BAND_LABEL[band];
 
   const handleGenerate = () => {
     setPtrState("generating");

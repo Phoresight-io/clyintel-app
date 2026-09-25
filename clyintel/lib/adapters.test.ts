@@ -39,6 +39,14 @@ describe("toUIClient — Client Score mapping", () => {
     expect(c.scoreSummary).toEqual(["Pays, but often late", "Based on 4 invoices since May 2026"]);
     expect(c.scoreFactors).toEqual(["1 of 3 paid invoices were late", "No invoices past due"]);
     expect(c.riskDrivers).toEqual(["Paid 1 of 3 invoices after the due date"]);
+    expect(c.provisional).toBe(false);
+  });
+
+  it("provisional comes from latest.inputs.provisional (default false)", () => {
+    expect(toUIClient(client, { latest: ptr({ inputs: { provisional: true } }), prior: null }, []).provisional).toBe(true);
+    expect(toUIClient(client, { latest: ptr({ inputs: { provisional: false } }), prior: null }, []).provisional).toBe(false);
+    expect(toUIClient(client, { latest: ptr({ inputs: null }), prior: null }, []).provisional).toBe(false);
+    expect(toUIClient(client, { latest: null, prior: null }, []).provisional).toBe(false);
   });
 
   it("prior row → prevScore from prior composite", () => {
