@@ -81,20 +81,23 @@ export function toUIClientInvoiceSet(rows: InvoiceRow[], paidDates?: PaidDateMap
   return set;
 }
 
-function deriveStatus(rows: InvoiceRow[]): ClientStatus {
-  const statuses = rows.map((r) => uiStatus(r.status, r.due_date));
+// Client status roll-up. Past-due and due-soon use the same uiStatus /
+// daysFromToday rules as the invoice rows:
+//   any invoice past due                    → "past_due"
+//   else an open invoice due within 7 days  → "due"  (the Receivables dashboard
+//                                              selects past_due + due clients)
+//   else >= 1 invoice (open or all paid)    → "current"
+//   else (never had an invoice)             → "no_history"
+export function deriveStatus(rows: InvoiceRow[], now: Date = new Date()): ClientStatus {
+  const statuses = rows.map((r) => uiStatus(r.status, r.due_date, now));
   if (statuses.some((s) => s === "past_due")) return "past_due";
-  const hasOpen = statuses.some((s) => s === "current");
-  if (hasOpen) {
-    // "due" if anything is due within 7 days, else "current"
-    const dueSoon = rows.some((r) => {
-      if (uiStatus(r.status, r.due_date) !== "current") return false;
-      const delta = daysFromToday(r.due_date);
-      return delta !== null && delta <= 7;
-    });
-    return dueSoon ? "due" : "current";
-  }
-  return rows.length > 0 ? "recovered" : "current";
+  const dueSoon = rows.some((r) => {
+    if (uiStatus(r.status, r.due_date, now) !== "current") return false;
+    const delta = daysFromToday(r.due_date, now);
+    return delta !== null && delta <= 7;
+  });
+  if (dueSoon) return "due";
+  return rows.length > 0 ? "current" : "no_history";
 }
 
 // Latest + prior ptr_scores rows for a client (see getPtrScores in lib/data.ts).
