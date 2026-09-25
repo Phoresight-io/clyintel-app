@@ -79,6 +79,10 @@ unique index is still there, 3) merge/deploy, 4) GET dry-run one client, 5) POST
 - **Due-date convention**: `daysFromToday` uses `Math.round` against the current
   time, so `due_date == today` is inconsistent. The scorer inherits the UI
   convention on purpose. Fix both together.
+- **written_off is double-counted**: it counts as late in paymentHistory AND as
+  past_due via uiStatus, so it also feeds delinquency and exposure, and the
+  "Oldest open invoice" driver can cite it. QBO has no written_off status, so this
+  can't happen with today's data. Fix it before any non-QBO invoice source goes live.
 - Batch / scheduled scoring (all clients, monthly) and `counted_toward_limit`
   accounting.
 - `dispute_rate` has no source (it stays null).

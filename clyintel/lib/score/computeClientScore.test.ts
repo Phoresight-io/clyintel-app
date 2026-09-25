@@ -200,6 +200,86 @@ describe("computeClientScore — graceful degradation", () => {
   });
 });
 
+describe("computeClientScore — summary headline and payment timing", () => {
+  // No paid_at data. One invoice 10 days past due (band 80), past due $500 of
+  // $1,500 billed (exposure 66.67), no comms.
+  // (.3*80 + .15*66.67) / .45 = 75.56 → 76 → medium
+  function noTimingMedium(): ScoreInputs {
+    return {
+      asOf: AS_OF,
+      invoices: [
+        inv({ id: "p", status: "paid", due_date: "2026-08-01", issue_date: "2026-07-01", amount_cents: 100000, amount_outstanding_cents: 0 }),
+        inv({ id: "o", status: "overdue", due_date: "2026-09-15", issue_date: "2026-08-15", amount_cents: 50000, amount_outstanding_cents: 50000 }),
+      ],
+      paidTimings: [],
+      comms: [],
+    };
+  }
+
+  it("no paid_at data + medium band → timing-neutral headline, no unbacked 'late' line", () => {
+    const r = scored(noTimingMedium());
+    expect((r.inputs as any).components.paymentHistory).toBeNull();
+    expect(r.composite_score).toBe(76);
+    expect(r.risk_level).toBe("medium");
+    expect(r.score_summary[0]).toBe("Moderate collection risk");
+    expect((r.inputs as any).aggregates.paid_late).toBe(0);
+    for (const line of [...r.score_summary, ...r.score_factors, ...r.risk_drivers]) {
+      expect(line.toLowerCase()).not.toContain("late");
+    }
+  });
+
+  it("no paid_at data uses timing-neutral headlines in every band", () => {
+    // Band chosen by delinquency alone (only component besides exposure).
+    const cases: [ScoreInvoice["status"], string, string][] = [
+      ["sent", "2026-09-30", "Low collection risk"], // not past due → 100 / 100
+      ["overdue", "2026-07-01", "Severe collection risk"], // 86 days → 15, exposure 0 → 10
+    ];
+    for (const [status, due, headline] of cases) {
+      const r = scored({
+        asOf: AS_OF,
+        invoices: [inv({ id: "x", status, due_date: due, amount_cents: 1000, amount_outstanding_cents: 1000 })],
+        paidTimings: [],
+        comms: [],
+      });
+      expect(r.score_summary[0]).toBe(headline);
+    }
+  });
+
+  it("with paid_at data the existing headlines are unchanged", () => {
+    expect(scored(fixture()).score_summary[0]).toBe("Elevated collection risk");
+    // 3 paid with timing (1 late → 66.67), 1 invoice 10 days past due (80),
+    // past due $500 of $3,500 billed (85.71).
+    // No comms → responsiveness null, weights renormalize over .85:
+    // (.4*66.67 + .3*80 + .15*85.71) / .85 = 74.77 → 75 → medium
+    const medium = scored({
+      asOf: AS_OF,
+      invoices: [
+        inv({ id: "p1", status: "paid", due_date: "2026-06-01", amount_cents: 100000, amount_outstanding_cents: 0 }),
+        inv({ id: "p2", status: "paid", due_date: "2026-07-01", amount_cents: 100000, amount_outstanding_cents: 0 }),
+        inv({ id: "p3", status: "paid", due_date: "2026-08-01", amount_cents: 100000, amount_outstanding_cents: 0 }),
+        inv({ id: "o", status: "overdue", due_date: "2026-09-15", amount_cents: 50000, amount_outstanding_cents: 50000 }),
+      ],
+      paidTimings: [
+        { invoice_id: "p1", paid_at: "2026-05-30T00:00:00Z" },
+        { invoice_id: "p2", paid_at: "2026-06-30T00:00:00Z" },
+        { invoice_id: "p3", paid_at: "2026-08-20T00:00:00Z" }, // 19 days late
+      ],
+      comms: [],
+    });
+    expect(medium.composite_score).toBe(75);
+    expect(medium.risk_level).toBe("medium");
+    expect(medium.score_summary[0]).toBe("Pays, but often late");
+    expect(medium.score_factors).toContain("1 of 3 paid invoices were late");
+    const clean = scored({
+      asOf: AS_OF,
+      invoices: [inv({ id: "a", status: "paid", due_date: "2026-09-01", amount_cents: 1000, amount_outstanding_cents: 0 })],
+      paidTimings: [{ invoice_id: "a", paid_at: "2026-08-30T00:00:00Z" }],
+      comms: [],
+    });
+    expect(clean.score_summary[0]).toBe("Reliable payer");
+  });
+});
+
 describe("computeClientScore — insufficient data", () => {
   it("no invoices → insufficient_data", () => {
     expect(computeClientScore({ asOf: AS_OF, invoices: [], paidTimings: [], comms: [] })).toEqual({ kind: "insufficient_data" });

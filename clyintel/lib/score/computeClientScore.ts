@@ -150,9 +150,19 @@ export function riskLevelFor(composite: number): RiskLevel {
   return "critical";
 }
 
+// Used only when paymentHistory is non-null: these lines describe payment timing.
 const HEADLINE: Record<RiskLevel, string> = {
   low: "Reliable payer",
   medium: "Pays, but often late",
+  high: "Elevated collection risk",
+  critical: "Severe collection risk",
+};
+
+// Used when paymentHistory is null: nothing is known about payment timing, so the
+// headline must not claim anything about it.
+const HEADLINE_TIMING_NEUTRAL: Record<RiskLevel, string> = {
+  low: "Low collection risk",
+  medium: "Moderate collection risk",
   high: "Elevated collection risk",
   critical: "Severe collection risk",
 };
@@ -285,7 +295,8 @@ export function computeClientScore(input: ScoreInputs): ScoreResult {
     .filter((v): v is string => !!v && !isNaN(new Date(v).getTime()))
     .sort()[0];
 
-  const score_summary: string[] = [HEADLINE[risk_level]];
+  const headlines = components.paymentHistory === null ? HEADLINE_TIMING_NEUTRAL : HEADLINE;
+  const score_summary: string[] = [headlines[risk_level]];
   const prior = input.prior;
   if (prior && prior.composite_score !== null) {
     const delta = composite - Math.round(prior.composite_score);
