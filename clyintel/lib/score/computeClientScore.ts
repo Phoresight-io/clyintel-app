@@ -116,7 +116,12 @@ function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-// Used when at least one DATED payment exists: these headlines describe payment timing.
+// Timing headlines need at least this many dated payments. With fewer, one late
+// or on-time payment would decide the headline, so the timing-neutral set is used
+// and the evidence stays visible in the "X of N dated payments" factor.
+const TIMING_HEADLINE_MIN_DATED = 3;
+
+// Used when there are >= TIMING_HEADLINE_MIN_DATED dated payments: these headlines describe payment timing.
 const HEADLINE: Record<RiskLevel, string> = {
   low: "Reliable payer",
   medium: "Usually pays, sometimes late",
@@ -124,7 +129,7 @@ const HEADLINE: Record<RiskLevel, string> = {
   critical: "Severe collection risk",
 };
 
-// Used when there are zero dated payments: timing is unknown, so these make no claim about it.
+// Used below TIMING_HEADLINE_MIN_DATED dated payments: these make no claim about timing.
 const HEADLINE_TIMING_NEUTRAL: Record<RiskLevel, string> = {
   low: "Low collection risk",
   medium: "Moderate collection risk",
@@ -261,7 +266,7 @@ export function computeClientScore(input: ScoreInputs): ScoreResult {
     .map((inv) => inv.issue_date ?? inv.created_at)
     .filter((v): v is string => !!v && !isNaN(new Date(v).getTime()))
     .sort()[0];
-  const headline = (datedPaid === 0 ? HEADLINE_TIMING_NEUTRAL : HEADLINE)[risk_level];
+  const headline = (datedPaid >= TIMING_HEADLINE_MIN_DATED ? HEADLINE : HEADLINE_TIMING_NEUTRAL)[risk_level];
 
   const prior = input.prior;
   let trend: string;
@@ -295,8 +300,11 @@ export function computeClientScore(input: ScoreInputs): ScoreResult {
   if (datedPaid > 0) {
     score_factors.push(`${onTime} of ${plural(datedPaid, "dated payment")} ${datedPaid === 1 ? "was" : "were"} on time`);
   }
-  if (avgDaysOverdue !== null) {
-    score_factors.push(`Average delay: ${plural(Math.round(avgDaysOverdue), "day")}`);
+  // Paid-late invoices only. Open past-due age is covered by the "$X past due"
+  // factor and the "Oldest open invoice" driver. The avg_days_overdue column keeps
+  // its blended definition (late-paid + current past-due).
+  if (avgLatePaidDays !== null) {
+    score_factors.push(`Average delay: ${plural(avgLatePaidDays, "day")}`);
   }
   score_factors.push(
     pastDueCount > 0
