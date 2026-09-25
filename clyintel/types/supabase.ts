@@ -1202,12 +1202,16 @@ export type Database = {
           created_at: string
           dispute_rate: number | null
           id: string
+          inputs: Json | null
           non_response_rate: number | null
           outstanding_amount_cents: number | null
           payment_history_score: number | null
+          risk_drivers: string[] | null
           risk_level: Database["public"]["Enums"]["ptr_risk_level"]
           score_date: string
+          score_factors: string[] | null
           score_month: string
+          score_summary: string[] | null
           subscriber_id: string
         }
         Insert: {
@@ -1221,12 +1225,16 @@ export type Database = {
           created_at?: string
           dispute_rate?: number | null
           id?: string
+          inputs?: Json | null
           non_response_rate?: number | null
           outstanding_amount_cents?: number | null
           payment_history_score?: number | null
+          risk_drivers?: string[] | null
           risk_level?: Database["public"]["Enums"]["ptr_risk_level"]
           score_date?: string
+          score_factors?: string[] | null
           score_month: string
+          score_summary?: string[] | null
           subscriber_id: string
         }
         Update: {
@@ -1240,12 +1248,16 @@ export type Database = {
           created_at?: string
           dispute_rate?: number | null
           id?: string
+          inputs?: Json | null
           non_response_rate?: number | null
           outstanding_amount_cents?: number | null
           payment_history_score?: number | null
+          risk_drivers?: string[] | null
           risk_level?: Database["public"]["Enums"]["ptr_risk_level"]
           score_date?: string
+          score_factors?: string[] | null
           score_month?: string
+          score_summary?: string[] | null
           subscriber_id?: string
         }
         Relationships: [
