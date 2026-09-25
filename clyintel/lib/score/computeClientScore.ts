@@ -22,6 +22,7 @@
 import { uiStatus, daysFromToday } from "../adapters";
 import type { Database, Json } from "../../types/supabase";
 import {
+  SCORER_VERSION,
   PRIOR,
   PROVISIONAL_MIN_DATED,
   WEIGHTS,
@@ -30,6 +31,7 @@ import {
   type RiskLevel,
 } from "./scoreBands";
 import { utcDate, type DateSource, type PaidTiming } from "./resolvePaidTimings";
+import { daysBetweenUtcDates } from "./dates";
 
 export type { PaidTiming } from "./resolvePaidTimings";
 export type { RiskLevel } from "./scoreBands";
@@ -61,7 +63,7 @@ export interface ScoreInputs {
 export type ComponentKey = keyof typeof WEIGHTS;
 const COMPONENT_ORDER: ComponentKey[] = ["paymentHistory", "currentDelinquency", "exposure"];
 
-export const SCORER_VERSION = "client-score-v1";
+export { SCORER_VERSION } from "./scoreBands";
 
 // The ptr_scores fields the scorer produces (the route adds client_id and
 // subscriber_id). Numbers are rounded to the live column scales:
@@ -86,16 +88,11 @@ export interface ScoreRow {
 
 export type ScoreResult = { kind: "insufficient_data" } | ({ kind: "scored" } & ScoreRow);
 
-const MS_PER_DAY = 1000 * 60 * 60 * 24;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function round(n: number, dp: number): number {
   const f = 10 ** dp;
   return Math.round(n * f) / f;
-}
-
-function dayDiff(laterYmd: string, earlierYmd: string): number {
-  return Math.round((Date.parse(laterYmd) - Date.parse(earlierYmd)) / MS_PER_DAY);
 }
 
 function monthLabel(value: string): string {
@@ -191,7 +188,7 @@ export function computeClientScore(input: ScoreInputs): ScoreResult {
       noDueDate += 1; // dated, but lateness can't be measured without a due date
       continue;
     }
-    const days = dayDiff(t.paid_date, due);
+    const days = daysBetweenUtcDates(due, t.paid_date) as number; // both are valid YMDs here
     timings.push({
       invoice_id: inv.id,
       due_date: due,

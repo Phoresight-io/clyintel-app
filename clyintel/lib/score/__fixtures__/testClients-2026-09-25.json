@@ -1,0 +1,494 @@
+{
+ "_source": "Test DB (mhvuqjryesjsrictesuk) ptr_scores + invoices + balance_events, read 2026-09-25; no invoice_payments rows, no prior-month scores.",
+ "clients": [
+  {
+   "client_id": "9e38c5f4-0d88-41c6-a968-394b9202f440",
+   "name": "0969 Ocean View Road",
+   "stored_as_of": "2026-09-25T21:00:37.081Z",
+   "stored_composite": 54,
+   "invoices": [
+    {
+     "id": "0f5aebc6-954c-4971-92f7-d91d2a2816c2",
+     "status": "paid",
+     "due_date": "2026-03-13",
+     "issue_date": "2026-02-11",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 22675,
+     "amount_outstanding_cents": 0
+    },
+    {
+     "id": "48846d59-6572-45c4-88d3-8c381d9df3c2",
+     "status": "paid",
+     "due_date": "2026-04-13",
+     "issue_date": "2026-03-14",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 38700,
+     "amount_outstanding_cents": 0
+    },
+    {
+     "id": "d2256a4c-f4b7-4879-818c-1e6da3f3663f",
+     "status": "partial",
+     "due_date": "2026-06-28",
+     "issue_date": "2026-05-29",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 47750,
+     "amount_outstanding_cents": 27000
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  },
+  {
+   "client_id": "ae724d7d-345a-4d17-b7c3-c865fe604515",
+   "name": "55 Twin Lane",
+   "stored_as_of": "2026-09-25T21:00:22.832Z",
+   "stored_composite": 48,
+   "invoices": [
+    {
+     "id": "0cf2006d-b629-4c4d-85b1-ed4298c59545",
+     "status": "partial",
+     "due_date": "2026-06-19",
+     "issue_date": "2026-05-20",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 5400,
+     "amount_outstanding_cents": 400
+    },
+    {
+     "id": "1744ec7f-596d-4a01-b96b-bb627aba3fb2",
+     "status": "paid",
+     "due_date": "2026-05-20",
+     "issue_date": "2026-04-20",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 8640,
+     "amount_outstanding_cents": 0
+    },
+    {
+     "id": "c55af312-f53b-4313-a30d-c0a68c9d6457",
+     "status": "overdue",
+     "due_date": "2026-05-11",
+     "issue_date": "2026-04-11",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 8100,
+     "amount_outstanding_cents": 8100
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  },
+  {
+   "client_id": "97cc593b-9eba-4fb5-851a-7149ad86697b",
+   "name": "Amy's Bird Sanctuary",
+   "stored_as_of": "2026-09-25T20:45:08.596Z",
+   "stored_composite": 50,
+   "invoices": [
+    {
+     "id": "68ade12d-f759-43af-a557-5c25d2f10cab",
+     "status": "paid",
+     "due_date": "2026-05-11",
+     "issue_date": "2026-04-11",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 20500,
+     "amount_outstanding_cents": 0
+    },
+    {
+     "id": "7cab14a8-f79c-4898-9ac7-0582403dd1bb",
+     "status": "partial",
+     "due_date": "2026-06-06",
+     "issue_date": "2026-05-07",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 45900,
+     "amount_outstanding_cents": 23900
+    },
+    {
+     "id": "bdf1c51c-1db9-4ff8-9ff8-3c024088242a",
+     "status": "paid",
+     "due_date": "2026-06-25",
+     "issue_date": "2026-05-26",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 10800,
+     "amount_outstanding_cents": 0
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  },
+  {
+   "client_id": "a76e3e84-b21b-418b-8a5d-f3b5e3c8bd20",
+   "name": "Barnett Design",
+   "stored_as_of": "2026-09-25T21:00:23.233Z",
+   "stored_composite": 42,
+   "invoices": [
+    {
+     "id": "68a5c331-9aaf-4295-8c93-809a9e4bd0ac",
+     "status": "overdue",
+     "due_date": "2026-06-14",
+     "issue_date": "2026-05-15",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 27450,
+     "amount_outstanding_cents": 27450
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  },
+  {
+   "client_id": "37a367dd-cb81-4e9b-842b-d66c03f7b87f",
+   "name": "Bill's Windsurf Shop",
+   "stored_as_of": "2026-09-25T20:46:13.527Z",
+   "stored_composite": 49,
+   "invoices": [
+    {
+     "id": "05438306-e1a5-4703-816c-693caeb023fb",
+     "status": "paid",
+     "due_date": "2026-03-13",
+     "issue_date": "2026-02-11",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 17500,
+     "amount_outstanding_cents": 0
+    },
+    {
+     "id": "2440ec2a-e3c4-4ad0-91b1-7aae6da7de00",
+     "status": "overdue",
+     "due_date": "2026-05-11",
+     "issue_date": "2026-04-11",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 8500,
+     "amount_outstanding_cents": 8500
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  },
+  {
+   "client_id": "e8fdf1f0-0b2a-4b04-b474-66a497fb60b7",
+   "name": "Cool Cars",
+   "stored_as_of": "2026-09-25T20:45:45.819Z",
+   "stored_composite": 84,
+   "invoices": [
+    {
+     "id": "0317e331-dfc4-41e2-b589-38077395d649",
+     "status": "paid",
+     "due_date": "2026-05-15",
+     "issue_date": "2026-05-01",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 390000,
+     "amount_outstanding_cents": 0
+    },
+    {
+     "id": "2c68beac-6b04-41ef-8ee9-a387f583a350",
+     "status": "paid",
+     "due_date": "2026-06-16",
+     "issue_date": "2026-05-17",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 236952,
+     "amount_outstanding_cents": 0
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  },
+  {
+   "client_id": "71656c3e-5c77-4038-81b8-6d6eab11cb10",
+   "name": "Dukes Basketball Camp",
+   "stored_as_of": "2026-09-25T20:46:57.601Z",
+   "stored_composite": 84,
+   "invoices": [
+    {
+     "id": "541bf9b6-3014-4cbd-824e-7766c10645f9",
+     "status": "paid",
+     "due_date": "2026-05-11",
+     "issue_date": "2026-04-11",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 46040,
+     "amount_outstanding_cents": 0
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  },
+  {
+   "client_id": "b31e7286-1c37-448a-9ce7-734ab731e6a0",
+   "name": "Geeta Kalapatapu",
+   "stored_as_of": "2026-09-25T21:01:25.840Z",
+   "stored_composite": 68,
+   "invoices": [
+    {
+     "id": "06713eca-495f-4590-ab63-4e744debc41a",
+     "status": "paid",
+     "due_date": "2026-06-27",
+     "issue_date": "2026-05-28",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 62910,
+     "amount_outstanding_cents": 0
+    }
+   ],
+   "payments": [],
+   "balance_events": [
+    {
+     "invoice_id": "06713eca-495f-4590-ab63-4e744debc41a",
+     "detected_at": "2026-09-14T01:02:38.42092+00:00",
+     "new_outstanding_cents": 0,
+     "evidence": {
+      "syncedAt": "2026-09-14T01:02:38.308Z",
+      "newOutstandingCents": 0,
+      "prevOutstandingCents": 62910
+     }
+    }
+   ]
+  },
+  {
+   "client_id": "d206750c-eca3-4dca-a536-73e132248f72",
+   "name": "Jeff's Jalopies",
+   "stored_as_of": "2026-09-25T21:00:23.771Z",
+   "stored_composite": 40,
+   "invoices": [
+    {
+     "id": "26c32320-5a5d-4864-bac2-564548b36849",
+     "status": "overdue",
+     "due_date": "2026-06-06",
+     "issue_date": "2026-05-07",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 8100,
+     "amount_outstanding_cents": 8100
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  },
+  {
+   "client_id": "49dd2e48-a870-42b7-8e37-a74137eadcaa",
+   "name": "John Melton",
+   "stored_as_of": "2026-09-25T21:00:23.974Z",
+   "stored_composite": 51,
+   "invoices": [
+    {
+     "id": "74a5eff1-7699-4e2e-87a3-533a54703964",
+     "status": "partial",
+     "due_date": "2026-06-03",
+     "issue_date": "2026-05-04",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 75000,
+     "amount_outstanding_cents": 20000
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  },
+  {
+   "client_id": "564861ac-ce45-451e-ae40-48ec0a7532a5",
+   "name": "Kookies by Kathy",
+   "stored_as_of": "2026-09-25T21:00:24.138Z",
+   "stored_composite": 39,
+   "invoices": [
+    {
+     "id": "ba09b705-5203-4943-af92-50bec8a0e9ba",
+     "status": "overdue",
+     "due_date": "2026-05-10",
+     "issue_date": "2026-04-10",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 7500,
+     "amount_outstanding_cents": 7500
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  },
+  {
+   "client_id": "971b3f35-45cf-416c-8bab-0c983923131a",
+   "name": "Mark Cho",
+   "stored_as_of": "2026-09-25T21:00:24.321Z",
+   "stored_composite": 43,
+   "invoices": [
+    {
+     "id": "492a1494-5866-4af4-b17a-4e02562a6f15",
+     "status": "overdue",
+     "due_date": "2026-06-28",
+     "issue_date": "2026-05-29",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 31428,
+     "amount_outstanding_cents": 31428
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  },
+  {
+   "client_id": "e8a9f402-7bcf-445b-a413-af056575c8f5",
+   "name": "Paulsen Medical Supplies",
+   "stored_as_of": "2026-09-25T21:00:24.498Z",
+   "stored_composite": 42,
+   "invoices": [
+    {
+     "id": "bcae1db4-a536-47b7-9f4a-02fc7407e03c",
+     "status": "overdue",
+     "due_date": "2026-06-26",
+     "issue_date": "2026-05-27",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 95475,
+     "amount_outstanding_cents": 95475
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  },
+  {
+   "client_id": "e29b736b-4571-4f87-bf8b-95ae3f038e6a",
+   "name": "Red Rock Diner",
+   "stored_as_of": "2026-09-25T21:00:24.807Z",
+   "stored_composite": 39,
+   "invoices": [
+    {
+     "id": "c1659ec1-157f-4deb-9288-bc86361bebdb",
+     "status": "overdue",
+     "due_date": "2026-04-20",
+     "issue_date": "2026-03-21",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 15600,
+     "amount_outstanding_cents": 15600
+    },
+    {
+     "id": "d407c2b8-6e29-4567-a0d6-da11bba33145",
+     "status": "overdue",
+     "due_date": "2026-06-26",
+     "issue_date": "2026-05-27",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 7000,
+     "amount_outstanding_cents": 7000
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  },
+  {
+   "client_id": "8782d328-bcd0-46b4-864d-d55a59857de2",
+   "name": "Rondonuwu Fruit and Vegi",
+   "stored_as_of": "2026-09-25T21:00:25.003Z",
+   "stored_composite": 42,
+   "invoices": [
+    {
+     "id": "96a3b83f-b3a2-4314-8ccc-165df92fdaa8",
+     "status": "overdue",
+     "due_date": "2026-06-27",
+     "issue_date": "2026-05-28",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 7860,
+     "amount_outstanding_cents": 7860
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  },
+  {
+   "client_id": "5de04374-da28-4ad5-8cb3-5d412f8a21bb",
+   "name": "Sonnenschein Family Store",
+   "stored_as_of": "2026-09-25T21:00:25.207Z",
+   "stored_composite": 43,
+   "invoices": [
+    {
+     "id": "c1fc1f71-ec69-4fd4-8808-ddd2464127fa",
+     "status": "overdue",
+     "due_date": "2026-06-28",
+     "issue_date": "2026-05-29",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 36207,
+     "amount_outstanding_cents": 36207
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  },
+  {
+   "client_id": "8f296d50-1f06-4eda-bf84-bbc5bc10211b",
+   "name": "Sushi by Katsuyuki",
+   "stored_as_of": "2026-09-25T20:44:42.977Z",
+   "stored_composite": 46,
+   "invoices": [
+    {
+     "id": "0f86608c-988c-4e1b-b4b1-aace8d0f21ee",
+     "status": "overdue",
+     "due_date": "2026-06-19",
+     "issue_date": "2026-05-20",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 8000,
+     "amount_outstanding_cents": 8000
+    },
+    {
+     "id": "2373d5e0-3625-45ef-8b54-126aba0a5b5a",
+     "status": "overdue",
+     "due_date": "2026-06-26",
+     "issue_date": "2026-05-27",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 8000,
+     "amount_outstanding_cents": 8000
+    },
+    {
+     "id": "f264bae1-3371-487b-97d6-bc92dc40c452",
+     "status": "paid",
+     "due_date": "2026-06-12",
+     "issue_date": "2026-05-13",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 8000,
+     "amount_outstanding_cents": 0
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  },
+  {
+   "client_id": "3621a590-54bb-45ba-a0df-1c08db604336",
+   "name": "Travis Waldron",
+   "stored_as_of": "2026-09-25T21:00:25.470Z",
+   "stored_composite": 46,
+   "invoices": [
+    {
+     "id": "11b3a5db-cdfc-40a9-96f7-49d4313f2822",
+     "status": "paid",
+     "due_date": "2026-06-16",
+     "issue_date": "2026-05-17",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 8100,
+     "amount_outstanding_cents": 0
+    },
+    {
+     "id": "742505cb-2a1b-491f-95e9-f58236e247b8",
+     "status": "overdue",
+     "due_date": "2026-06-25",
+     "issue_date": "2026-05-26",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 41472,
+     "amount_outstanding_cents": 41472
+    },
+    {
+     "id": "d0152a1a-4094-4c40-b619-b4659fd99995",
+     "status": "paid",
+     "due_date": "2026-06-25",
+     "issue_date": "2026-05-26",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 10355,
+     "amount_outstanding_cents": 0
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  },
+  {
+   "client_id": "a4ffdd55-d0a0-4932-834f-ece57c3a65dc",
+   "name": "Weiskopf Consulting",
+   "stored_as_of": "2026-09-25T21:00:25.752Z",
+   "stored_composite": 42,
+   "invoices": [
+    {
+     "id": "58f7011c-1abb-425c-99b3-ab078b8b2f19",
+     "status": "overdue",
+     "due_date": "2026-06-26",
+     "issue_date": "2026-05-27",
+     "created_at": "2026-07-03T21:47:09.995422+00:00",
+     "amount_cents": 37500,
+     "amount_outstanding_cents": 37500
+    }
+   ],
+   "payments": [],
+   "balance_events": []
+  }
+ ]
+}

@@ -7,6 +7,11 @@ import type { Database } from "../../types/supabase";
 
 export type RiskLevel = Database["public"]["Enums"]["ptr_risk_level"];
 
+// Stamped into ptr_scores.inputs.version on every score (and in the GET dry-run).
+// A stored score whose version differs is stale and is rescored on the next page
+// load (ensureCurrentScore). Bump it on any change to the scorer's logic or wording.
+export const SCORER_VERSION = "v1.1";
+
 export const PROVISIONAL_MIN_DATED = 3;
 // Bayesian prior blended into paymentHistory: history = (n·mean + PRIOR) / (n + 1).
 export const PRIOR = 70;

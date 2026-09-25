@@ -107,6 +107,26 @@ No change to the scoring math. The changes are to wording, display and when scor
   approved one-time backfill on Test. The "Score this client" button is gone;
   "Rescore" stays.
 
+## Freshness: daily refresh + scorer version (feat/client-score-freshness)
+
+- **`SCORER_VERSION`** (`lib/score/scoreBands.ts`, currently `"v1.1"`) is the
+  single source of truth. The scorer stamps it into `ptr_scores.inputs.version`
+  on every score and in the GET dry-run. **Rule: bump it on any change to the
+  scorer's logic or wording.** Every stored score then refreshes on its next
+  page load.
+- **When a stored score is stale** (`isScoreStale` in
+  `lib/score/ensureCurrentScore.ts`):
+  `!latest || latest.score_date !== today (UTC) || latest.inputs.version !== SCORER_VERSION`.
+  Rows with no version count as stale, so every pre-v1.1 row is rescored once.
+  Daily rescoring upserts the same `(client_id, score_month)` row, so each
+  month keeps its last score. The flow is still fail-soft and sequential in the
+  portfolio loader.
+- **Day math**: see follow-up 3. Against the 19 Test clients scored on
+  2026-09-25, the only composite that changes is Rondonuwu Fruit and Vegi,
+  42 → 43. Its oldest invoice goes from 91 to 90 days past due, which crosses
+  the 90/91 lateness boundary (10 → 15). Regression fixture:
+  `lib/score/__fixtures__/testClients-2026-09-25.json`.
+
 ## Follow-ups
 
 1. **Historical payment-date backfill in the QBO import**: a PREREQUISITE for
@@ -117,13 +137,16 @@ No change to the scoring math. The changes are to wording, display and when scor
    Payment Update webhooks. This replaces the speculative `evidence.txnDate`
    read in `resolvePaidTimings`. Motivating example: Geeta Kalapatapu's score
    uses `detected_at` (9/14) rather than the real payment date.
-3. **daysFromToday rounding**: `Math.round` against the current time makes day
-   counts run +1 versus the calendar in the afternoon (and `due_date == today` is
-   inconsistent). Fix before nightly scoring. The UI and scorer share it, so fix
-   both together.
+3. ~~**daysFromToday rounding**~~: **DONE (feat/client-score-freshness).** Every
+   day count now goes through `daysBetweenUtcDates` (`lib/score/dates.ts`), the
+   whole-day difference between UTC calendar dates, with no rounding: the scorer,
+   `uiStatus`, the "Due In" column and the client list's days overdue. Due
+   2026-06-28 at 2026-09-25T21:00Z is 89, not 90. An invoice due today is no
+   longer shown as past due in the afternoon.
 4. **Auto-rescore triggers**: rescore on payment detected, on an invoice sync
-   change, nightly for past-due clients, and before outreach. Today scoring only
-   happens on page load, when the month has no score yet.
+   change, nightly for past-due clients, and before outreach. *Partly done:* the
+   page-load refresh is now **daily** (stale when `score_date` ≠ today UTC)
+   instead of monthly. The event/nightly triggers are still open.
 5. **De minimis past-due threshold** ($25 / 2%): considered, not adopted.
 6. **Recency weighting** of payment history.
 7. **Responsiveness (v2)**: reply rate over outreach. `non_response_rate` stays null.
