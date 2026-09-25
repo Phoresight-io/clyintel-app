@@ -4,7 +4,8 @@ import { createSupabaseServer } from "@/lib/supabase-server";
 import {
   getClient,
   getInvoicesByClient,
-  getPtrScores,
+  ensureCurrentScore,
+  getPaidDates,
   getClientContacts,
   getCommunicationsByClient,
   getInvoicePaymentsByClient,
@@ -49,8 +50,10 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
     // getClient already proved ownership; getClientContacts also self-scopes by
     // the client's subscriber_id, so it's safe alongside the other per-client reads.
-    const [ptr, contacts, voiceCalls, communications, transactions, balanceEvents] = await Promise.all([
-      getPtrScores(user.id, id),
+    const [ptr, paidDates, contacts, voiceCalls, communications, transactions, balanceEvents] = await Promise.all([
+      // Scores this month if missing/stale; never throws or blocks the render.
+      ensureCurrentScore(user.id, id, invoices),
+      getPaidDates(user.id, invoices),
       getClientContacts(user.id, id),
       getVoiceCalls({ clientId: id }),
       getCommunicationsByClient(user.id, id),
@@ -58,7 +61,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       getBalanceEventsByClient(user.id, invoiceUuids),
     ]);
     const uiClient = toUIClient(client, ptr, invoices);
-    const invoiceSet = toUIClientInvoiceSet(invoices);
+    const invoiceSet = toUIClientInvoiceSet(invoices, paidDates);
 
     return (
       <Suspense fallback={null}>

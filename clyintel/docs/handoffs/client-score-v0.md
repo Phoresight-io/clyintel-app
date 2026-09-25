@@ -42,7 +42,8 @@ turns each paid invoice's evidence into ONE `{ invoice_id, paid_date, date_sourc
 record, using this precedence:
 1. The last succeeded payment (`payments.paid_at` via `invoice_payments`) → `payment`.
 2. Otherwise, the first `balance_events` row with `new_outstanding_cents = 0`
-   (ordered by `detected_at`): `evidence.txnDate` → `qbo_txn`, or else
+   (ordered by `detected_at`): `evidence.txnDate` → `qbo_txn` (speculative, see
+   follow-up 2), or else
    `detected_at` → `detected`.
 3. Otherwise there is no record, and the invoice counts as "paid, undated".
 
@@ -85,24 +86,52 @@ dated payments the headline is timing-neutral, and the history driver requires n
 - The endpoint has **not** been called against live data from this branch.
 - PR base is `develop` (feature PRs → develop; develop → main is a separate release PR).
 
+## Polish + auto-populate (feat/client-score-polish)
+
+No change to the scoring math. The changes are to wording, display and when scoring runs:
+- **Headline**: timing headlines ("Reliable payer", "Usually pays, sometimes
+  late", "Frequently pays late") now need >= 3 dated payments. Below that the
+  timing-neutral set is used, and the evidence stays visible in the "X of N dated
+  payments" factor.
+- **"Average delay" factor**: now uses paid-late invoices only, and is omitted
+  when none were paid late. The `avg_days_overdue` column keeps its blended
+  definition.
+- **Paid-date column**: shows the normalized paid date from
+  `lib/score/loadPaidTimings.ts`, the same reader the scorer uses, or "—". It no
+  longer shows `updated_at`, which is the QBO sync touch time.
+- **Auto-populate**: `ensureCurrentScore` (core in
+  `lib/score/ensureCurrentScore.ts`, wiring in `lib/data.ts`) runs on the client
+  page and, sequentially, in the portfolio list loader. It scores a client when
+  the client has >= 1 non-draft invoice and no ptr_scores row for the current UTC
+  month. It never throws or blocks the render. The first portfolio load is the
+  approved one-time backfill on Test. The "Score this client" button is gone;
+  "Rescore" stays.
+
 ## Follow-ups
 
-- **Agent-2 AI summary line**: an LLM line written to `ai_recommendation` /
-  `ai_model`, shown alongside the deterministic summary. The v0 upsert already
-  leaves those columns alone.
-- **Recovery Recommendations source**: `negotiationRecs = []` in DetailScreen still
-  has no data source. Out of scope here.
-- **Due-date convention**: `daysFromToday` uses `Math.round` against the current
-  time, so `due_date == today` is inconsistent. The scorer inherits the UI
-  convention on purpose. Fix both together.
-- ~~**written_off is double-counted**~~: **fixed in v1.** written_off now counts
-  only in paymentHistory (scores 0). It is excluded from delinquency, from
-  exposure's pastDueOutstanding, and from the "Oldest open invoice" driver. It is
-  still `past_due` in the UI's `uiStatus`; that UI convention is unchanged.
-- **Responsiveness (v2)**: reply rate over outreach. It was removed from v1
-  inputs and `non_response_rate` stays null.
-- **Historical backfill**: add a loader source that emits the same `PaidTiming`
-  records (a new `date_source` value). The scorer needs no change.
-- Batch / scheduled scoring (all clients, monthly) and `counted_toward_limit`
-  accounting.
-- `dispute_rate` has no source (it stays null).
+1. **Historical payment-date backfill in the QBO import**: a PREREQUISITE for
+   customer launch. Today only payments detected since go-live have dates. The
+   backfill should emit the same `PaidTiming` records (a new `date_source`), so
+   the scorer needs no change.
+2. **Persist the QBO Payment TxnDate**, keyed by QBO payment id and updated on
+   Payment Update webhooks. This replaces the speculative `evidence.txnDate`
+   read in `resolvePaidTimings`. Motivating example: Geeta Kalapatapu's score
+   uses `detected_at` (9/14) rather than the real payment date.
+3. **daysFromToday rounding**: `Math.round` against the current time makes day
+   counts run +1 versus the calendar in the afternoon (and `due_date == today` is
+   inconsistent). Fix before nightly scoring. The UI and scorer share it, so fix
+   both together.
+4. **Auto-rescore triggers**: rescore on payment detected, on an invoice sync
+   change, nightly for past-due clients, and before outreach. Today scoring only
+   happens on page load, when the month has no score yet.
+5. **De minimis past-due threshold** ($25 / 2%): considered, not adopted.
+6. **Recency weighting** of payment history.
+7. **Responsiveness (v2)**: reply rate over outreach. `non_response_rate` stays null.
+
+Also still open:
+- **Agent-2 AI summary line** → `ai_recommendation` / `ai_model`. The upsert
+  already leaves those columns alone.
+- **Recovery Recommendations source** (`negotiationRecs = []`).
+- `counted_toward_limit` accounting; `dispute_rate` has no source.
+- ~~written_off double-count~~: fixed in v1. It counts only in history; it is
+  still `past_due` in the UI's `uiStatus`.

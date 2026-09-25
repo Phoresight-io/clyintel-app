@@ -1,6 +1,9 @@
 import { getSupabase } from "@/lib/supabase";
 import type { Database } from "@/types/supabase";
-import { toUIClient, toUIClientInvoiceSet, type PtrScorePair } from "@/lib/adapters";
+import { toUIClient, toUIClientInvoiceSet, type PaidDateMap, type PtrScorePair } from "@/lib/adapters";
+import { ensureCurrentScoreCore } from "@/lib/score/ensureCurrentScore";
+import { makeScorePort } from "@/lib/score/scoreClient";
+import { loadPaidTimings } from "@/lib/score/loadPaidTimings";
 import type { Client as UIClientShape, ClientInvoiceSet } from "@/lib/mock-data";
 import type { ClientContactDisplay } from "@/lib/contacts/contactDisplay";
 
@@ -188,6 +191,39 @@ export async function getPtrScores(userId: string, clientId: string): Promise<Pt
   return { latest: data?.[0] ?? null, prior: data?.[1] ?? null };
 }
 
+// Latest + prior PTR scores, first computing this month's score if it's missing
+// or stale (auto-populate; replaces the manual "Score this client" button). Only
+// writes ptr_scores, through the scoreClient write path. Never throws: on any
+// failure it returns whatever getPtrScores reads (see ensureCurrentScoreCore).
+export async function ensureCurrentScore(
+  userId: string,
+  clientId: string,
+  invoices: Pick<InvoiceRow, "status">[],
+): Promise<PtrScorePair> {
+  return ensureCurrentScoreCore(
+    { userId, clientId, invoices },
+    {
+      readScores: () => getPtrScores(userId, clientId),
+      port: makeScorePort(getSupabase(), userId),
+      now: new Date(),
+    },
+  );
+}
+
+// Paid-in-full dates for a client's paid invoices (same source precedence as the
+// scorer: last succeeded payment, else first zero-balance balance_event).
+// Fail closed → empty map, so the Paid-date column shows "—".
+export async function getPaidDates(userId: string, invoices: InvoiceRow[]): Promise<PaidDateMap> {
+  try {
+    const paidIds = invoices.filter((inv) => inv.status === "paid").map((inv) => inv.id);
+    const timings = await loadPaidTimings(getSupabase(), userId, paidIds);
+    return new Map(timings.map((t) => [t.invoice_id, t.paid_date]));
+  } catch (e) {
+    console.error("getPaidDates error", e);
+    return new Map();
+  }
+}
+
 // Contacts for a single client (read-only display — Brick 3). client_contacts has
 // no subscriber_id, so the query is user-scoped via the parent client join:
 // `clients!inner(subscriber_id)` + `.eq("clients.subscriber_id", userId)` means a
@@ -250,9 +286,11 @@ export async function getUIPortfolio(userId: string): Promise<UIPortfolio> {
 
   const uiClients: UIClientShape[] = [];
   const clientInvoices: Record<string, ClientInvoiceSet> = {};
+  // Sequential on purpose: ensureCurrentScore may score (and write) each client
+  // missing a current-month score, so no unbounded parallelism against the DB.
   for (const client of clients) {
     const clientInv = byClient.get(client.id) ?? [];
-    const ptr = await getPtrScores(userId, client.id);
+    const ptr = await ensureCurrentScore(userId, client.id, clientInv);
     uiClients.push(toUIClient(client, ptr, clientInv));
     clientInvoices[client.id] = toUIClientInvoiceSet(clientInv);
   }

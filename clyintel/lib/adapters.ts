@@ -47,7 +47,12 @@ export function uiStatus(
   return "current"; // draft | sent
 }
 
-export function toUIInvoice(row: InvoiceRow): Invoice {
+// invoiceId → paid-in-full date ('YYYY-MM-DD'), from lib/score/loadPaidTimings.
+// Paid rows show that date, or "—" when it's unknown. They never show updated_at:
+// that is the QBO sync touch time, not a payment date.
+export type PaidDateMap = Map<string, string>;
+
+export function toUIInvoice(row: InvoiceRow, paidDates?: PaidDateMap): Invoice {
   const ui = uiStatus(row.status, row.due_date);
   const dayDelta = daysFromToday(row.due_date);
   const invoice: Invoice = {
@@ -62,15 +67,15 @@ export function toUIInvoice(row: InvoiceRow): Invoice {
   } else if (ui === "current") {
     invoice.daysUntilDue = dayDelta ?? undefined;
   } else if (ui === "paid") {
-    invoice.paidDate = formatDate(row.updated_at);
+    invoice.paidDate = formatDate(paidDates?.get(row.id) ?? null);
   }
   return invoice;
 }
 
-export function toUIClientInvoiceSet(rows: InvoiceRow[]): ClientInvoiceSet {
+export function toUIClientInvoiceSet(rows: InvoiceRow[], paidDates?: PaidDateMap): ClientInvoiceSet {
   const set: ClientInvoiceSet = { outstanding: [], upcoming: [], paid: [] };
   for (const row of rows) {
-    const inv = toUIInvoice(row);
+    const inv = toUIInvoice(row, paidDates);
     if (inv.status === "paid") set.paid.push(inv);
     else if (inv.status === "past_due") set.outstanding.push(inv);
     else set.upcoming.push(inv);

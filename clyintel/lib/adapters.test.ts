@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { toUIClient } from "./adapters";
+import { toUIClient, toUIInvoice, toUIClientInvoiceSet } from "./adapters";
 import type { Database } from "@/types/supabase";
 
 type ClientRow = Database["public"]["Tables"]["clients"]["Row"];
 type PtrScoreRow = Database["public"]["Tables"]["ptr_scores"]["Row"];
+type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
 
 const client = { id: "c1", name: "Acme", company: "Acme Co", updated_at: "2026-09-01T00:00:00Z" } as unknown as ClientRow;
 
@@ -59,5 +60,38 @@ describe("toUIClient — Client Score mapping", () => {
     expect(c.scoreSummary).toEqual([]);
     expect(c.scoreFactors).toEqual([]);
     expect(c.riskDrivers).toEqual([]);
+  });
+});
+
+describe("Paid-date column — never updated_at", () => {
+  const paidRow = {
+    id: "inv-1",
+    invoice_number: "1001",
+    status: "paid",
+    due_date: "2026-06-01",
+    amount_cents: 10000,
+    amount_outstanding_cents: 0,
+    last_reminder_at: null,
+    updated_at: "2026-09-20T15:00:00Z", // QBO sync touch — must never be shown
+  } as unknown as InvoiceRow;
+
+  it("map present → shows the paid date", () => {
+    expect(toUIInvoice(paidRow, new Map([["inv-1", "2026-06-03"]])).paidDate).toBe("6/3/26");
+  });
+
+  it("map absent → —", () => {
+    expect(toUIInvoice(paidRow).paidDate).toBe("—");
+  });
+
+  it("invoice missing from map → —", () => {
+    expect(toUIInvoice(paidRow, new Map([["other", "2026-06-03"]])).paidDate).toBe("—");
+  });
+
+  it("toUIClientInvoiceSet threads the map through; never 9/20/26", () => {
+    const withMap = toUIClientInvoiceSet([paidRow], new Map([["inv-1", "2026-06-03"]]));
+    expect(withMap.paid[0].paidDate).toBe("6/3/26");
+    const without = toUIClientInvoiceSet([paidRow]);
+    expect(without.paid[0].paidDate).toBe("—");
+    expect(JSON.stringify([withMap, without])).not.toContain("9/20/26");
   });
 });

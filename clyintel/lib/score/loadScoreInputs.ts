@@ -4,24 +4,17 @@
 //
 // Reads:
 //   invoices          subscriber_id + client_id
-//   invoice_payments  → payments.paid_at for the client's PAID invoices,
-//                       status = 'succeeded', payments filtered by subscriber_id
-//   balance_events    subscriber_id + invoice_id IN the client's paid invoices,
-//                       new_outstanding_cents = 0 (balance_events has no client_id)
+//   paid timings      loadPaidTimings (payments + balance_events) for the client's
+//                       PAID invoices: one PaidTiming per invoice, so the scorer
+//                       never sees where a date came from
 //   prior ptr_scores  latest row from an EARLIER score_month (text 'YYYY-MM')
-// resolvePaidTimings turns the payment and balance-event rows into one
-// PaidTiming per paid invoice, so the scorer never sees where a date came from.
 //
 // Any read error throws. The route turns that into a 500 and writes nothing.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../../types/supabase";
 import type { PriorScore, ScoreInputs, ScoreInvoice } from "./computeClientScore";
-import {
-  resolvePaidTimings,
-  type BalanceEventTimingRow,
-  type PaymentTimingRow,
-} from "./resolvePaidTimings";
+import { loadPaidTimings } from "./loadPaidTimings";
 
 type Db = SupabaseClient<Database>;
 
@@ -55,36 +48,9 @@ export async function loadScoreInputs(
   const invoices = (invRes.data ?? []) as ScoreInvoice[];
   const paidIds = invoices.filter((i) => i.status === "paid").map((i) => i.id);
 
-  let payments: PaymentTimingRow[] = [];
-  let balanceEvents: BalanceEventTimingRow[] = [];
-  if (paidIds.length > 0) {
-    const [payRes, evRes] = await Promise.all([
-      db
-        .from("invoice_payments")
-        .select("invoice_id, payments!inner(paid_at, status, subscriber_id)")
-        .in("invoice_id", paidIds)
-        .eq("payments.status", "succeeded")
-        .eq("payments.subscriber_id", subscriberId),
-      db
-        .from("balance_events")
-        .select("invoice_id, detected_at, new_outstanding_cents, evidence")
-        .eq("subscriber_id", subscriberId)
-        .in("invoice_id", paidIds)
-        .eq("new_outstanding_cents", 0),
-    ]);
-    if (payRes.error) throw new Error(`score: payments load failed: ${payRes.error.message}`);
-    if (evRes.error) throw new Error(`score: balance_events load failed: ${evRes.error.message}`);
-    payments = (payRes.data ?? []).map((r) => {
-      const p = r.payments as unknown as { paid_at: string | null } | { paid_at: string | null }[] | null;
-      const one = Array.isArray(p) ? p[0] : p;
-      return { invoice_id: r.invoice_id, paid_at: one?.paid_at ?? null };
-    });
-    balanceEvents = (evRes.data ?? []) as BalanceEventTimingRow[];
-  }
-
   return {
     invoices,
-    paidTimings: resolvePaidTimings(paidIds, payments, balanceEvents),
+    paidTimings: await loadPaidTimings(db, subscriberId, paidIds),
     asOf,
     prior: (priorRes.data as PriorScore | null) ?? null,
   };

@@ -234,8 +234,9 @@ export default function DetailScreen({
   const [scoring, setScoring] = useState(false);
   const [scoreError, setScoreError] = useState<string | null>(null);
 
-  // POST computes + upserts this month's ptr_scores row, then the server page
-  // re-reads it via router.refresh(). Real (UUID) clients only.
+  // Rescore: POST computes + upserts this month's ptr_scores row, then the server
+  // page re-reads it via router.refresh(). Real (UUID) clients only. The initial
+  // score is written automatically on page load (ensureCurrentScore).
   async function runScore() {
     setScoring(true);
     setScoreError(null);
@@ -431,13 +432,7 @@ export default function DetailScreen({
             {score === null ? (
               <div>
                 <div style={{ fontSize: 20, fontWeight: 700, color: C.textDim, marginBottom: 6 }}>Not yet scored</div>
-                <div style={{ fontSize: 13, color: C.textMid, fontWeight: 500, marginBottom: 14 }}>Scores use this client&apos;s invoices and payment history.</div>
-                {realMode && (
-                  <button onClick={runScore} disabled={scoring} style={{ width: "100%", padding: "10px 0", fontSize: 14, fontWeight: 600, color: "#FFFFFF", background: C.navy, border: "none", borderRadius: 7, cursor: scoring ? "default" : "pointer", opacity: scoring ? 0.6 : 1 }}>
-                    {scoring ? "Scoring…" : "Score this client"}
-                  </button>
-                )}
-                {scoreError && <div style={{ fontSize: 13, color: C.red, fontWeight: 500, marginTop: 8 }}>{scoreError}</div>}
+                <div style={{ fontSize: 13, color: C.textMid, fontWeight: 500 }}>Not enough invoice data to score yet.</div>
               </div>
             ) : (
               <>
@@ -454,8 +449,8 @@ export default function DetailScreen({
               <div style={{ height: 6, borderRadius: 3, background: "linear-gradient(to right, #DC2626 0%, #F59E0B 50%, #16A34A 100%)", marginBottom: 12, position: "relative" }}>
                 <div style={{ position: "absolute", left: `${score}%`, top: -2, width: 10, height: 10, borderRadius: "50%", background: scoreColor, border: "2px solid #FFFFFF" }} />
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-                <div style={{ fontSize: 16, fontWeight: 700, color: scoreColor }}>{scoreLabel}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: scoreColor, whiteSpace: "nowrap" }}>{scoreLabel}</div>
                 {client.provisional && (
                   <span title="Based on fewer than 3 dated payments" style={{ fontSize: 11, fontWeight: 600, color: C.textMid, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 4, padding: "2px 6px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Provisional</span>
                 )}

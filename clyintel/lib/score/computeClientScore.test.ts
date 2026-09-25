@@ -104,7 +104,7 @@ describe("computeClientScore v1 — known fixture", () => {
     ]);
     expect(r.score_factors).toEqual([
       "2 of 3 dated payments were on time",
-      "Average delay: 25 days",
+      "Average delay: 18 days", // paid-late only (i2); open past-due age is not mixed in
       "$800.00 past due across 1 invoice",
       "1 invoice written off",
     ]);
@@ -186,7 +186,8 @@ describe("computeClientScore v1 — no dated payments (prior only)", () => {
       "1 paid invoice has no payment date — not used in the score (limited history)",
       "Based on 2 invoices since Jul 2026",
     ]);
-    expect(r.score_factors).toEqual(["Average delay: 10 days", "$500.00 past due across 1 invoice"]);
+    // No late PAID invoices → no "Average delay" line (the open invoice is covered below).
+    expect(r.score_factors).toEqual(["$500.00 past due across 1 invoice", "$1,500.00 billed across 2 invoices"]);
     expect(r.risk_drivers).toEqual(["33% of billed amount is past due ($500.00)"]);
     for (const line of [...r.score_summary, ...r.score_factors, ...r.risk_drivers]) {
       expect(line).not.toMatch(/on time|paid .* late|70/i);
@@ -242,7 +243,7 @@ describe("computeClientScore v1 — amount weighting and drivers", () => {
     expect(inputsOf(r).components.paymentHistory).toBe(51);
     // .55·51 + 30 + 15 = 73.05 → 73 → medium
     expect(r.composite_score).toBe(73);
-    expect(r.score_summary[0]).toBe("Usually pays, sometimes late");
+    expect(r.score_summary[0]).toBe("Moderate collection risk"); // 2 dated < 3 → timing-neutral
     expect(r.risk_drivers).toEqual(["Paid 1 of 2 invoices late (avg 50 days)"]);
     expect(r.score_factors).toContain("1 of 2 dated payments were on time");
   });
@@ -261,6 +262,118 @@ describe("computeClientScore v1 — amount weighting and drivers", () => {
     expect(r.score_summary[0]).toBe("Reliable payer");
     expect(r.score_factors).toEqual(["3 of 3 dated payments were on time", "No invoices past due"]);
     expect(r.risk_drivers).toEqual(["No material risk drivers identified"]);
+  });
+});
+
+describe("polish — headline needs >= 3 dated payments", () => {
+  const paid = (id: string) => inv({ id, status: "paid", due_date: "2026-06-01", amount_cents: 1000, amount_outstanding_cents: 0 });
+  const onTime = (id: string): PaidTiming => ({ invoice_id: id, paid_date: "2026-05-30", date_source: "payment" });
+  const run = (ids: string[]) =>
+    scored({ asOf: AS_OF, invoices: ids.map(paid), paidTimings: ids.map(onTime) });
+
+  it("1 dated payment → timing-neutral headline; evidence still in factors", () => {
+    const r = run(["a"]);
+    expect(r.composite_score).toBe(92); // history 85 → .55·85 + 30 + 15 = 91.75
+    expect(r.score_summary[0]).toBe("Low collection risk");
+    expect(r.score_factors[0]).toBe("1 of 1 dated payment was on time");
+  });
+
+  it("2 dated payments → timing-neutral headline", () => {
+    expect(run(["a", "b"]).score_summary[0]).toBe("Low collection risk");
+  });
+
+  it("3 dated payments → timing headline", () => {
+    expect(run(["a", "b", "c"]).score_summary[0]).toBe("Reliable payer");
+  });
+
+  it("a single late payment no longer produces a timing headline", () => {
+    const r = scored({
+      asOf: AS_OF,
+      invoices: [paid("a")],
+      paidTimings: [{ invoice_id: "a", paid_date: "2026-07-01", date_source: "detected" }], // 30 days → 65
+    });
+    // history (65 + 70)/2 = 67.5 → .55·67.5 + 45 = 82.13 → 82 → medium
+    expect(r.risk_level).toBe("medium");
+    expect(r.score_summary[0]).toBe("Moderate collection risk");
+    expect(r.score_factors[0]).toBe("0 of 1 dated payment was on time");
+  });
+});
+
+describe("polish — Average delay = paid-late invoices only", () => {
+  it("no late paid + an open past-due invoice → no Average delay line; column stays blended", () => {
+    const r = scored({
+      asOf: AS_OF,
+      invoices: [
+        inv({ id: "a", status: "paid", due_date: "2026-06-01", amount_cents: 1000, amount_outstanding_cents: 0 }),
+        inv({ id: "o", status: "overdue", due_date: "2026-09-05", amount_cents: 1000, amount_outstanding_cents: 1000 }),
+      ],
+      paidTimings: [{ invoice_id: "a", paid_date: "2026-06-01", date_source: "payment" }],
+    });
+    expect(r.score_factors.some((l) => l.startsWith("Average delay"))).toBe(false);
+    expect(r.avg_days_overdue).toBe(20); // column: the open invoice's 20 days
+  });
+
+  it("with late paid invoices → mean of paid-late days only", () => {
+    const r = scored({
+      asOf: AS_OF,
+      invoices: [
+        inv({ id: "a", status: "paid", due_date: "2026-06-01", amount_cents: 1000, amount_outstanding_cents: 0 }),
+        inv({ id: "b", status: "paid", due_date: "2026-06-01", amount_cents: 1000, amount_outstanding_cents: 0 }),
+        inv({ id: "o", status: "overdue", due_date: "2026-06-27", amount_cents: 1000, amount_outstanding_cents: 1000 }),
+      ],
+      paidTimings: [
+        { invoice_id: "a", paid_date: "2026-06-11", date_source: "payment" }, // 10 late
+        { invoice_id: "b", paid_date: "2026-06-21", date_source: "payment" }, // 20 late
+      ],
+    });
+    expect(r.score_factors).toContain("Average delay: 15 days"); // (10 + 20)/2, not the 90-day open invoice
+    expect(r.avg_days_overdue).toBe(40); // column blends: (10 + 20 + 90)/3
+  });
+});
+
+describe("exact spec cases owed from #137", () => {
+  const paid = (id: string, cents: number) =>
+    inv({ id, status: "paid", due_date: "2026-06-01", amount_cents: cents, amount_outstanding_cents: 0 });
+
+  it("$5,000 on time + $200 at 60d late → weighted mean 97.5", () => {
+    const r = scored({
+      asOf: AS_OF,
+      invoices: [paid("a", 500000), paid("b", 20000)],
+      paidTimings: [
+        { invoice_id: "a", paid_date: "2026-06-01", date_source: "payment" },
+        { invoice_id: "b", paid_date: "2026-07-31", date_source: "payment" }, // 60 days → 35
+      ],
+    });
+    expect(inputsOf(r).aggregates.history_weighted_mean).toBe(97.5);
+  });
+
+  it("one on-time payment → history 85", () => {
+    const r = scored({
+      asOf: AS_OF,
+      invoices: [paid("a", 1000)],
+      paidTimings: [{ invoice_id: "a", paid_date: "2026-06-01", date_source: "payment" }],
+    });
+    expect(r.payment_history_score).toBe(85);
+  });
+
+  it("one 10-days-late payment → history 75", () => {
+    const r = scored({
+      asOf: AS_OF,
+      invoices: [paid("a", 1000)],
+      paidTimings: [{ invoice_id: "a", paid_date: "2026-06-11", date_source: "payment" }],
+    });
+    expect(r.payment_history_score).toBe(75);
+  });
+
+  it("new client, nothing overdue, no dated payments → composite 84, medium, provisional", () => {
+    const r = scored({
+      asOf: AS_OF,
+      invoices: [inv({ id: "s", status: "sent", due_date: "2026-10-15", amount_cents: 1000, amount_outstanding_cents: 1000 })],
+      paidTimings: [],
+    });
+    expect(r.composite_score).toBe(84); // .55·70 + .30·100 + .15·100 = 83.5 → 84
+    expect(r.risk_level).toBe("medium");
+    expect(inputsOf(r).provisional).toBe(true);
   });
 });
 
