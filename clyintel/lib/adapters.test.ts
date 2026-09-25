@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toUIClient, toUIInvoice, toUIClientInvoiceSet } from "./adapters";
+import { toUIClient, toUIInvoice, toUIClientInvoiceSet, deriveStatus } from "./adapters";
 import type { Database } from "@/types/supabase";
 
 type ClientRow = Database["public"]["Tables"]["clients"]["Row"];
@@ -93,5 +93,37 @@ describe("Paid-date column — never updated_at", () => {
     const without = toUIClientInvoiceSet([paidRow]);
     expect(without.paid[0].paidDate).toBe("—");
     expect(JSON.stringify([withMap, without])).not.toContain("9/20/26");
+  });
+});
+
+describe("deriveStatus — client status roll-up", () => {
+  const NOW = new Date("2026-09-25T21:00:00Z");
+  const invRow = (status: string, due: string | null) =>
+    ({ id: `${status}-${due}`, status, due_date: due, amount_cents: 1000, amount_outstanding_cents: 1000 }) as unknown as InvoiceRow;
+
+  it("a past-due invoice present → past_due", () => {
+    expect(deriveStatus([invRow("paid", "2026-06-01"), invRow("overdue", "2026-08-01")], NOW)).toBe("past_due");
+    expect(deriveStatus([invRow("partial", "2026-09-20")], NOW)).toBe("past_due"); // partial, past its due date
+  });
+
+  it(">= 1 invoice, none past due, all paid → current (was 'recovered' / \"Paid\")", () => {
+    expect(deriveStatus([invRow("paid", "2026-06-01"), invRow("paid", "2026-07-01")], NOW)).toBe("current");
+  });
+
+  it(">= 1 invoice, open but not yet due (> 7 days) → current", () => {
+    expect(deriveStatus([invRow("sent", "2026-10-20"), invRow("paid", "2026-06-01")], NOW)).toBe("current");
+  });
+
+  it("open invoice due within 7 days → due (kept for the Receivables dashboard)", () => {
+    expect(deriveStatus([invRow("sent", "2026-10-01")], NOW)).toBe("due");
+    expect(deriveStatus([invRow("sent", "2026-09-25")], NOW)).toBe("due"); // due today, not past due
+  });
+
+  it("zero invoices → no_history (was \"Current\")", () => {
+    expect(deriveStatus([], NOW)).toBe("no_history");
+  });
+
+  it("toUIClient carries the derived status", () => {
+    expect(toUIClient(client, { latest: null, prior: null }, []).status).toBe("no_history");
   });
 });

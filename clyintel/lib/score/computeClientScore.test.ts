@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { computeClientScore, formatCents, type ScoreInputs, type ScoreInvoice } from "./computeClientScore";
+import { computeClientScore, formatCents, SCORER_VERSION, type ScoreInputs, type ScoreInvoice } from "./computeClientScore";
+import { resolvePaidTimings } from "./resolvePaidTimings";
+import regression from "./__fixtures__/testClients-2026-09-25.json";
 import type { PaidTiming } from "./resolvePaidTimings";
 
 const AS_OF = new Date("2026-09-25T12:00:00Z");
@@ -59,7 +61,8 @@ describe("computeClientScore v1 — known fixture", () => {
   it("computes components, composite, band and numeric columns", () => {
     const r = scored(fixture());
     const inputs = inputsOf(r);
-    expect(inputs.version).toBe("client-score-v1");
+    expect(inputs.version).toBe(SCORER_VERSION);
+    expect(SCORER_VERSION).toBe("v1.1");
     expect(inputs.components).toEqual({ paymentHistory: 82.42, currentDelinquency: 50, exposure: 76.05 });
     expect(r.composite_score).toBe(72);
     expect(r.risk_level).toBe("medium");
@@ -398,5 +401,63 @@ describe("formatCents", () => {
     expect(formatCents(124000)).toBe("$1,240.00");
     expect(formatCents(5)).toBe("$0.05");
     expect(formatCents(123456789)).toBe("$1,234,567.89");
+  });
+});
+
+describe("freshness — UTC day math in the scorer", () => {
+  // asOf in the afternoon UTC proves there is no +1 day.
+  const afternoon = new Date("2026-09-25T21:00:00Z");
+  const overdue = (due: string) =>
+    scored({
+      asOf: afternoon,
+      invoices: [inv({ id: "o", status: "overdue", due_date: due, amount_cents: 1000, amount_outstanding_cents: 1000 })],
+      paidTimings: [],
+    });
+
+  it("exactly 90 days past due → delinquency 15", () => {
+    const r = overdue("2026-06-27"); // 2026-06-27 → 2026-09-25 = 90 days
+    expect(inputsOf(r).aggregates.max_days_past_due).toBe(90);
+    expect(inputsOf(r).components.currentDelinquency).toBe(15);
+  });
+
+  it("91 days past due → delinquency 10", () => {
+    const r = overdue("2026-06-26");
+    expect(inputsOf(r).aggregates.max_days_past_due).toBe(91);
+    expect(inputsOf(r).components.currentDelinquency).toBe(10);
+  });
+
+  it("the scorer output carries inputs.version === SCORER_VERSION", () => {
+    expect(inputsOf(overdue("2026-09-01")).version).toBe(SCORER_VERSION);
+  });
+});
+
+// Real Test-DB inputs for every client scored on 2026-09-25 (19 rows, including
+// the originally verified ones). Each is recomputed at its stored as_of with the
+// new UTC day math. Expected: identical composites except where a 1-day shift
+// crosses a lateness boundary. Only Rondonuwu moves: 91 → 90 days (10 → 15), 42 → 43.
+describe("regression — 2026-09-25 Test clients under UTC day math", () => {
+  const MOVED: Record<string, number> = { "Rondonuwu Fruit and Vegi": 43 };
+  type Fx = {
+    name: string;
+    stored_as_of: string;
+    stored_composite: number;
+    invoices: ScoreInvoice[];
+    payments: { invoice_id: string; paid_at: string | null }[];
+    balance_events: { invoice_id: string; detected_at: string; new_outstanding_cents: number; evidence: unknown }[];
+  };
+  const clients = (regression as unknown as { clients: Fx[] }).clients;
+
+  it("covers all 19 scored clients", () => {
+    expect(clients).toHaveLength(19);
+  });
+
+  it.each(clients.map((c) => [c.name, c] as const))("%s", (_name, c) => {
+    const paidIds = c.invoices.filter((i) => i.status === "paid").map((i) => i.id);
+    const r = scored({
+      asOf: new Date(c.stored_as_of),
+      invoices: c.invoices,
+      paidTimings: resolvePaidTimings(paidIds, c.payments, c.balance_events),
+    });
+    expect(r.composite_score).toBe(MOVED[c.name] ?? c.stored_composite);
   });
 });

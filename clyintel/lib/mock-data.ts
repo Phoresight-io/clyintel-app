@@ -3,7 +3,12 @@
 // flushed (D2 closeout) so the app renders real subscriber data (or blank),
 // never fabricated numbers. Do not add const data exports here.
 
-export type ClientStatus = "current" | "due" | "past_due" | "recovered";
+// Client-level roll-up (deriveStatus in lib/adapters.ts):
+//   past_due   — any invoice past due
+//   due        — none past due, an open invoice due within 7 days
+//   current    — has >= 1 invoice, none past due or due soon (incl. all paid)
+//   no_history — never had an invoice
+export type ClientStatus = "current" | "due" | "past_due" | "no_history";
 
 export interface Client {
   id: string | number;

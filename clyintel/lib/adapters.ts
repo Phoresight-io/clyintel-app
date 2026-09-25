@@ -1,5 +1,6 @@
 import type { Database } from "@/types/supabase";
 import type { Client, Invoice, ClientInvoiceSet, ClientStatus } from "@/lib/mock-data";
+import { daysBetweenUtcDates } from "@/lib/score/dates";
 
 // Maps real Supabase rows onto the UI shapes the screen components already
 // consume (`Client`, `Invoice`, `ClientInvoiceSet`). Keeps the components
@@ -9,8 +10,6 @@ type ClientRow = Database["public"]["Tables"]["clients"]["Row"];
 type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
 type PtrScoreRow = Database["public"]["Tables"]["ptr_scores"]["Row"];
 
-const MS_PER_DAY = 1000 * 60 * 60 * 24;
-
 function formatDate(value: string | null): string {
   if (!value) return "—";
   const d = new Date(value);
@@ -18,15 +17,14 @@ function formatDate(value: string | null): string {
   return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`;
 }
 
-// Exported (with an injectable `now`, default = the current time) so the Client
-// Score scorer (lib/score/computeClientScore.ts) decides "past due" with the SAME
-// convention the UI renders. Default behavior is unchanged.
+// Days from today (UTC calendar date) until `due`: negative when past due, 0 when
+// due today. Goes through daysBetweenUtcDates, the shared UTC calendar-date
+// helper, so the scorer (lib/score/computeClientScore.ts) and the "Due In"
+// column always agree. `now` is injectable; it defaults to the current time.
 export function daysFromToday(due: string | null, now: Date = new Date()): number | null {
   if (!due) return null;
-  const d = new Date(due);
-  if (isNaN(d.getTime())) return null;
-  const today = now;
-  return Math.round((d.getTime() - today.getTime()) / MS_PER_DAY);
+  const days = daysBetweenUtcDates(due, now);
+  return days === null ? null : 0 - days;
 }
 
 export function uiStatus(
@@ -83,20 +81,23 @@ export function toUIClientInvoiceSet(rows: InvoiceRow[], paidDates?: PaidDateMap
   return set;
 }
 
-function deriveStatus(rows: InvoiceRow[]): ClientStatus {
-  const statuses = rows.map((r) => uiStatus(r.status, r.due_date));
+// Client status roll-up. Past-due and due-soon use the same uiStatus /
+// daysFromToday rules as the invoice rows:
+//   any invoice past due                    → "past_due"
+//   else an open invoice due within 7 days  → "due"  (the Receivables dashboard
+//                                              selects past_due + due clients)
+//   else >= 1 invoice (open or all paid)    → "current"
+//   else (never had an invoice)             → "no_history"
+export function deriveStatus(rows: InvoiceRow[], now: Date = new Date()): ClientStatus {
+  const statuses = rows.map((r) => uiStatus(r.status, r.due_date, now));
   if (statuses.some((s) => s === "past_due")) return "past_due";
-  const hasOpen = statuses.some((s) => s === "current");
-  if (hasOpen) {
-    // "due" if anything is due within 7 days, else "current"
-    const dueSoon = rows.some((r) => {
-      if (uiStatus(r.status, r.due_date) !== "current") return false;
-      const delta = daysFromToday(r.due_date);
-      return delta !== null && delta <= 7;
-    });
-    return dueSoon ? "due" : "current";
-  }
-  return rows.length > 0 ? "recovered" : "current";
+  const dueSoon = rows.some((r) => {
+    if (uiStatus(r.status, r.due_date, now) !== "current") return false;
+    const delta = daysFromToday(r.due_date, now);
+    return delta !== null && delta <= 7;
+  });
+  if (dueSoon) return "due";
+  return rows.length > 0 ? "current" : "no_history";
 }
 
 // Latest + prior ptr_scores rows for a client (see getPtrScores in lib/data.ts).

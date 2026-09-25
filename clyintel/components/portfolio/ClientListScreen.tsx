@@ -53,9 +53,9 @@ export default function ClientListScreen({ initialClients, initialClientInvoices
           const recoveryYTD = getRecoveryYTD(client.id);
           const scoreDelta = client.score !== null && client.prevScore !== null ? client.score - client.prevScore : null;
           let statusColor = C.red, statusLabel = "Past Due";
-          if (client.status === "recovered") { statusColor = C.green; statusLabel = "Paid"; }
-          else if (client.status === "current") { statusColor = C.green; statusLabel = "Current"; }
+          if (client.status === "current") { statusColor = C.green; statusLabel = "Current"; }
           else if (client.status === "due") { statusColor = C.amber; statusLabel = "Due Soon"; }
+          else if (client.status === "no_history") { statusColor = C.textMid; statusLabel = "No History"; }
           const invoices = clientInvoices[client.id];
           const currentInvoices = invoices ? (invoices.outstanding?.length || 0) + (invoices.upcoming?.length || 0) : 0;
 
