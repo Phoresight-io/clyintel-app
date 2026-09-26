@@ -10,6 +10,7 @@ import { formatCents } from "@/lib/score/computeClientScore";
 import ExchangeDrawer from "@/components/shared/ExchangeDrawer";
 import NegotiationActions from "./NegotiationActions";
 import { RecCard } from "./RecoveryRecModal";
+import { RECOVERY_RECOMMENDATIONS_ENABLED } from "@/lib/features";
 
 type SortCol = "clientName" | "id" | "amount" | "dueDate" | "daysOverdue" | "status" | "lastActivity";
 type SortDir = "asc" | "desc";
@@ -186,7 +187,9 @@ export default function DashboardScreen({ initialClients, initialClientInvoices,
         ))}
       </div>
 
-      <NegotiationActions cards={recCards} onUpdate={updateRec} activeModal={activeRecModal} setActiveModal={setActiveRecModal} />
+      {RECOVERY_RECOMMENDATIONS_ENABLED && (
+        <NegotiationActions cards={recCards} onUpdate={updateRec} activeModal={activeRecModal} setActiveModal={setActiveRecModal} />
+      )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
         <div style={{ fontSize: 18, fontWeight: 600, color: C.navy }}>Outstanding</div>
@@ -283,7 +286,7 @@ export default function DashboardScreen({ initialClients, initialClientInvoices,
                 ) : "—"}
               </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {rec && (
+                {RECOVERY_RECOMMENDATIONS_ENABLED && rec && (
                   <button onClick={() => setActiveRecModal(rec.id)} title="Recovery recommendation pending" style={{ width: 26, height: 26, borderRadius: "50%", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, background: C.amberBg, color: C.amber }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.75")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}>
                     !
                   </button>
