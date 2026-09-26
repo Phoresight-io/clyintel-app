@@ -185,3 +185,38 @@ describe("AppShell — account-menu identity", () => {
     expect(avatarText()).not.toBe("JD");
   });
 });
+
+describe("AppShell — header business name", () => {
+  const headerName = () => screen.queryByTestId("header-business-name");
+
+  it("shows the subscriber's business name in place of 'Clyintel'", async () => {
+    mockState.session = { user: { id: "u1", email: CWJR } };
+    mockState.subscriberRow = { business_name: "  Acme Corp  ", contact_name: null, email: CWJR, plan: null };
+    render(<AppShell initialEmail={CWJR}>content</AppShell>);
+
+    await waitFor(() => expect(headerName()).toHaveTextContent(/^Acme Corp$/));
+    expect(screen.queryByText("Clyintel")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["null", null],
+    ["empty (signup trigger default)", ""],
+    ["whitespace", "   "],
+  ])("shows no name when business_name is %s", async (_label, business_name) => {
+    mockState.session = { user: { id: "u1", email: CWJR } };
+    mockState.subscriberRow = { business_name, contact_name: null, email: CWJR, plan: null };
+    render(<AppShell initialEmail={CWJR}>content</AppShell>);
+
+    await waitFor(() => expect(avatarText()).toBe("CW"));
+    expect(headerName()).not.toBeInTheDocument();
+    expect(screen.queryByText("Clyintel")).not.toBeInTheDocument();
+  });
+
+  it("shows no name when there is no subscribers row or no session", async () => {
+    mockState.session = null;
+    render(<AppShell initialEmail={null}>content</AppShell>);
+    await waitFor(() => expect(avatarText()).toBe("·"));
+    expect(headerName()).not.toBeInTheDocument();
+    expect(screen.queryByText("Clyintel")).not.toBeInTheDocument();
+  });
+});
