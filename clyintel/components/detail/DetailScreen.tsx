@@ -15,6 +15,7 @@ import ContactEditorDrawer from "./ContactEditorDrawer";
 import PTRWidget from "./PTRWidget";
 import NegotiationActions from "@/components/dashboard/NegotiationActions";
 import { RecCard } from "@/components/dashboard/RecoveryRecModal";
+import { RECOVERY_RECOMMENDATIONS_ENABLED } from "@/lib/features";
 import { Toast, ToastSuccessDot } from "@/components/ui/Toast";
 
 type ContactUpdate = Database["public"]["Tables"]["client_contacts"]["Update"];
@@ -291,7 +292,7 @@ export default function DetailScreen({
             <div style={{ fontSize: 22, fontWeight: 600, color: C.text }}>{client.name}</div>
           </div>
 
-          <PTRWidget client={client} />
+          {RECOVERY_RECOMMENDATIONS_ENABLED && <PTRWidget client={client} />}
 
           <div style={{ borderTop: `1px solid ${C.border}`, margin: "4px 0 16px" }} />
 
@@ -376,7 +377,9 @@ export default function DetailScreen({
             </div>
           )}
 
-          <NegotiationActions cards={recCards} onUpdate={(id, patch) => setRecCards(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c))} activeModal={activeRecModal} setActiveModal={setActiveRecModal} />
+          {RECOVERY_RECOMMENDATIONS_ENABLED && (
+            <NegotiationActions cards={recCards} onUpdate={(id, patch) => setRecCards(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c))} activeModal={activeRecModal} setActiveModal={setActiveRecModal} />
+          )}
 
           {/* Invoice History Table */}
           <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden" }}>
@@ -405,7 +408,7 @@ export default function DetailScreen({
                       <div style={{ fontSize: 14, fontWeight: isPaid ? 600 : 400, color: statusColor }}>{statusLabel}</div>
                       <div style={{ fontSize: 14, color: C.textMid, fontWeight: 500 }}>{inv.lastActivity}</div>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        {!isPaid && negotiationRecs.some(r => r.id === inv.id) && (
+                        {RECOVERY_RECOMMENDATIONS_ENABLED && !isPaid && negotiationRecs.some(r => r.id === inv.id) && (
                           <button onClick={() => setActiveRecModal(inv.id)} title="Recovery recommendation pending" style={{ width: 26, height: 26, borderRadius: "50%", background: C.amberBg, color: C.amber, border: "none", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.75")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}>!</button>
                         )}
                       </div>
