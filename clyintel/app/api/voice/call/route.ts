@@ -84,6 +84,11 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
+  // Every call is about one invoice: the agent's variables and its in-call
+  // payment-link email (app/api/voice/tools) both key off voice_calls.invoice_id.
+  if (!invoiceId) {
+    return NextResponse.json({ error: "invoiceId is required" }, { status: 400 });
+  }
 
   // Resolve the outbound assistant: test mode routes to VAPI_ASSISTANT_ID_TEST,
   // otherwise production's VAPI_ASSISTANT_ID (unchanged default behavior).

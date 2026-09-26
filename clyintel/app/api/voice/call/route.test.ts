@@ -74,4 +74,21 @@ describe("voice/call — server-built variables", () => {
     expect(build).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("missing invoiceId → 400 'invoiceId is required', no row, no build, no call", async () => {
+    const { invoiceId: _omit, ...noInvoice } = baseBody;
+    void _omit;
+    const res = await POST(req(noInvoice));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invoiceId is required" });
+    expect(build).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("invoiceId present → unchanged (call placed)", async () => {
+    build.mockResolvedValue({});
+    const res = await POST(req(baseBody));
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

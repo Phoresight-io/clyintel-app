@@ -3,8 +3,12 @@ import {
   selectFromContacts,
   selectForChannel,
   EMAIL_CHANNEL,
+  VOICE_CHANNEL,
+  resolveAddressRecipient,
+  withClientEmailOptOut,
   type ContactRow,
 } from "./selectRecipients";
+import { isChannelAllowed } from "./isChannelAllowed";
 
 const contact = (over: Partial<ContactRow>): ContactRow => ({
   id: "00000000-0000-0000-0000-000000000000",
@@ -123,5 +127,53 @@ describe("selectForChannel — email: eligibility-walk (lowest-ranked eligible d
 
   it("no contacts → none", () => {
     expect(selectForChannel([], EMAIL_CHANNEL)).toBeNull();
+  });
+});
+
+describe("VOICE_CHANNEL", () => {
+  it("picks the dunning voice_rank-1 contact with a phone, skipping voice opt-outs", () => {
+    const out = contact({ id: "out", contact_type: "dunning", phone: "+1", voice_rank: 1, opt_out_voice: true });
+    const ok = contact({ id: "ok", contact_type: "dunning", phone: "+2", voice_rank: 2 });
+    expect(selectForChannel([out, ok], VOICE_CHANNEL)?.id).toBe("ok");
+  });
+});
+
+describe("withClientEmailOptOut — client-level email opt-out folded in", () => {
+  const c = contact({ email: "a@x.com", opt_out_email: false });
+  it("client not opted out → contact's own flag", () => {
+    expect(withClientEmailOptOut(c, false).opt_out_email).toBe(false);
+    expect(withClientEmailOptOut({ ...c, opt_out_email: true }, false).opt_out_email).toBe(true);
+  });
+  it("client opted out, or flag unknown (undefined/null) → opted out (fail closed)", () => {
+    expect(withClientEmailOptOut(c, true).opt_out_email).toBe(true);
+    expect(withClientEmailOptOut(c, undefined).opt_out_email).toBe(true);
+    expect(withClientEmailOptOut(c, null).opt_out_email).toBe(true);
+  });
+});
+
+describe("resolveAddressRecipient — spoken address → contact-shaped recipient", () => {
+  const onFile = contact({ id: "on", email: "AP@Acme.com", name: "Ada", opt_out_email: false });
+  const optedOut = contact({ id: "out", email: "old@acme.com", opt_out_email: true });
+
+  it("matches an on-file contact (trim + case-insensitive) → that row", () => {
+    const r = resolveAddressRecipient([onFile, optedOut], false, "  ap@acme.COM ");
+    expect(r.id).toBe("on");
+    expect(r.name).toBe("Ada");
+    expect(isChannelAllowed(r, "email")).toBe(true);
+  });
+
+  it("match on an opted-out contact → its opt-out applies at the gate", () => {
+    expect(isChannelAllowed(resolveAddressRecipient([onFile, optedOut], false, "OLD@acme.com"), "email")).toBe(false);
+  });
+
+  it("not on file → contact-shaped object with the verbatim (trimmed) address, no name", () => {
+    const r = resolveAddressRecipient([onFile], false, " New.Person@Example.com ");
+    expect(r).toMatchObject({ id: "", email: "New.Person@Example.com", name: null, is_primary: false, opt_out_email: false });
+    expect(isChannelAllowed(r, "email")).toBe(true);
+  });
+
+  it("client opted out → denied whether or not the address is on file", () => {
+    expect(isChannelAllowed(resolveAddressRecipient([onFile], true, "ap@acme.com"), "email")).toBe(false);
+    expect(isChannelAllowed(resolveAddressRecipient([onFile], true, "new@example.com"), "email")).toBe(false);
   });
 });

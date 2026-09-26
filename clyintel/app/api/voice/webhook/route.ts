@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { serverEnv } from "@/lib/config/env.server";
 import type { Database } from "@/types/supabase";
+import {
+  extractVapiCallId,
+  extractVoiceCallId,
+  resolveVoiceCall,
+  serializeError,
+  type VapiCallCarrier,
+} from "@/lib/voice/resolveVoiceCall";
 
 // Inbound Vapi webhook: status-update and end-of-call-report events for a call
 // placed by app/api/voice/call. After verifying the shared secret it:
@@ -24,15 +31,9 @@ import type { Database } from "@/types/supabase";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type Service = ReturnType<typeof getSupabase>;
 type VoiceCallUpdate = Database["public"]["Tables"]["voice_calls"]["Update"];
 
-interface CallEnvelope {
-  id?: string;
-  metadata?: { voiceCallId?: string };
-}
-
-interface VapiMessage {
+interface VapiMessage extends VapiCallCarrier {
   type?: string;
   status?: string;
   endedReason?: string;
@@ -50,13 +51,8 @@ interface VapiMessage {
       committedDate?: string;
     };
   };
-  call?: CallEnvelope;
-  // Some event types nest the call (and its metadata) under `artifact` instead
-  // of / in addition to the top-level `call`.
-  artifact?: {
-    variableValues?: { call?: CallEnvelope };
-    variables?: { call?: CallEnvelope };
-  };
+  // call / artifact (which carry the call and its metadata) come from
+  // VapiCallCarrier (lib/voice/resolveVoiceCall).
 }
 
 // Map a Vapi endedReason onto the voice_calls.outcome enum. Only the buckets the
@@ -70,77 +66,6 @@ function deriveOutcome(endedReason: string | null): string {
   if (r.includes("busy")) return "busy";
   if (r.includes("error") || r.includes("fail")) return "failed";
   return "connected";
-}
-
-// Pull the app's voiceCallId out of wherever Vapi echoes our call-create
-// metadata: top-level call, or the artifact-nested copies.
-function extractVoiceCallId(message: VapiMessage | undefined): string | null {
-  return (
-    message?.call?.metadata?.voiceCallId ??
-    message?.artifact?.variableValues?.call?.metadata?.voiceCallId ??
-    message?.artifact?.variables?.call?.metadata?.voiceCallId ??
-    null
-  );
-}
-
-// Pull the Vapi call id from the body, falling back to the X-Call-Id header Vapi
-// always sends.
-function extractVapiCallId(message: VapiMessage | undefined, req: NextRequest): string | null {
-  return (
-    message?.call?.id ??
-    message?.artifact?.variableValues?.call?.id ??
-    message?.artifact?.variables?.call?.id ??
-    req.headers.get("x-call-id") ??
-    null
-  );
-}
-
-// Resolve the voice_calls row: prefer our own id (from metadata), then the Vapi
-// call id → vapi_call_id. Returns the matched primary-key id and which path
-// matched, or nulls when nothing resolves.
-async function resolveVoiceCall(
-  service: Service,
-  voiceCallId: string | null,
-  vapiCallId: string | null,
-): Promise<{ id: string | null; via: string | null }> {
-  if (voiceCallId) {
-    const { data, error } = await service
-      .from("voice_calls")
-      .select("id")
-      .eq("id", voiceCallId)
-      .maybeSingle();
-    // supabase-js returns errors, it does not throw — inspect and log, never swallow.
-    if (error) console.error("voice/webhook: voice_calls lookup by id failed", serializeError(error));
-    if (data) return { id: data.id, via: "metadata.voiceCallId" };
-  }
-  if (vapiCallId) {
-    const { data, error } = await service
-      .from("voice_calls")
-      .select("id")
-      .eq("vapi_call_id", vapiCallId)
-      .maybeSingle();
-    if (error) console.error("voice/webhook: voice_calls lookup by vapi_call_id failed", serializeError(error));
-    if (data) return { id: data.id, via: "call.id→vapi_call_id" };
-  }
-  return { id: null, via: null };
-}
-
-// Serialize a Supabase/PostgREST error for storage + logging. String(err) on the
-// error object yields "[object Object]", which hid the real cause here — pull the
-// useful fields explicitly, with a JSON fallback.
-function serializeError(err: unknown): string {
-  if (err && typeof err === "object") {
-    const e = err as { message?: string; code?: string; details?: string; hint?: string };
-    if (e.message || e.code || e.details || e.hint) {
-      return JSON.stringify({ message: e.message, code: e.code, details: e.details, hint: e.hint });
-    }
-    try {
-      return JSON.stringify(err);
-    } catch {
-      return String(err);
-    }
-  }
-  return String(err);
 }
 
 export async function POST(req: NextRequest) {

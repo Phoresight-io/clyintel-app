@@ -22,20 +22,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../../types/supabase";
 import {
   EMAIL_CHANNEL,
+  VOICE_CHANNEL,
   selectForChannel,
-  type ChannelDescriptor,
   type ContactRow,
 } from "../outreach/selectRecipients";
 import { daysBetweenUtcDates } from "../score/dates";
-
-// Voice channel for selectForChannel: dunning voice_rank → poc, phone present,
-// not opted out of voice.
-export const VOICE_CHANNEL: ChannelDescriptor = {
-  channel: "voice",
-  rankColumn: "voice_rank",
-  optOutField: "opt_out_voice",
-  addressField: "phone",
-};
 
 export const CALL_VARIABLE_KEYS = [
   "contact_name",

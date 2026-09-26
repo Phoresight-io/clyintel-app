@@ -4,7 +4,7 @@
 > removed in "refactor(voice): remove post-call email trigger (agent-owned send
 > supersedes #140)". `/api/voice/webhook` no longer sends email for any event. The
 > Recovery Agent now decides and sends the payment-link email itself, mid-call, via
-> an in-call Vapi tool (see the voice-tools handoff, added with that tool).
+> an in-call Vapi tool (see `docs/handoffs/voice-agent-tools.md`).
 >
 > **Retained and reused by the tool path:** the `handoff_email_status` claim
 > (`createHandoffPort`: `claimOrRecord` NULL-guard, `finalize` guarded on
