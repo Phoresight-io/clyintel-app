@@ -10,6 +10,9 @@
 
 import { serverEnv } from "@/lib/config/env.server";
 
+// Display name on every outbound email. The address stays team@phoresight.io.
+export const SENDER_NAME = "Phoresight";
+
 export interface SendEmailParams {
   to: string;
   toName?: string;
@@ -31,7 +34,7 @@ export async function sendEmail(params: SendEmailParams): Promise<SendEmailResul
   const apiKey = serverEnv.appMailersendApiKey();
 
   const body = {
-    from: { email: "team@phoresight.io", name: "Clyintel" },
+    from: { email: "team@phoresight.io", name: SENDER_NAME },
     to: [{ email: params.to, name: params.toName ?? params.to }],
     subject: params.subject,
     text: params.text,
