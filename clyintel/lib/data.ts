@@ -6,6 +6,14 @@ import { makeScorePort } from "@/lib/score/scoreClient";
 import { loadPaidTimings } from "@/lib/score/loadPaidTimings";
 import type { Client as UIClientShape, ClientInvoiceSet } from "@/lib/mock-data";
 import type { ClientContactDisplay } from "@/lib/contacts/contactDisplay";
+import {
+  aggregateRecoveryYTD,
+  ytdStart,
+  RECOVERY_YTD_UNAVAILABLE,
+  type RecoveryInvoiceRef,
+  type RecoveryLedgerRow,
+  type RecoveryYTD,
+} from "@/lib/recovery/recoveryYTD";
 
 // All data-fetching functions live here.
 //
@@ -266,9 +274,49 @@ export async function getClientContacts(
   }));
 }
 
+// Page size for the paged rev_share_ledger read (PostgREST caps a response at
+// its max-rows, so a single unpaged read could silently truncate the sum).
+const LEDGER_PAGE = 1000;
+
+// Recovery YTD from rev_share_ledger (scoped to subscriber, captured_at on/after
+// Jan 1 UTC), attributed to clients via invoices.external_id (the ledger's
+// source_invoice_id is the source-system invoice id, NOT invoices.id). `invoices`
+// are the subscriber's already-loaded invoices. Read failure → { ok: false }
+// (renders "—"), so an error can never look like a real $0.
+export async function getRecoveryYTD(
+  userId: string,
+  invoices: RecoveryInvoiceRef[],
+  now: Date = new Date(),
+): Promise<RecoveryYTD> {
+  try {
+    const supabase = getSupabase();
+    const rows: RecoveryLedgerRow[] = [];
+    for (let from = 0; ; from += LEDGER_PAGE) {
+      const { data, error } = await supabase
+        .from("rev_share_ledger")
+        .select("id, source_invoice_id, dollars_recovered, captured_at")
+        .eq("subscriber_id", userId)
+        .gte("captured_at", ytdStart(now).toISOString())
+        .order("id", { ascending: true })
+        .range(from, from + LEDGER_PAGE - 1);
+      if (error) {
+        console.error("getRecoveryYTD error", error);
+        return RECOVERY_YTD_UNAVAILABLE;
+      }
+      rows.push(...(data ?? []));
+      if (!data || data.length < LEDGER_PAGE) break;
+    }
+    return aggregateRecoveryYTD(rows, invoices, now);
+  } catch (e) {
+    console.error("getRecoveryYTD error", e);
+    return RECOVERY_YTD_UNAVAILABLE;
+  }
+}
+
 export interface UIPortfolio {
   clients: UIClientShape[];
   clientInvoices: Record<string, ClientInvoiceSet>;
+  recoveryYTD: RecoveryYTD;
 }
 
 // Aggregates a subscriber's clients + invoices + latest PTR scores into the UI
@@ -276,6 +324,8 @@ export interface UIPortfolio {
 // for a subscriber with no data yet.
 export async function getUIPortfolio(userId: string): Promise<UIPortfolio> {
   const [clients, invoices] = await Promise.all([getClients(userId), getInvoices(userId)]);
+  // Independent of scoring; runs alongside the sequential scoring loop below.
+  const recoveryYTDPromise = getRecoveryYTD(userId, invoices);
 
   const byClient = new Map<string, InvoiceRow[]>();
   for (const inv of invoices) {
@@ -295,7 +345,7 @@ export async function getUIPortfolio(userId: string): Promise<UIPortfolio> {
     clientInvoices[client.id] = toUIClientInvoiceSet(clientInv);
   }
 
-  return { clients: uiClients, clientInvoices };
+  return { clients: uiClients, clientInvoices, recoveryYTD: await recoveryYTDPromise };
 }
 
 // All communications for a client (scoped to subscriber), newest first. Every
