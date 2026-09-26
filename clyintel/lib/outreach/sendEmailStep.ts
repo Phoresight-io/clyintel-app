@@ -22,9 +22,10 @@ import type { Database } from "@/types/supabase";
 //      Recipient override (in-call agent tool only): ctx.recipient replaces THIS
 //      selection step and nothing else — an on-file contact by id (ownership-
 //      checked; missing → recipient_not_found) or a spoken address
-//      (resolveAddressRecipient). Both fold in clients.opt_out_email. Gate 2 then
-//      runs unchanged on whatever step 1 picked, so an override is never exempt.
-//      No override → exactly today's selection (cadence / outreach/run unchanged).
+//      (resolveAddressRecipient). Gate 2 then runs unchanged on whatever step 1
+//      picked, so an override is never exempt. No override → the channel-aware
+//      default. EVERY path (default included) folds in clients.opt_out_email, so an
+//      opted-out client is denied at gate 2 (channel_denied, nothing written).
 //   2. isChannelAllowed(contact, "email") → DETERMINISTIC opt-out gate. Denied →
 //      write NOTHING and exit (there is no `skipped` recovery_attempts convention
 //      in the codebase yet, so we do not invent one).
@@ -180,16 +181,22 @@ export function renderHtmlBody(text: string, vars: RenderVars): string {
 }
 
 /** Step-1 selection over one client's already-loaded contacts (the real port's
- *  logic, pure so it is testable). No recipient → channel-aware default (dunning
- *  rank-1 → poc, opt-out/address filtered; a backfilled PoC with email_rank=1 is
- *  the poc fallback). contactId → that contact, client opt-out folded in; null if
- *  not among these contacts. email → resolveAddressRecipient. */
+ *  logic, pure so it is testable). Every branch folds in the client-level email
+ *  opt-out (withClientEmailOptOut; undefined = opted out, fail closed), and gate 2
+ *  then denies an opted-out pick as channel_denied.
+ *    No recipient → channel-aware default (dunning rank-1 → poc, opt-out/address
+ *      filtered; a backfilled PoC with email_rank=1 is the poc fallback).
+ *    contactId → that contact; null if not among these contacts.
+ *    email → resolveAddressRecipient. */
 export function pickRecipient(
   contacts: ContactRow[],
   recipient?: RecipientOverride,
   clientOptOutEmail?: boolean,
 ): ContactRow | null {
-  if (!recipient) return selectForChannel(contacts, EMAIL_CHANNEL);
+  if (!recipient) {
+    const picked = selectForChannel(contacts, EMAIL_CHANNEL);
+    return picked ? withClientEmailOptOut(picked, clientOptOutEmail) : null;
+  }
   if ("contactId" in recipient) {
     const row = contacts.find((c) => c.id === recipient.contactId);
     return row ? withClientEmailOptOut(row, clientOptOutEmail) : null;
@@ -379,17 +386,28 @@ function createDefaultPort(): SendEmailPort {
   const service = getSupabase();
   return {
     async loadRecipientContact(clientId, recipient, clientOptOutEmail) {
-      const { data, error } = await service
-        .from("client_contacts")
-        .select("*")
-        .eq("client_id", clientId);
-      if (error) {
-        console.error("sendEmailStep: client_contacts read failed", error);
+      // Contacts + the client-level email opt-out, read together on every send
+      // (one extra small query). The cadence passes no clientOptOutEmail, so the
+      // real clients.opt_out_email is what reaches pickRecipient — it must never
+      // be undefined there, or every cadence send would fail closed.
+      const [contactsRes, clientRes] = await Promise.all([
+        service.from("client_contacts").select("*").eq("client_id", clientId),
+        service.from("clients").select("opt_out_email").eq("id", clientId).maybeSingle(),
+      ]);
+      if (contactsRes.error) {
+        console.error("sendEmailStep: client_contacts read failed", contactsRes.error);
         return null; // fail closed → treated as unsendable
       }
-      // The read above is scoped to this client, so an override contactId from
+      if (clientRes.error) {
+        console.error("sendEmailStep: clients opt-out read failed", clientRes.error);
+        return null; // fail closed → treated as unsendable
+      }
+      if (!clientRes.data) return null; // client not found → fail closed
+      // An explicit value from an override caller wins; otherwise the DB flag.
+      const effectiveOptOut = clientOptOutEmail ?? clientRes.data.opt_out_email;
+      // The contacts read is scoped to this client, so an override contactId from
       // another client simply isn't found (ownership check).
-      return pickRecipient(data ?? [], recipient, clientOptOutEmail);
+      return pickRecipient(contactsRes.data ?? [], recipient, effectiveOptOut);
     },
     async loadActiveSystemDefaultEmailTemplate() {
       const { data, error } = await service

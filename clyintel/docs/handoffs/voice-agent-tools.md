@@ -126,7 +126,7 @@ The catch can't tell these apart. A `communications` row with status `failed` al
 - **`email`:** handled by `resolveAddressRecipient` in `selectRecipients.ts`.
   - If it matches an on-file contact (trimmed, case-insensitive), that row is used, so its own opt-out applies.
   - Otherwise a contact-shaped object with the address is used. It is not persisted.
-- **Client-level opt-out.** Both override paths fold in `clients.opt_out_email` (`withClientEmailOptOut`). If it wasn't supplied, it is treated as opted out.
+- **Client-level opt-out.** Both override paths fold in `clients.opt_out_email` (`withClientEmailOptOut`). The default path does too, since the cadence follow-up. A flag the caller doesn't supply is read from the `clients` row; if that row can't be read, the send is refused.
 - **What gets recorded.** Step 4 is unchanged: `to_address = contact.email`. A spoken address therefore lands verbatim in `communications.to_address` and shows in the Recovery Agent Exchanges timeline.
 - Nothing is ever written to `client_contacts`.
 - With no contact name, the greeting falls back to `client_name`.
@@ -173,6 +173,6 @@ The catch can't tell these apart. A `communications` row with status `failed` al
 
 ## Follow-ups (not in this PR)
 
-- **`clients.opt_out_email` on the default cadence path.** `sendEmailStep`'s no-recipient path (cadence, `outreach/run`) still does not read it. This PR deliberately leaves it open to keep cadence behavior unchanged; there is a test pinning the current behavior. It needs its own PR.
+- **`clients.opt_out_email` on the default cadence path:** done in "fix(outreach): apply client-level email opt-out on the default cadence path". `sendEmailStep`'s default port now reads the flag on every send, so an opted-out client gets `channel_denied`.
 - A call-specific email template. Today's is the system-default dunning template, and the send counts toward the cadence cap.
 - `/api/voice/call` takes `subscriberId` from the body (the pre-Beta gap noted in #140).
