@@ -47,19 +47,12 @@ function makeReq(params: Record<string, string>): never {
   } as never;
 }
 
-const ORIGINAL_REDIRECT_URI = process.env.QBO_REDIRECT_URI;
-
 beforeEach(() => {
   vi.clearAllMocks();
-  // Must be set so the route passes its redirect_uri guard and reaches the
-  // exchange (otherwise it would finish("error") for a different reason).
-  process.env.QBO_REDIRECT_URI = "https://app.example.com/api/qbo/callback";
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {
-  if (ORIGINAL_REDIRECT_URI === undefined) delete process.env.QBO_REDIRECT_URI;
-  else process.env.QBO_REDIRECT_URI = ORIGINAL_REDIRECT_URI;
   vi.restoreAllMocks();
 });
 
@@ -76,6 +69,8 @@ describe("qbo/callback — token-exchange failure lands on finish('error')", () 
     expect(location).toBe(`${ORIGIN}/connections?qbo=error`);
     // Reached the exchange, and did NOT proceed to persist/sync on failure.
     expect(exchangeAuthCode).toHaveBeenCalledTimes(1);
+    // redirect_uri is derived from THIS deployment's origin, not an env var.
+    expect(exchangeAuthCode).toHaveBeenCalledWith("expired_code", `${ORIGIN}/api/qbo/callback`);
     expect(runQboSync).not.toHaveBeenCalled();
     // Single-use state cookie is cleared on the way out.
     expect(res.cookies.get("qbo_oauth_state")?.value).toBe("");

@@ -8,6 +8,19 @@ export const INTUIT_AUTHORIZE_URL = "https://appcenter.intuit.com/connect/oauth2
 export const INTUIT_TOKEN_URL =
   "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 export const QBO_SCOPE = "com.intuit.quickbooks.accounting";
+export const QBO_CALLBACK_PATH = "/api/qbo/callback";
+
+/**
+ * OAuth redirect_uri for the deployment that served the request. Derived from
+ * the request origin (not an env var) so every environment — localhost, develop,
+ * production — sends the user back to ITSELF after Intuit consent. The callback
+ * runs on that same origin, so /connect and /callback derive a byte-identical
+ * value. Each environment's callback URL must be registered as a Redirect URI on
+ * the Intuit app; an unregistered origin is rejected by Intuit, never followed.
+ */
+export function qboRedirectUriFor(origin: string): string {
+  return new URL(QBO_CALLBACK_PATH, origin).toString();
+}
 
 /**
  * Base host for the QBO Accounting API (`/v3/company/...`). Unlike the OAuth

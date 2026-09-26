@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { createSupabaseServer } from "@/lib/supabase-server";
-import { INTUIT_AUTHORIZE_URL, QBO_SCOPE } from "@/lib/qbo/constants";
+import { INTUIT_AUTHORIZE_URL, QBO_SCOPE, qboRedirectUriFor } from "@/lib/qbo/constants";
 import { serverEnv } from "@/lib/config/env.server";
 import {
   QBO_STATE_COOKIE,
@@ -35,9 +35,8 @@ export async function GET(req: NextRequest) {
   }
 
   const clientId = serverEnv.qboClientIdOptional();
-  const redirectUri = serverEnv.qboRedirectUri();
-  if (!clientId || !redirectUri) {
-    console.error("qbo/connect: QBO_CLIENT_ID or QBO_REDIRECT_URI not configured");
+  if (!clientId) {
+    console.error("qbo/connect: QBO_CLIENT_ID not configured");
     return NextResponse.json({ error: "QuickBooks is not configured" }, { status: 500 });
   }
 
@@ -48,6 +47,9 @@ export async function GET(req: NextRequest) {
   // Validated at set-time; anything not on the allowlist collapses to the default
   // so a bad ?returnTo can never be sealed into the cookie.
   const returnTo = sanitizeReturnTo(req.nextUrl.searchParams.get("returnTo"));
+
+  // Return to THIS deployment's callback (develop stays on develop, prod on prod).
+  const redirectUri = qboRedirectUriFor(req.nextUrl.origin);
 
   const authorizeUrl = new URL(INTUIT_AUTHORIZE_URL);
   authorizeUrl.searchParams.set("client_id", clientId);
