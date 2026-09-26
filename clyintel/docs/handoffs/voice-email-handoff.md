@@ -1,5 +1,21 @@
 # Voice → email handoff: handoff
 
+> **Post-call trigger RETIRED.** The end-of-call-report trigger described below was
+> removed in "refactor(voice): remove post-call email trigger (agent-owned send
+> supersedes #140)". `/api/voice/webhook` no longer sends email for any event. The
+> Recovery Agent now decides and sends the payment-link email itself, mid-call, via
+> an in-call Vapi tool (see the voice-tools handoff, added with that tool).
+>
+> **Retained and reused by the tool path:** the `handoff_email_status` claim
+> (`createHandoffPort`: `claimOrRecord` NULL-guard, `finalize` guarded on
+> `'claimed'`), `parseHandoffMode`, the `add_voice_calls_handoff_email` migration,
+> and the `VOICE_HANDOFF_EMAIL_MODE` / `VOICE_HANDOFF_EMAIL_CLIENT_ID` fences. The
+> `payment_committed` fix stays in the webhook.
+>
+> The rest of this document is kept as the record of the #140 design. Its trigger
+> point, send conditions (`not_connected`, `no_payment_link_consent`) and runbook
+> steps 4–7 no longer apply.
+
 _Branch `feat/voice-email-handoff` · off `develop` @ 1c1e383 · 2026-09-25_
 
 After a Vapi call where the person agrees to pay or asks for a link, send the
@@ -91,8 +107,7 @@ There is no `env-matrix.md` in the repo, so the rows are recorded here:
 
 1. **Migration.** Chat applies `add_voice_calls_handoff_email` to Test via `apply_migration` and reads back the 4 columns, the CHECK and the FK.
 2. **Vapi setup.**
-   - On the assistant Test dials (confirm it's `VAPI_ASSISTANT_ID_TEST`), add this `structuredDataPlan`, then republish:
-     `{"type":"object","properties":{"sendPaymentLink":{"type":"boolean","description":"true ONLY if the person reached confirmed they can speak for the account AND agreed to pay or asked for a payment link. false if they disputed the balance, said wrong person/number, asked not to be contacted, or gave no clear agreement."}},"required":["sendPaymentLink"]}`
+   - _(Removed: the `sendPaymentLink` `structuredDataPlan` step. Nothing reads it now that the post-call trigger is gone.)_
    - Point the server URL at `https://dev-clyintel.vercel.app/api/voice/webhook`, using the Test `VAPI_WEBHOOK_SECRET`.
 3. **Env.** In the Test project set `VOICE_HANDOFF_EMAIL_MODE=dry_run` and `VOICE_HANDOFF_EMAIL_CLIENT_ID=9e38c5f4…`, then redeploy.
 4. **Dry run.** Place a call with `test: true`, `clientId` = 0969 Ocean View Road, its open past-due `invoiceId` and your phone as `toNumber`. Agree to pay. Verify `handoff_email_status = 'would_send'`, `to_address` is your inbox, and the link is the subscriber default.

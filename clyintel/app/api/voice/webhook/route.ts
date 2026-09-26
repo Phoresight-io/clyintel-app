@@ -2,11 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { serverEnv } from "@/lib/config/env.server";
 import type { Database } from "@/types/supabase";
-import {
-  maybeSendVoiceHandoffEmail,
-  createHandoffPort,
-  parseHandoffMode,
-} from "@/lib/voice/handoffEmail";
 
 // Inbound Vapi webhook: status-update and end-of-call-report events for a call
 // placed by app/api/voice/call. After verifying the shared secret it:
@@ -15,10 +10,9 @@ import {
 //   2. writes one lightweight audit row to voice_call_events (the raw Vapi
 //      payload + matched id) — no secret material is ever stored
 //   3. applies the status/end-of-call update to the resolved row (by primary key)
-//   4. end-of-call-report only, after that update hits exactly one row: the
-//      voice → email handoff (lib/voice/handoffEmail.ts). It is OFF unless
-//      VOICE_HANDOFF_EMAIL_MODE is set, at most once per call (DB claim), and it
-//      never throws into this route.
+//
+// It never sends email. The post-call payment-link email trigger (#140) was
+// removed: the agent sends the link itself, mid-call, via an in-call tool.
 //
 // It ALWAYS returns 200 once the secret checks out — even on a parse/DB error —
 // so Vapi doesn't retry-storm; failures are logged. Auth is the only non-200
@@ -54,9 +48,6 @@ interface VapiMessage {
       paymentCommitted?: boolean;
       committedAmount?: number;
       committedDate?: string;
-      // Set by the assistant's structuredDataPlan: the person agreed to pay or asked
-      // for a payment link. Only a strict boolean true triggers the handoff email.
-      sendPaymentLink?: boolean;
     };
   };
   call?: CallEnvelope;
@@ -259,28 +250,6 @@ export async function POST(req: NextRequest) {
           `voice/webhook: updated ${data?.length ?? 0} row(s) ` +
             `(id=${match.id} via=${match.via} type=${eventType})`,
         );
-
-        // 3. Voice → email handoff. Inline, only after the end-of-call patch hit
-        // exactly one row. Isolated: a throw here never changes the patch above
-        // or the 200 below.
-        if (eventType === "end-of-call-report" && (data?.length ?? 0) === 1) {
-          try {
-            const handoff = await maybeSendVoiceHandoffEmail(
-              {
-                voiceCallId: match.id,
-                structuredData: message?.analysis?.structuredData,
-                mode: parseHandoffMode(serverEnv.voiceHandoffEmailMode()),
-                clientFence: serverEnv.voiceHandoffEmailClientId() ?? null,
-              },
-              createHandoffPort(service),
-            );
-            if (handoff.action !== "off") {
-              console.log(`voice/webhook: handoff ${JSON.stringify(handoff)} (id=${match.id})`);
-            }
-          } catch (handoffErr) {
-            console.error("voice/webhook: handoff threw", handoffErr);
-          }
-        }
       }
     }
   } catch (err) {
