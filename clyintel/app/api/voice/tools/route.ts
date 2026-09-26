@@ -107,6 +107,13 @@ export async function POST(req: NextRequest) {
       console.error("voice/tools: voice_call_events insert threw", auditThrow);
     }
 
+    // TEMPORARY diagnostic (fix/voice-tools-mode-diag): what the running server
+    // actually reads for the mode fence. One row per request that calls
+    // send_payment_email. Best-effort; never changes the tool response.
+    if (toolCalls.some((tc) => tc?.function?.name === "send_payment_email")) {
+      await writeModeDiag(service, vapiCallId, match.id);
+    }
+
     for (const tc of toolCalls) {
       const toolCallId = typeof tc?.id === "string" ? tc.id : "";
       const name = typeof tc?.function?.name === "string" ? tc.function.name : "";
@@ -117,6 +124,43 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ results }, { status: 200 });
+}
+
+// TEMPORARY: remove once the mode issue on dev is understood. No secrets: only
+// the mode value, whether the fence is set/matches, and Vercel build metadata.
+async function writeModeDiag(
+  service: ReturnType<typeof getSupabase>,
+  vapiCallId: string | null,
+  voiceCallId: string | null,
+): Promise<void> {
+  try {
+    const fence = serverEnv.voiceHandoffEmailClientId() ?? null;
+    let clientFenceMatches: boolean | null = null;
+    if (voiceCallId) {
+      const { data } = await service.from("voice_calls").select("client_id").eq("id", voiceCallId).maybeSingle();
+      clientFenceMatches = data ? fence === data.client_id : null;
+    }
+    const diag = {
+      modeRaw: JSON.stringify(process.env.VOICE_HANDOFF_EMAIL_MODE ?? null),
+      modeParsed: parseHandoffMode(serverEnv.voiceHandoffEmailMode()),
+      clientFenceSet: Boolean(fence),
+      clientFenceMatches,
+      vercelEnv: process.env.VERCEL_ENV ?? null,
+      gitRef: process.env.VERCEL_GIT_COMMIT_REF ?? null,
+      gitSha: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+      deploymentUrl: process.env.VERCEL_URL ?? null,
+    };
+    console.log(`voice/tools: tools-diag ${JSON.stringify(diag)}`);
+    const { error } = await service.from("voice_call_events").insert({
+      event_type: "tools-diag",
+      vapi_call_id: vapiCallId,
+      matched_voice_call_id: voiceCallId,
+      raw: diag as never,
+    });
+    if (error) console.error("voice/tools: tools-diag insert error", serializeError(error));
+  } catch (err) {
+    console.error("voice/tools: tools-diag failed", err);
+  }
 }
 
 async function runTool(
