@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup, within, act } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 // Regression tests for the account-menu identity in AppShell. These lock the
@@ -54,6 +54,7 @@ vi.mock("@/lib/supabase-browser", () => ({
 }));
 
 import AppShell from "./AppShell";
+import { BUSINESS_NAME_UPDATED_EVENT } from "@/lib/subscriber/businessName";
 
 const CWJR = "cwjr27@outlook.com";
 
@@ -183,5 +184,58 @@ describe("AppShell — account-menu identity", () => {
     render(<AppShell initialEmail={null}>content</AppShell>);
     await waitFor(() => expect(avatarText()).toBe("·"));
     expect(avatarText()).not.toBe("JD");
+  });
+});
+
+describe("AppShell — header business name", () => {
+  const headerName = () => screen.queryByTestId("header-business-name");
+
+  it("shows the subscriber's business name in place of 'Clyintel'", async () => {
+    mockState.session = { user: { id: "u1", email: CWJR } };
+    mockState.subscriberRow = { business_name: "  Acme Corp  ", contact_name: null, email: CWJR, plan: null };
+    render(<AppShell initialEmail={CWJR}>content</AppShell>);
+
+    await waitFor(() => expect(headerName()).toHaveTextContent(/^Acme Corp$/));
+    expect(screen.queryByText("Clyintel")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["null", null],
+    ["empty (signup trigger default)", ""],
+    ["whitespace", "   "],
+  ])("shows no name when business_name is %s", async (_label, business_name) => {
+    mockState.session = { user: { id: "u1", email: CWJR } };
+    mockState.subscriberRow = { business_name, contact_name: null, email: CWJR, plan: null };
+    render(<AppShell initialEmail={CWJR}>content</AppShell>);
+
+    await waitFor(() => expect(avatarText()).toBe("CW"));
+    expect(headerName()).not.toBeInTheDocument();
+    expect(screen.queryByText("Clyintel")).not.toBeInTheDocument();
+  });
+
+  it("shows no name when there is no subscribers row or no session", async () => {
+    mockState.session = null;
+    render(<AppShell initialEmail={null}>content</AppShell>);
+    await waitFor(() => expect(avatarText()).toBe("·"));
+    expect(headerName()).not.toBeInTheDocument();
+    expect(screen.queryByText("Clyintel")).not.toBeInTheDocument();
+  });
+
+  it("updates immediately when Settings saves a name (no reload)", async () => {
+    mockState.session = { user: { id: "u1", email: CWJR } };
+    mockState.subscriberRow = { business_name: "", contact_name: null, email: CWJR, plan: null };
+    render(<AppShell initialEmail={CWJR}>content</AppShell>);
+    await waitFor(() => expect(avatarText()).toBe("CW"));
+    expect(headerName()).not.toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent(BUSINESS_NAME_UPDATED_EVENT, { detail: "Acme Corp" }));
+    });
+    expect(headerName()).toHaveTextContent(/^Acme Corp$/);
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent(BUSINESS_NAME_UPDATED_EVENT, { detail: "Beta LLC" }));
+    });
+    expect(headerName()).toHaveTextContent(/^Beta LLC$/);
   });
 });
