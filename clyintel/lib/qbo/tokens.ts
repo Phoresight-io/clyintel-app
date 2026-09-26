@@ -52,7 +52,7 @@ export function exchangeAuthCode(
   code: string,
   redirectUri: string
 ): Promise<QboTokenResponse> {
-  // redirect_uri must be byte-identical to the one sent on /connect (QBO_REDIRECT_URI).
+  // redirect_uri must be byte-identical to the one sent on /connect (qboRedirectUriFor).
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,

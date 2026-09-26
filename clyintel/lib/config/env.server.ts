@@ -54,7 +54,6 @@ export const serverEnv = {
   qboBaseUrl: (): string => requireServerEnv("QBO_BASE_URL"),
   /** OPTIONAL at the OAuth routes, which keep their own "not configured" guard. */
   qboClientIdOptional: (): string | undefined => optionalServerEnv("QBO_CLIENT_ID"),
-  qboRedirectUri: (): string | undefined => optionalServerEnv("QBO_REDIRECT_URI"),
   qboWebhookVerifierToken: (): string | undefined => optionalServerEnv("QBO_WEBHOOK_VERIFIER_TOKEN"),
   qboEnvironment: (): string | undefined => optionalServerEnv("QBO_ENVIRONMENT"),
 

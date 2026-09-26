@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServer } from "@/lib/supabase-server";
 import { getSupabase } from "@/lib/supabase";
 import { encryptSecret } from "@/lib/crypto";
-import { QBO_SCOPE } from "@/lib/qbo/constants";
+import { QBO_SCOPE, qboRedirectUriFor } from "@/lib/qbo/constants";
 import { exchangeAuthCode } from "@/lib/qbo/tokens";
 import {
   QBO_STATE_COOKIE,
@@ -80,13 +80,9 @@ export async function GET(req: NextRequest) {
   // /connections and never errors the flow (reauth-never-fails-reauth).
   const returnTo = sanitizeReturnTo(parseStateCookie(cookieValue)?.returnTo);
 
-  const redirectUri = serverEnv.qboRedirectUri();
-  if (!redirectUri) {
-    console.error("qbo/callback: QBO_REDIRECT_URI not configured");
-    return finish("error");
-  }
-
-  // Exchange the code (redirect_uri byte-identical to /connect).
+  // Exchange the code. redirect_uri must be byte-identical to /connect's; Intuit
+  // redirected here, so this request's origin is the one /connect derived from.
+  const redirectUri = qboRedirectUriFor(url.origin);
   let tokens;
   try {
     tokens = await exchangeAuthCode(code, redirectUri);
