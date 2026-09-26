@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 import { createSupabaseBrowser } from "@/lib/supabase-browser";
 import { CLIENTS_KEY, INTEGRATIONS_KEY, DEMO_RESET_KEY } from "@/lib/demo-mode";
+import { BUSINESS_NAME_UPDATED_EVENT } from "@/lib/subscriber/businessName";
 
 // Initials for the avatar. Derived from the real name if present, otherwise from
 // the email local-part (e.g. "cwjr27@outlook.com" → "CW"). NEVER a hardcoded
@@ -34,6 +35,10 @@ export default function AppShell({
   const [initials, setInitials] = useState(() => deriveInitials(null, initialEmail));
   const [email, setEmail] = useState<string | null>(initialEmail);
   const [planName, setPlanName] = useState<string | null>(null);
+  // Subscriber's customer-facing business name for the header. null until the
+  // subscribers row loads, and stays null when it's blank (the signup trigger
+  // inserts '') — the header then shows no name rather than a placeholder.
+  const [businessName, setBusinessName] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   // Identity is "resolved" once we have the SSR seed OR the client session check
@@ -85,10 +90,22 @@ export default function AppShell({
         setInitials(deriveInitials(data.business_name || data.contact_name, enrichedEmail));
       }
       setPlanName(planDisplay);
+      setBusinessName(data.business_name?.trim() || null);
     })();
     return () => {
       active = false;
     };
+  }, []);
+
+  // Settings → Profile announces a saved name; reflect it in the header now
+  // rather than on the next page load.
+  useEffect(() => {
+    const onUpdated = (e: Event) => {
+      const detail = (e as CustomEvent<unknown>).detail;
+      setBusinessName(typeof detail === "string" ? detail.trim() || null : null);
+    };
+    window.addEventListener(BUSINESS_NAME_UPDATED_EVENT, onUpdated);
+    return () => window.removeEventListener(BUSINESS_NAME_UPDATED_EVENT, onUpdated);
   }, []);
 
   // Sign out: end the Supabase session (server + client), clear any client-side
@@ -127,6 +144,7 @@ export default function AppShell({
   // timing. On sign-out we blank it so no identity lingers before the redirect.
   const displayEmail = signingOut ? null : email ?? initialEmail;
   const displayInitials = signingOut ? "" : initials || deriveInitials(null, initialEmail);
+  const displayBusinessName = signingOut ? null : businessName;
 
   const isRecoveryActive = pathname === "/" || pathname.startsWith("/client") || pathname === "/connections";
   const isPortfolioActive = pathname === "/portfolio";
@@ -150,8 +168,12 @@ export default function AppShell({
             onClick={() => router.push("/")}
             style={{ height: 36, objectFit: "contain", cursor: "pointer" }}
           />
-          <div style={{ width: 1, height: 24, background: C.border, margin: "0 16px" }} />
-          <span style={{ fontSize: 18, fontWeight: 700, color: C.navy, letterSpacing: "-0.5px" }}>Clyintel</span>
+          {displayBusinessName && (
+            <>
+              <div style={{ width: 1, height: 24, background: C.border, margin: "0 16px" }} />
+              <span data-testid="header-business-name" style={{ fontSize: 18, fontWeight: 700, color: C.navy, letterSpacing: "-0.5px" }}>{displayBusinessName}</span>
+            </>
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           {/* Nav Items */}

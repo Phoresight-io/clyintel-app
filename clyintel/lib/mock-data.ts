@@ -3,14 +3,22 @@
 // flushed (D2 closeout) so the app renders real subscriber data (or blank),
 // never fabricated numbers. Do not add const data exports here.
 
-export type ClientStatus = "current" | "due" | "past_due" | "recovered";
+// Client-level roll-up (deriveStatus in lib/adapters.ts):
+//   past_due   — any invoice past due
+//   due        — none past due, an open invoice due within 7 days
+//   current    — has >= 1 invoice, none past due or due soon (incl. all paid)
+//   no_history — never had an invoice
+export type ClientStatus = "current" | "due" | "past_due" | "no_history";
 
 export interface Client {
   id: string | number;
   name: string;
   industry: string;
-  score: number;
-  prevScore: number;
+  // null = not yet scored (no ptr_scores row). Never fabricated as 0.
+  score: number | null;
+  prevScore: number | null;
+  // True when the latest score rests on fewer than 3 dated payments / write-offs.
+  provisional: boolean;
   status: ClientStatus;
   balance: number;
   daysOverdue: number;

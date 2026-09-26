@@ -5,6 +5,7 @@ import {
   renderHtmlBody,
   resolvePaymentLink,
   nextAttemptNumber,
+  pickRecipient,
   COMM_STATUS,
   type SendEmailPort,
   type RenderVars,
@@ -212,5 +213,154 @@ describe("sendEmailStep — live", () => {
       .calls[0][0] as { status: string; counted_toward_limit: boolean };
     expect(raArg.status).toBe("failed"); // C1: a failed send is recorded as failed, not scheduled
     expect(raArg.counted_toward_limit).toBe(false); // C1: nothing sent → does not count
+  });
+});
+
+// ── Recipient override (in-call agent tool) ────────────────────────────────
+// The fake port selects with pickRecipient — the SAME function the real port
+// runs over the client's contacts — so these exercise the real step-1 logic and
+// the unchanged gate 2 together. Like the real port, it resolves the effective
+// client opt-out as `clientOptOutEmail ?? <clients.opt_out_email row>`; the row
+// value defaults to false (client not opted out).
+describe("sendEmailStep — recipient override", () => {
+  const dunning = contact({ id: "c-dun", contact_type: "dunning", email: "ap@acme.com", email_rank: 1, is_primary: false });
+  const poc = contact({ id: "c-poc", contact_type: "poc", email: "owner@acme.com", email_rank: 2 });
+  const optedOut = contact({ id: "c-out", contact_type: "dunning", email: "Old@Acme.com", email_rank: 3, opt_out_email: true, is_primary: false });
+  const CONTACTS = [dunning, poc, optedOut];
+
+  function overridePort(contacts = CONTACTS, clientRowOptOut = false) {
+    return makePort({
+      loadRecipientContact: vi.fn(async (_clientId: string, recipient?, clientOptOutEmail?) =>
+        pickRecipient(contacts, recipient, clientOptOutEmail ?? clientRowOptOut),
+      ),
+    });
+  }
+  const toAddress = (port: SendEmailPort) =>
+    (port.insertPendingCommunication as ReturnType<typeof vi.fn>).mock.calls[0][0].to_address;
+
+  it("no recipient → identical to today: port called with clientId only, default selection (dunning rank-1)", async () => {
+    const port = overridePort();
+    const res = await sendEmailStep(CTX, "dry_run", port);
+    expect(port.loadRecipientContact).toHaveBeenCalledWith("client-1");
+    expect((port.loadRecipientContact as ReturnType<typeof vi.fn>).mock.calls[0]).toHaveLength(1);
+    expect(res.outcome).toBe("would_send");
+    expect(toAddress(port)).toBe("ap@acme.com");
+    // Snapshot of today's default pick over the same contacts (client not opted out).
+    expect(pickRecipient(CONTACTS, undefined, false)).toEqual(dunning);
+  });
+
+  // FLIPPED (was: "default path ignores clients.opt_out_email (known gap,
+  // deliberately not closed here)" → outcome "sent"). The cadence passes no flag;
+  // the port's clients row says opted out → channel_denied, nothing written.
+  it("default path applies clients.opt_out_email: client opted out, contact not → channel_denied, nothing written", async () => {
+    const port = overridePort(CONTACTS, true);
+    const res = await sendEmailStep(CTX, "live", port);
+    expect(port.loadRecipientContact).toHaveBeenCalledWith("client-1");
+    expect(res.outcome).toBe("channel_denied");
+    expect(port.insertPendingCommunication).not.toHaveBeenCalled();
+    expect(port.dispatchEmail).not.toHaveBeenCalled();
+    expect(port.insertRecoveryAttempt).not.toHaveBeenCalled();
+  });
+
+  it("REGRESSION: default path, client NOT opted out, eligible contact → still sends exactly as today", async () => {
+    const port = overridePort(CONTACTS, false);
+    const res = await sendEmailStep(CTX, "live", port);
+    expect(res.outcome).toBe("sent");
+    expect(toAddress(port)).toBe("ap@acme.com");
+    expect(port.dispatchEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("contactId happy path → that contact is the recipient", async () => {
+    const port = overridePort();
+    const res = await sendEmailStep({ ...CTX, recipient: { contactId: "c-poc" }, clientOptOutEmail: false }, "live", port);
+    expect(port.loadRecipientContact).toHaveBeenCalledWith("client-1", { contactId: "c-poc" }, false);
+    expect(res.outcome).toBe("sent");
+    expect(toAddress(port)).toBe("owner@acme.com");
+    expect(port.dispatchEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "owner@acme.com" }));
+  });
+
+  it("contactId not on this client → recipient_not_found, nothing written", async () => {
+    const port = overridePort();
+    const res = await sendEmailStep({ ...CTX, recipient: { contactId: "someone-elses" }, clientOptOutEmail: false }, "live", port);
+    expect(res.outcome).toBe("recipient_not_found");
+    expect(port.insertPendingCommunication).not.toHaveBeenCalled();
+    expect(port.dispatchEmail).not.toHaveBeenCalled();
+  });
+
+  it("spoken email NOT on file → sent to that address, recorded verbatim in to_address", async () => {
+    const port = overridePort();
+    const res = await sendEmailStep({ ...CTX, recipient: { email: " New.Person@Example.com " }, clientOptOutEmail: false }, "live", port);
+    expect(res.outcome).toBe("sent");
+    expect(toAddress(port)).toBe("New.Person@Example.com");
+    expect(port.dispatchEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "New.Person@Example.com" }));
+  });
+
+  it("spoken email matching an on-file OPTED-OUT contact (case-insensitive) → channel_denied (gate 2 ran)", async () => {
+    const port = overridePort();
+    const res = await sendEmailStep({ ...CTX, recipient: { email: "old@acme.com" }, clientOptOutEmail: false }, "live", port);
+    expect(res.outcome).toBe("channel_denied");
+    expect(port.insertPendingCommunication).not.toHaveBeenCalled();
+    expect(port.dispatchEmail).not.toHaveBeenCalled();
+  });
+
+  it("contactId of an opted-out contact → channel_denied", async () => {
+    const port = overridePort();
+    const res = await sendEmailStep({ ...CTX, recipient: { contactId: "c-out" }, clientOptOutEmail: false }, "live", port);
+    expect(res.outcome).toBe("channel_denied");
+    expect(port.dispatchEmail).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["contactId", { contactId: "c-dun" }],
+    ["spoken email", { email: "new@example.com" }],
+  ])("clients.opt_out_email true → denied on the %s override path", async (_label, recipient) => {
+    const port = overridePort();
+    const res = await sendEmailStep({ ...CTX, recipient, clientOptOutEmail: true }, "live", port);
+    expect(res.outcome).toBe("channel_denied");
+    expect(port.insertPendingCommunication).not.toHaveBeenCalled();
+    expect(port.dispatchEmail).not.toHaveBeenCalled();
+  });
+
+  // CHANGED with the cadence fix (was: "override with clientOptOutEmail NOT
+  // supplied → fail closed (denied)" over a port that passed undefined through).
+  // The real port now resolves a missing flag to clients.opt_out_email, so the
+  // DB value decides; a truly unknown flag still fails closed in pickRecipient.
+  it("override with clientOptOutEmail NOT supplied → the port's clients.opt_out_email decides", async () => {
+    const out = overridePort(CONTACTS, true);
+    expect((await sendEmailStep({ ...CTX, recipient: { email: "new@example.com" } }, "live", out)).outcome).toBe("channel_denied");
+    const ok = overridePort(CONTACTS, false);
+    expect((await sendEmailStep({ ...CTX, recipient: { email: "new@example.com" } }, "live", ok)).outcome).toBe("sent");
+  });
+
+  it("free address with no name → greeting falls back to the client name", async () => {
+    const port = makePort({
+      loadActiveSystemDefaultEmailTemplate: vi.fn(async () => ({ id: "tpl-1", subject: "s", body: "Hi {{contact_name}}" }) as never),
+      loadRecipientContact: vi.fn(async (_c: string, r?, o?) => pickRecipient(CONTACTS, r, o)),
+    });
+    await sendEmailStep({ ...CTX, recipient: { email: "new@example.com" }, clientOptOutEmail: false }, "dry_run", port);
+    expect((port.insertPendingCommunication as ReturnType<typeof vi.fn>).mock.calls[0][0].body).toBe("Hi Acme");
+  });
+});
+
+describe("pickRecipient — default path folds in the client-level email opt-out", () => {
+  const dunning = contact({ id: "c-dun", contact_type: "dunning", email: "ap@acme.com", email_rank: 1, is_primary: false });
+  const poc = contact({ id: "c-poc", contact_type: "poc", email: "owner@acme.com", email_rank: 2 });
+
+  it("client not opted out (false) → same pick as today, unmodified", () => {
+    expect(pickRecipient([dunning, poc], undefined, false)).toEqual(dunning);
+  });
+
+  it("client opted out (true) + an otherwise-eligible contact → that contact, now opt_out_email === true", () => {
+    const r = pickRecipient([dunning, poc], undefined, true);
+    expect(r?.id).toBe("c-dun");
+    expect(r?.opt_out_email).toBe(true);
+  });
+
+  it("flag unknown (undefined) → fail closed (opted out)", () => {
+    expect(pickRecipient([dunning, poc])?.opt_out_email).toBe(true);
+  });
+
+  it("no eligible contact → null (unchanged: no_primary_contact)", () => {
+    expect(pickRecipient([], undefined, false)).toBeNull();
   });
 });

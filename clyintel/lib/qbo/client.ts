@@ -290,3 +290,35 @@ export async function listInvoices(
   }
   throw new Error("QBO Invoice query exceeded pagination cap");
 }
+
+// ===========================================================================
+// COMPANY INFO (appended) — the connected company's name, used only to SUGGEST
+// the subscriber's customer-facing business name on connect
+// (lib/subscriber/businessName.ts). Everything above is untouched.
+// ===========================================================================
+
+/**
+ * GET {base}/v3/company/{realmId}/companyinfo/{realmId} → CompanyName (trimmed),
+ * or null when absent. Throws on non-2xx (a 401 retries once via `refresh`).
+ */
+export async function getCompanyName(
+  realmId: string,
+  accessToken: string,
+  refresh?: RefreshAccessToken,
+): Promise<string | null> {
+  const url = `${qboApiBaseUrl()}/v3/company/${realmId}/companyinfo/${realmId}`;
+  const res = await qboFetchWith401Retry(
+    (token) =>
+      fetch(url, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      }),
+    accessToken,
+    refresh,
+    () => new Error("QBO CompanyInfo fetch failed: 401 Unauthorized"),
+    (status) => new Error(`QBO CompanyInfo fetch failed: HTTP ${status}`),
+  );
+  const body = (await res.json()) as { CompanyInfo?: { CompanyName?: unknown } };
+  const name = body.CompanyInfo?.CompanyName;
+  return typeof name === "string" && name.trim() !== "" ? name.trim() : null;
+}

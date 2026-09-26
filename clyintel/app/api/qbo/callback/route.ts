@@ -12,11 +12,15 @@ import {
   DEFAULT_RETURN_TO,
 } from "@/lib/qbo/oauthState";
 import { runQboSync } from "@/lib/qbo/runQboSync";
+import { getCompanyName } from "@/lib/qbo/client";
+import { prefillBusinessNameFromQbo } from "@/lib/subscriber/businessName";
 import { serverEnv } from "@/lib/config/env.server";
 
 // QuickBooks OAuth callback. Validates the signed state cookie, exchanges the
 // code for tokens, and upserts the encrypted token set into connected_accounts
 // (provider='quickbooks'). Never writes subscribers.qbo_* and never logs tokens.
+// After the tokens are saved it pre-fills an EMPTY subscribers.business_name from
+// QBO CompanyInfo (best-effort; never overwrites, never fails the connect).
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -143,6 +147,20 @@ export async function GET(req: NextRequest) {
       environment: serverEnv.qboEnvironment() ?? null,
     } as never,
   });
+
+  // Suggest the customer-facing business name from QBO's CompanyName — ONLY when
+  // the subscriber has none; never overwrites. Tokens are already persisted, so
+  // this is best-effort: any failure is logged and the connect still succeeds.
+  try {
+    const prefill = await prefillBusinessNameFromQbo(service, subscriberId, () =>
+      getCompanyName(realmId, tokens.access_token),
+    );
+    if (prefill.action === "error") {
+      console.error("qbo/callback: business-name prefill failed (connect still succeeds)", prefill.reason);
+    }
+  } catch (err) {
+    console.error("qbo/callback: business-name prefill threw (connect still succeeds)", err);
+  }
 
   // Auto-sync on reauthorize (Delta 4). Tokens are persisted, so the reauth has
   // ALREADY succeeded — a sync failure must NEVER fail it (mirrors the

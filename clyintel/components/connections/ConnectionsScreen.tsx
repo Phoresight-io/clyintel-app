@@ -66,6 +66,7 @@ function parseCSVToClients(text: string, startId: number): Client[] {
       industry: col(row, 'industry') || 'Other',
       score,
       prevScore: score + 4,
+      provisional: false,
       status,
       balance,
       daysOverdue,

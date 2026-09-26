@@ -1202,12 +1202,16 @@ export type Database = {
           created_at: string
           dispute_rate: number | null
           id: string
+          inputs: Json | null
           non_response_rate: number | null
           outstanding_amount_cents: number | null
           payment_history_score: number | null
+          risk_drivers: string[] | null
           risk_level: Database["public"]["Enums"]["ptr_risk_level"]
           score_date: string
+          score_factors: string[] | null
           score_month: string
+          score_summary: string[] | null
           subscriber_id: string
         }
         Insert: {
@@ -1221,12 +1225,16 @@ export type Database = {
           created_at?: string
           dispute_rate?: number | null
           id?: string
+          inputs?: Json | null
           non_response_rate?: number | null
           outstanding_amount_cents?: number | null
           payment_history_score?: number | null
+          risk_drivers?: string[] | null
           risk_level?: Database["public"]["Enums"]["ptr_risk_level"]
           score_date?: string
+          score_factors?: string[] | null
           score_month: string
+          score_summary?: string[] | null
           subscriber_id: string
         }
         Update: {
@@ -1240,12 +1248,16 @@ export type Database = {
           created_at?: string
           dispute_rate?: number | null
           id?: string
+          inputs?: Json | null
           non_response_rate?: number | null
           outstanding_amount_cents?: number | null
           payment_history_score?: number | null
+          risk_drivers?: string[] | null
           risk_level?: Database["public"]["Enums"]["ptr_risk_level"]
           score_date?: string
+          score_factors?: string[] | null
           score_month?: string
+          score_summary?: string[] | null
           subscriber_id?: string
         }
         Relationships: [
@@ -1707,6 +1719,10 @@ export type Database = {
           ended_at: string | null
           ended_reason: string | null
           from_number: string | null
+          handoff_email_at: string | null
+          handoff_email_communication_id: string | null
+          handoff_email_reason: string | null
+          handoff_email_status: string | null
           id: string
           invoice_id: string | null
           outcome: string | null
@@ -1732,6 +1748,10 @@ export type Database = {
           ended_at?: string | null
           ended_reason?: string | null
           from_number?: string | null
+          handoff_email_at?: string | null
+          handoff_email_communication_id?: string | null
+          handoff_email_reason?: string | null
+          handoff_email_status?: string | null
           id?: string
           invoice_id?: string | null
           outcome?: string | null
@@ -1757,6 +1777,10 @@ export type Database = {
           ended_at?: string | null
           ended_reason?: string | null
           from_number?: string | null
+          handoff_email_at?: string | null
+          handoff_email_communication_id?: string | null
+          handoff_email_reason?: string | null
+          handoff_email_status?: string | null
           id?: string
           invoice_id?: string | null
           outcome?: string | null
@@ -1777,6 +1801,13 @@ export type Database = {
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "voice_calls_handoff_email_communication_id_fkey"
+            columns: ["handoff_email_communication_id"]
+            isOneToOne: false
+            referencedRelation: "communications"
             referencedColumns: ["id"]
           },
           {

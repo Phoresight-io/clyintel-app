@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
-import { getPayment, getInvoice, linkedInvoiceIds, listInvoices } from "./client";
+import { getPayment, getInvoice, linkedInvoiceIds, listInvoices, getCompanyName } from "./client";
 
 // Deterministic — global fetch is stubbed, no network. QBO_BASE_URL is env-derived
 // (via constants.qboApiBaseUrl), so set it for the run and restore afterward.
@@ -192,5 +192,31 @@ describe("qbo client", () => {
     ).toEqual(["130", "131"]);
 
     expect(linkedInvoiceIds({ Id: "1", TotalAmt: 1, TxnDate: "2026-01-01" })).toEqual([]);
+  });
+});
+
+describe("qbo client — getCompanyName (CompanyInfo)", () => {
+  it("GETs companyinfo/{realmId} and returns the trimmed CompanyName", async () => {
+    const fetchMock = vi.fn(async () => okJson({ CompanyInfo: { CompanyName: "  Ocean View LLC ", LegalName: "OV Holdings" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await getCompanyName(REALM, TOKEN)).toBe("Ocean View LLC");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(`${BASE}/v3/company/${REALM}/companyinfo/${REALM}`);
+    expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TOKEN}`);
+    vi.unstubAllGlobals();
+  });
+
+  it("missing / blank CompanyName → null", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => okJson({ CompanyInfo: { CompanyName: "  " } })));
+    expect(await getCompanyName(REALM, TOKEN)).toBeNull();
+    vi.stubGlobal("fetch", vi.fn(async () => okJson({})));
+    expect(await getCompanyName(REALM, TOKEN)).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("non-2xx → throws without leaking the token", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => errStatus(500)));
+    await expect(getCompanyName(REALM, TOKEN)).rejects.toThrow("QBO CompanyInfo fetch failed: HTTP 500");
+    vi.unstubAllGlobals();
   });
 });

@@ -7,6 +7,7 @@ import { getInvoiceSource, type InvoiceSourceId } from "@/lib/invoiceSources";
 import BillingTab from "@/components/settings/BillingTab";
 import ConnectCard from "@/components/settings/ConnectCard";
 import RevenueRecoveryTab from "@/components/settings/RevenueRecoveryTab";
+import ProfileTab from "@/components/settings/ProfileTab";
 import InvoiceSourceCard, { type SourceRow } from "@/components/settings/InvoiceSourceCard";
 import { Toast, ToastSuccessDot } from "@/components/ui/Toast";
 
@@ -15,7 +16,7 @@ const SETTING_TABS = [
   { id: "notifications",   label: "Notifications",   disabled: false },
   { id: "revenue_recovery",label: "Revenue Recovery",disabled: false },
   { id: "subscription",    label: "Subscription",    disabled: false },
-  { id: "profile",         label: "Profile",         disabled: true  },
+  { id: "profile",         label: "Profile",         disabled: false },
 ];
 
 // OAuth connect-start + disconnect endpoints per invoice-source provider. Only
@@ -323,13 +324,8 @@ export default function IntegrationsScreen() {
       {/* Subscription tab */}
       {activeTab === "subscription" && <BillingTab />}
 
-      {/* Profile tab — disabled stub, should not be reachable via nav */}
-      {activeTab === "profile" && (
-        <section style={{ animation: "fadeUp 0.2s ease" }}>
-          <div style={{ fontSize: 16, fontWeight: 600, color: C.text, marginBottom: 4 }}>Profile</div>
-          <div style={{ fontSize: 13, color: C.textDim, fontWeight: 500 }}>Coming soon.</div>
-        </section>
-      )}
+      {/* Profile tab — customer-facing business name */}
+      {activeTab === "profile" && <ProfileTab />}
 
       {/* Sync-result toast */}
       {syncToast && (

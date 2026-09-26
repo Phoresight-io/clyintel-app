@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { serverEnv } from "@/lib/config/env.server";
 import type { Database } from "@/types/supabase";
+import { buildCallVariables } from "@/lib/voice/buildCallVariables";
 
 // Outbound voice-call trigger. Creates a voice_calls row FIRST (status 'queued')
 // via the service-role client — writes bypass RLS, same pattern as the other
@@ -10,6 +11,12 @@ import type { Database } from "@/types/supabase";
 // before the provider call so a provider failure is recorded ('failed'), never
 // lost. The Vapi call carries the row id in metadata.voiceCallId so the webhook
 // (app/api/voice/webhook) can correlate status/end-of-call events back to it.
+//
+// The assistant's variableValues are built server-side from the DB by id
+// (lib/voice/buildCallVariables.ts), so a caller passing only ids still gets a
+// grounded agent. body.variables, when sent, is merged OVER the built set
+// (explicit caller override wins). A build failure never blocks the call: it's
+// logged and the call goes out with body.variables alone.
 //
 // Requires the Node.js runtime (service-role key never reaches the edge). POST,
 // never cached.
@@ -77,6 +84,11 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
+  // Every call is about one invoice: the agent's variables and its in-call
+  // payment-link email (app/api/voice/tools) both key off voice_calls.invoice_id.
+  if (!invoiceId) {
+    return NextResponse.json({ error: "invoiceId is required" }, { status: 400 });
+  }
 
   // Resolve the outbound assistant: test mode routes to VAPI_ASSISTANT_ID_TEST,
   // otherwise production's VAPI_ASSISTANT_ID (unchanged default behavior).
@@ -121,6 +133,15 @@ export async function POST(req: NextRequest) {
 
   const voiceCallId = inserted.id;
 
+  // Build the agent's variables from the DB; caller-supplied values win.
+  let built: Record<string, string> = {};
+  try {
+    built = await buildCallVariables(service, { subscriberId, clientId, invoiceId });
+  } catch (err) {
+    console.error("voice/call: buildCallVariables failed; using body.variables only", err);
+  }
+  const variableValues: Record<string, unknown> = { ...built, ...variables };
+
   // 2. Place the call through Vapi. The row id rides along in metadata so the
   //    webhook can correlate later even before vapi_call_id is stored.
   let vapiResponse: Response;
@@ -135,7 +156,7 @@ export async function POST(req: NextRequest) {
         assistantId,
         phoneNumberId,
         customer: { number: toNumber },
-        assistantOverrides: { variableValues: variables },
+        assistantOverrides: { variableValues },
         metadata: { voiceCallId },
       }),
     });

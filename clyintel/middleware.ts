@@ -15,8 +15,12 @@ const PUBLIC_PATHS = ['/login', '/auth/callback', '/pay'];
 //
 // Deliberately NOT included: /api/voice/call — it has no self-authentication and
 // triggers outbound calls, so it stays behind session auth (app-internal only).
+//
+// /api/voice/tools is Vapi's in-call tool endpoint: same x-vapi-secret check as
+// /api/voice/webhook, inside the route.
 const WEBHOOK_PATHS = [
   '/api/voice/webhook',
+  '/api/voice/tools',
   '/api/stripe-webhook',
   '/api/qbo/webhook',
   '/api/webhooks/mailersend',

@@ -18,8 +18,8 @@ export type ContactRow = Database["public"]["Tables"]["client_contacts"]["Row"];
 
 // ── CHANNEL axis: descriptor + per-channel selection ─────────────────────────
 // A ChannelDescriptor makes selection REPEATABLE: adding a channel = add its
-// descriptor + a call, no rewrite. Email is the first (and only wired) instance;
-// SMS/voice descriptors are deliberately NOT defined yet (future bricks).
+// descriptor + a call, no rewrite. Email drives sends; voice picks who a call is
+// for (lib/voice/buildCallVariables). No SMS descriptor yet (future brick).
 export type ChannelDescriptor = {
   channel: "email" | "sms" | "voice";
   rankColumn: "email_rank" | "sms_rank" | "voice_rank";
@@ -32,6 +32,14 @@ export const EMAIL_CHANNEL: ChannelDescriptor = {
   rankColumn: "email_rank",
   optOutField: "opt_out_email",
   addressField: "email",
+};
+
+// Voice channel: dunning voice_rank → poc, phone present, not opted out of voice.
+export const VOICE_CHANNEL: ChannelDescriptor = {
+  channel: "voice",
+  rankColumn: "voice_rank",
+  optOutField: "opt_out_voice",
+  addressField: "phone",
 };
 
 /**
@@ -67,6 +75,69 @@ export function selectForChannel(
   if (rankedDunning.length > 0) return rankedDunning[0];
   const poc = contacts.find((c) => c.contact_type === "poc" && eligible(c));
   return poc ?? null;
+}
+
+// ── Explicit-recipient overrides (in-call agent tool) ───────────────────────
+// The agent may name the recipient: an on-file contact, or an address the person
+// spoke on the call. These helpers only BUILD the candidate; the caller's
+// isChannelAllowed gate still decides. Pure, no I/O.
+
+/** Normalise an address for comparison: trimmed, lower-cased. */
+export function normaliseEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+/**
+ * Fold the client-level email opt-out into a contact: opted out if the contact
+ * is, OR the client is. `clientOptOutEmail` undefined/null → treated as opted
+ * out (fail closed), so a caller that forgets to load it cannot open a send.
+ */
+export function withClientEmailOptOut(
+  contact: ContactRow,
+  clientOptOutEmail: boolean | null | undefined,
+): ContactRow {
+  const clientOut = clientOptOutEmail !== false;
+  return { ...contact, opt_out_email: contact.opt_out_email !== false || clientOut };
+}
+
+/**
+ * Resolve a spoken address to a contact-shaped recipient.
+ *   - matches an on-file contact's email (trim + case-insensitive) → THAT row,
+ *     so its own opt_out_email applies at the gate;
+ *   - else → a contact-shaped object (not persisted; id/client_id "") whose
+ *     opt_out_email is the client-level flag, so the gate still runs on it.
+ * Either way the client-level opt-out is folded in (withClientEmailOptOut). The
+ * address is kept verbatim (trimmed): it is what gets recorded and sent to.
+ */
+export function resolveAddressRecipient(
+  contacts: ContactRow[],
+  clientOptOutEmail: boolean | null | undefined,
+  email: string,
+): ContactRow {
+  const wanted = normaliseEmail(email);
+  const onFile = contacts.find((c) => typeof c.email === "string" && normaliseEmail(c.email) === wanted);
+  if (onFile) return withClientEmailOptOut(onFile, clientOptOutEmail);
+  return withClientEmailOptOut(
+    {
+      id: "",
+      client_id: "",
+      contact_type: null,
+      created_at: "",
+      updated_at: "",
+      email: email.trim(),
+      email_rank: null,
+      sms_rank: null,
+      voice_rank: null,
+      is_primary: false,
+      name: null,
+      phone: null,
+      role: null,
+      opt_out_email: false,
+      opt_out_sms: true,
+      opt_out_voice: true,
+    },
+    clientOptOutEmail,
+  );
 }
 
 // ── STRATEGY axis: how-many-recipients (backlog seam, NOT wired to sends) ─────

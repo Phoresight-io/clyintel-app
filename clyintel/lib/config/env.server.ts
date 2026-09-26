@@ -76,6 +76,11 @@ export const serverEnv = {
   vapiAssistantIdTest: (): string | undefined => optionalServerEnv("VAPI_ASSISTANT_ID_TEST"),
   vapiPhoneNumberId: (): string | undefined => optionalServerEnv("VAPI_PHONE_NUMBER_ID"),
   vapiWebhookSecret: (): string | undefined => optionalServerEnv("VAPI_WEBHOOK_SECRET"),
+  /** Voice → email handoff fence (lib/voice/handoffEmail.ts). Exactly "dry_run" or
+   *  "live" enables it; unset/empty/anything else = OFF (fail closed). */
+  voiceHandoffEmailMode: (): string | undefined => optionalServerEnv("VOICE_HANDOFF_EMAIL_MODE"),
+  /** Optional: when set, only this client_id may get a handoff email. */
+  voiceHandoffEmailClientId: (): string | undefined => optionalServerEnv("VOICE_HANDOFF_EMAIL_CLIENT_ID"),
 
   // ── Cron / ops bearer secrets — each route fails closed on a missing value ──
   settlementCronSecret: (): string | undefined => optionalServerEnv("SETTLEMENT_CRON_SECRET"),

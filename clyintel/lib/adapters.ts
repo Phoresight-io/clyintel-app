@@ -1,5 +1,6 @@
 import type { Database } from "@/types/supabase";
 import type { Client, Invoice, ClientInvoiceSet, ClientStatus } from "@/lib/mock-data";
+import { daysBetweenUtcDates } from "@/lib/score/dates";
 
 // Maps real Supabase rows onto the UI shapes the screen components already
 // consume (`Client`, `Invoice`, `ClientInvoiceSet`). Keeps the components
@@ -9,8 +10,6 @@ type ClientRow = Database["public"]["Tables"]["clients"]["Row"];
 type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
 type PtrScoreRow = Database["public"]["Tables"]["ptr_scores"]["Row"];
 
-const MS_PER_DAY = 1000 * 60 * 60 * 24;
-
 function formatDate(value: string | null): string {
   if (!value) return "—";
   const d = new Date(value);
@@ -18,17 +17,20 @@ function formatDate(value: string | null): string {
   return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`;
 }
 
-function daysFromToday(due: string | null): number | null {
+// Days from today (UTC calendar date) until `due`: negative when past due, 0 when
+// due today. Goes through daysBetweenUtcDates, the shared UTC calendar-date
+// helper, so the scorer (lib/score/computeClientScore.ts) and the "Due In"
+// column always agree. `now` is injectable; it defaults to the current time.
+export function daysFromToday(due: string | null, now: Date = new Date()): number | null {
   if (!due) return null;
-  const d = new Date(due);
-  if (isNaN(d.getTime())) return null;
-  const today = new Date();
-  return Math.round((d.getTime() - today.getTime()) / MS_PER_DAY);
+  const days = daysBetweenUtcDates(due, now);
+  return days === null ? null : 0 - days;
 }
 
-function uiStatus(
+export function uiStatus(
   status: InvoiceRow["status"],
   dueDate: string | null,
+  now: Date = new Date(),
 ): "past_due" | "current" | "paid" {
   if (status === "paid") return "paid";
   if (status === "overdue" || status === "in_recovery" || status === "written_off") return "past_due";
@@ -37,13 +39,18 @@ function uiStatus(
   // Decide with the SAME daysFromToday(due) < 0 convention every other row on this
   // page already uses: past-due partial → past_due, not-yet-due partial → current.
   if (status === "partial") {
-    const delta = daysFromToday(dueDate);
+    const delta = daysFromToday(dueDate, now);
     return delta !== null && delta < 0 ? "past_due" : "current";
   }
   return "current"; // draft | sent
 }
 
-export function toUIInvoice(row: InvoiceRow): Invoice {
+// invoiceId → paid-in-full date ('YYYY-MM-DD'), from lib/score/loadPaidTimings.
+// Paid rows show that date, or "—" when it's unknown. They never show updated_at:
+// that is the QBO sync touch time, not a payment date.
+export type PaidDateMap = Map<string, string>;
+
+export function toUIInvoice(row: InvoiceRow, paidDates?: PaidDateMap): Invoice {
   const ui = uiStatus(row.status, row.due_date);
   const dayDelta = daysFromToday(row.due_date);
   const invoice: Invoice = {
@@ -58,15 +65,15 @@ export function toUIInvoice(row: InvoiceRow): Invoice {
   } else if (ui === "current") {
     invoice.daysUntilDue = dayDelta ?? undefined;
   } else if (ui === "paid") {
-    invoice.paidDate = formatDate(row.updated_at);
+    invoice.paidDate = formatDate(paidDates?.get(row.id) ?? null);
   }
   return invoice;
 }
 
-export function toUIClientInvoiceSet(rows: InvoiceRow[]): ClientInvoiceSet {
+export function toUIClientInvoiceSet(rows: InvoiceRow[], paidDates?: PaidDateMap): ClientInvoiceSet {
   const set: ClientInvoiceSet = { outstanding: [], upcoming: [], paid: [] };
   for (const row of rows) {
-    const inv = toUIInvoice(row);
+    const inv = toUIInvoice(row, paidDates);
     if (inv.status === "paid") set.paid.push(inv);
     else if (inv.status === "past_due") set.outstanding.push(inv);
     else set.upcoming.push(inv);
@@ -74,23 +81,32 @@ export function toUIClientInvoiceSet(rows: InvoiceRow[]): ClientInvoiceSet {
   return set;
 }
 
-function deriveStatus(rows: InvoiceRow[]): ClientStatus {
-  const statuses = rows.map((r) => uiStatus(r.status, r.due_date));
+// Client status roll-up. Past-due and due-soon use the same uiStatus /
+// daysFromToday rules as the invoice rows:
+//   any invoice past due                    → "past_due"
+//   else an open invoice due within 7 days  → "due"  (the Receivables dashboard
+//                                              selects past_due + due clients)
+//   else >= 1 invoice (open or all paid)    → "current"
+//   else (never had an invoice)             → "no_history"
+export function deriveStatus(rows: InvoiceRow[], now: Date = new Date()): ClientStatus {
+  const statuses = rows.map((r) => uiStatus(r.status, r.due_date, now));
   if (statuses.some((s) => s === "past_due")) return "past_due";
-  const hasOpen = statuses.some((s) => s === "current");
-  if (hasOpen) {
-    // "due" if anything is due within 7 days, else "current"
-    const dueSoon = rows.some((r) => {
-      if (uiStatus(r.status, r.due_date) !== "current") return false;
-      const delta = daysFromToday(r.due_date);
-      return delta !== null && delta <= 7;
-    });
-    return dueSoon ? "due" : "current";
-  }
-  return rows.length > 0 ? "recovered" : "current";
+  const dueSoon = rows.some((r) => {
+    if (uiStatus(r.status, r.due_date, now) !== "current") return false;
+    const delta = daysFromToday(r.due_date, now);
+    return delta !== null && delta <= 7;
+  });
+  if (dueSoon) return "due";
+  return rows.length > 0 ? "current" : "no_history";
 }
 
-export function toUIClient(client: ClientRow, ptr: PtrScoreRow | null, invoices: InvoiceRow[]): Client {
+// Latest + prior ptr_scores rows for a client (see getPtrScores in lib/data.ts).
+export interface PtrScorePair {
+  latest: PtrScoreRow | null;
+  prior: PtrScoreRow | null;
+}
+
+export function toUIClient(client: ClientRow, ptr: PtrScorePair, invoices: InvoiceRow[]): Client {
   const outstandingCents = invoices.reduce(
     (sum, inv) => (uiStatus(inv.status, inv.due_date) === "past_due" ? sum + (inv.amount_outstanding_cents ?? inv.amount_cents) : sum),
     0
@@ -102,21 +118,29 @@ export function toUIClient(client: ClientRow, ptr: PtrScoreRow | null, invoices:
     return Math.max(max, overdue);
   }, 0);
 
-  const score = ptr?.composite_score ?? 0;
+  // Never fabricate a score: no ptr_scores row (or a null composite) → null,
+  // which the UI renders as "Not yet scored" / "—".
+  const latest = ptr.latest;
+  const score = latest?.composite_score ?? null;
+  const prevScore = ptr.prior?.composite_score ?? null;
+  const inputs = latest?.inputs;
+  const provisional =
+    typeof inputs === "object" && inputs !== null && !Array.isArray(inputs) && inputs.provisional === true;
   return {
     id: client.id,
     name: client.name,
     industry: client.company || "—",
     score,
-    prevScore: score,
+    prevScore,
+    provisional,
     status: deriveStatus(invoices),
     balance: Math.round(outstandingCents) / 100,
     daysOverdue: maxOverdue,
     invoices: invoices.length,
     lastActivity: formatDate(client.updated_at),
     nextAction: "",
-    scoreSummary: ptr?.ai_recommendation ? [ptr.ai_recommendation] : [],
-    scoreFactors: [],
-    riskDrivers: ptr?.risk_level ? [`Risk level: ${ptr.risk_level}`] : [],
+    scoreSummary: latest?.score_summary ?? [],
+    scoreFactors: latest?.score_factors ?? [],
+    riskDrivers: latest?.risk_drivers ?? [],
   };
 }
