@@ -1,6 +1,12 @@
 import { getSupabase } from "@/lib/supabase";
 import { sendEmail } from "@/lib/email";
-import { selectForChannel, EMAIL_CHANNEL, type ContactRow } from "@/lib/outreach/selectRecipients";
+import {
+  selectForChannel,
+  resolveAddressRecipient,
+  withClientEmailOptOut,
+  EMAIL_CHANNEL,
+  type ContactRow,
+} from "@/lib/outreach/selectRecipients";
 import { isChannelAllowed } from "@/lib/outreach/isChannelAllowed";
 import type { Database } from "@/types/supabase";
 
@@ -13,6 +19,12 @@ import type { Database } from "@/types/supabase";
 //
 // GATE ORDER (hard, do not reorder):
 //   1. selectRecipients → primary contact. None (email-less client) → clean no-op.
+//      Recipient override (in-call agent tool only): ctx.recipient replaces THIS
+//      selection step and nothing else — an on-file contact by id (ownership-
+//      checked; missing → recipient_not_found) or a spoken address
+//      (resolveAddressRecipient). Both fold in clients.opt_out_email. Gate 2 then
+//      runs unchanged on whatever step 1 picked, so an override is never exempt.
+//      No override → exactly today's selection (cadence / outreach/run unchanged).
 //   2. isChannelAllowed(contact, "email") → DETERMINISTIC opt-out gate. Denied →
 //      write NOTHING and exit (there is no `skipped` recovery_attempts convention
 //      in the codebase yet, so we do not invent one).
@@ -45,14 +57,24 @@ export type CommStatus = (typeof COMM_STATUS)[keyof typeof COMM_STATUS];
 
 const FROM_ADDRESS = "team@phoresight.io"; // matches lib/email.ts sender
 
+/** Explicit recipient chosen by the in-call agent: an on-file contact, or an
+ *  address the person spoke (used once; never written to client_contacts). */
+export type RecipientOverride = { contactId: string } | { email: string };
+
 export interface SendEmailStepContext {
   subscriberId: string;
   clientId: string;
   invoiceId: string;
+  /** Optional override of step-1 selection. Absent → today's selection. */
+  recipient?: RecipientOverride;
+  /** clients.opt_out_email, loaded by the caller. Only read with `recipient`;
+   *  undefined there = opted out (fail closed). */
+  clientOptOutEmail?: boolean;
 }
 
 export type SendEmailOutcome =
   | "no_primary_contact" // email-less client → nothing sendable
+  | "recipient_not_found" // override contactId missing / not this client's → nothing written
   | "channel_denied" // opt-out gate denied → nothing written
   | "no_template" // misconfig: no active system-default email template
   | "no_payment_link" // no resolvable payment link (client→subscriber→[Connect stub]) → suppressed, nothing written
@@ -157,9 +179,34 @@ export function renderHtmlBody(text: string, vars: RenderVars): string {
   return out.replace(/\n/g, "<br>");
 }
 
+/** Step-1 selection over one client's already-loaded contacts (the real port's
+ *  logic, pure so it is testable). No recipient → channel-aware default (dunning
+ *  rank-1 → poc, opt-out/address filtered; a backfilled PoC with email_rank=1 is
+ *  the poc fallback). contactId → that contact, client opt-out folded in; null if
+ *  not among these contacts. email → resolveAddressRecipient. */
+export function pickRecipient(
+  contacts: ContactRow[],
+  recipient?: RecipientOverride,
+  clientOptOutEmail?: boolean,
+): ContactRow | null {
+  if (!recipient) return selectForChannel(contacts, EMAIL_CHANNEL);
+  if ("contactId" in recipient) {
+    const row = contacts.find((c) => c.id === recipient.contactId);
+    return row ? withClientEmailOptOut(row, clientOptOutEmail) : null;
+  }
+  return resolveAddressRecipient(contacts, clientOptOutEmail, recipient.email);
+}
+
 // ── Port: the I/O this step needs. Real impl below; tests inject a fake. ──────
 export interface SendEmailPort {
-  loadRecipientContact(clientId: string): Promise<ContactRow | null>;
+  // No recipient → channel-aware default selection (today's behavior). With a
+  // recipient → that contact (client-owned) or the spoken address, with the
+  // client-level opt-out folded in; null = not found / unreadable.
+  loadRecipientContact(
+    clientId: string,
+    recipient?: RecipientOverride,
+    clientOptOutEmail?: boolean,
+  ): Promise<ContactRow | null>;
   loadActiveSystemDefaultEmailTemplate(): Promise<TemplateRow | null>;
   loadRenderVars(ctx: SendEmailStepContext): Promise<RenderVars | null>;
   loadExistingAttemptNumbers(invoiceId: string): Promise<number[]>;
@@ -211,8 +258,11 @@ export async function sendEmailStep(
 
   // 1. Recipient contact — channel-aware selection (dunning rank-1 → poc), already
   //    opt-out/address-filtered. None selectable → clean no-op, nothing written.
-  const contact = await port.loadRecipientContact(ctx.clientId);
-  if (!contact) return empty;
+  //    An override replaces this selection only; gate 2 below still runs on it.
+  const contact = ctx.recipient
+    ? await port.loadRecipientContact(ctx.clientId, ctx.recipient, ctx.clientOptOutEmail)
+    : await port.loadRecipientContact(ctx.clientId);
+  if (!contact) return ctx.recipient ? { ...empty, outcome: "recipient_not_found" } : empty;
 
   // 2. Compliance gate — deterministic, fail-closed. Denied → write nothing.
   //    Redundant safety net: selectForChannel already filtered opt-out + address,
@@ -328,7 +378,7 @@ export async function sendEmailStep(
 function createDefaultPort(): SendEmailPort {
   const service = getSupabase();
   return {
-    async loadRecipientContact(clientId) {
+    async loadRecipientContact(clientId, recipient, clientOptOutEmail) {
       const { data, error } = await service
         .from("client_contacts")
         .select("*")
@@ -337,10 +387,9 @@ function createDefaultPort(): SendEmailPort {
         console.error("sendEmailStep: client_contacts read failed", error);
         return null; // fail closed → treated as unsendable
       }
-      // Channel-aware selection (email): dunning rank-1 → poc, opt-out/address
-      // filtered. A backfilled PoC (contact_type='poc', email_rank=1) returns as
-      // the poc fallback when no eligible dunning contact exists.
-      return selectForChannel(data ?? [], EMAIL_CHANNEL);
+      // The read above is scoped to this client, so an override contactId from
+      // another client simply isn't found (ownership check).
+      return pickRecipient(data ?? [], recipient, clientOptOutEmail);
     },
     async loadActiveSystemDefaultEmailTemplate() {
       const { data, error } = await service
