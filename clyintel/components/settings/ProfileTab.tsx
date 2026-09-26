@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { C } from "@/lib/theme";
 import { createSupabaseBrowser } from "@/lib/supabase-browser";
-import { BUSINESS_NAME_MAX, validateBusinessName } from "@/lib/subscriber/businessName";
+import { BUSINESS_NAME_MAX, BUSINESS_NAME_UPDATED_EVENT, validateBusinessName } from "@/lib/subscriber/businessName";
 import { Toast, ToastSuccessDot } from "@/components/ui/Toast";
 
 // Profile tab — the subscriber's customer-facing business name
@@ -62,6 +62,7 @@ export default function ProfileTab() {
       }
       const data = (await res.json()) as { business_name: string };
       setName(data.business_name);
+      window.dispatchEvent(new CustomEvent<string>(BUSINESS_NAME_UPDATED_EVENT, { detail: data.business_name }));
       setShowToast(true);
     } catch {
       setError("Could not save business name.");

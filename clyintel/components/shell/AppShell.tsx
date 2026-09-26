@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 import { createSupabaseBrowser } from "@/lib/supabase-browser";
 import { CLIENTS_KEY, INTEGRATIONS_KEY, DEMO_RESET_KEY } from "@/lib/demo-mode";
+import { BUSINESS_NAME_UPDATED_EVENT } from "@/lib/subscriber/businessName";
 
 // Initials for the avatar. Derived from the real name if present, otherwise from
 // the email local-part (e.g. "cwjr27@outlook.com" → "CW"). NEVER a hardcoded
@@ -94,6 +95,17 @@ export default function AppShell({
     return () => {
       active = false;
     };
+  }, []);
+
+  // Settings → Profile announces a saved name; reflect it in the header now
+  // rather than on the next page load.
+  useEffect(() => {
+    const onUpdated = (e: Event) => {
+      const detail = (e as CustomEvent<unknown>).detail;
+      setBusinessName(typeof detail === "string" ? detail.trim() || null : null);
+    };
+    window.addEventListener(BUSINESS_NAME_UPDATED_EVENT, onUpdated);
+    return () => window.removeEventListener(BUSINESS_NAME_UPDATED_EVENT, onUpdated);
   }, []);
 
   // Sign out: end the Supabase session (server + client), clear any client-side

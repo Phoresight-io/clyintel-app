@@ -11,6 +11,10 @@ import type { Database } from "../../types/supabase";
 
 export const BUSINESS_NAME_MAX = 120;
 
+// Browser event fired after Settings → Profile saves a name, so the app header
+// (components/shell/AppShell.tsx) updates without a reload. detail: the saved name.
+export const BUSINESS_NAME_UPDATED_EVENT = "clyintel:business-name-updated";
+
 export type ValidateBusinessNameResult =
   | { ok: true; name: string }
   | { ok: false; reason: string };
