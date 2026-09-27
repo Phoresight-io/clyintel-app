@@ -36,6 +36,11 @@ const PROVIDER_ROUTES: Partial<
   },
 };
 
+// Stripe Connect ("Revenue Share") card is hidden from Settings > Integrations
+// for now. Flip to true to show it again; ConnectCard and its API routes are
+// untouched.
+const SHOW_STRIPE_CONNECT = false;
+
 interface SyncToast {
   invoices: number;
   events: number;
@@ -86,6 +91,7 @@ export default function IntegrationsScreen() {
 
   // Fetch plan-derived revenue share rate for ConnectCard fee disclosure.
   useEffect(() => {
+    if (!SHOW_STRIPE_CONNECT) return;
     let active = true;
     (async () => {
       const supabase = createSupabaseBrowser();
@@ -216,7 +222,8 @@ export default function IntegrationsScreen() {
             </button>
           </div>
 
-          {/* REVENUE SHARE section */}
+          {/* REVENUE SHARE section (Stripe Connect) — hidden via SHOW_STRIPE_CONNECT */}
+          {SHOW_STRIPE_CONNECT && (
           <div style={{ marginBottom: 32 }}>
             <div
               style={{
@@ -232,6 +239,7 @@ export default function IntegrationsScreen() {
             </div>
             <ConnectCard revShareRate={revShareRate} />
           </div>
+          )}
 
           {/* INVOICE SOURCES section — real cards from /api/sources + registry */}
           <div>
