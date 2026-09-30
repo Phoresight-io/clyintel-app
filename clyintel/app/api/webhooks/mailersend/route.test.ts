@@ -28,6 +28,11 @@ import {
   type MailersendWebhookPort,
 } from "./route";
 import { ATTENTION_REASON } from "@/lib/outreach/deriveAttentionReason";
+// Verbatim real MailerSend activity.delivered webhook body (captured 2026-09-26).
+import realDelivered from "@/lib/outreach/__fixtures__/mailersend-activity-delivered-2026-09-26.json";
+
+const REAL_MESSAGE_ID = "6ab7f77678162e9d5720667a"; // == communications.mailersend_message_id
+const REAL_EMAIL_ID = "6ab7f776db3f535d9aa7d147"; // different id space — must never match
 
 const SECRET = "whsec_route_test";
 
@@ -245,12 +250,17 @@ function makePort(over: Partial<MailersendWebhookPort> = {}): MailersendWebhookP
   };
 }
 
-// message-id lives at data.email.message.id; type drives classification.
+// Real MailerSend activity payloads are FLAT: the id that matches
+// communications.mailersend_message_id is data.message_id. Built from the real
+// fixture so every test exercises the production shape; type drives classification.
 function event(type: string, messageId: string | null = "ms-1"): unknown {
-  return {
-    type,
-    data: { email: messageId === null ? {} : { message: { id: messageId } } },
+  const data: Record<string, unknown> = {
+    ...realDelivered.data,
+    type: type.replace(/^activity\./, ""),
   };
+  if (messageId === null) delete data.message_id;
+  else data.message_id = messageId;
+  return { ...realDelivered, type, data };
 }
 
 describe("processMailersendEvent — resolution", () => {
@@ -363,5 +373,80 @@ describe("processMailersendEvent — idempotency & monotonicity", () => {
       "client-1",
       ATTENTION_REASON.hard_bounce,
     );
+  });
+});
+
+describe("processMailersendEvent — REAL flat MailerSend payload", () => {
+  it("real activity.delivered → 'activity', resolved by data.message_id, updates communications", async () => {
+    const find = vi.fn(async (id: string) =>
+      id === REAL_MESSAGE_ID ? { id: "comm-real", client_id: "client-1", subscriber_id: "sub-1" } : null,
+    );
+    const port = makePort({ findCommunicationByMessageId: find });
+    const out = await processMailersendEvent(realDelivered, port);
+    expect(out).toBe("activity");
+    expect(find).toHaveBeenCalledWith(REAL_MESSAGE_ID);
+    expect(find).not.toHaveBeenCalledWith(REAL_EMAIL_ID);
+    expect(port.updateCommunicationActivity).toHaveBeenCalledWith("comm-real", "activity.delivered");
+    expect(port.setContactOptOutEmail).not.toHaveBeenCalled();
+    expect(port.setClientAttentionReason).not.toHaveBeenCalled();
+  });
+
+  it("payload with ONLY data.email_id → 'no_message_id', no lookup (never matches on email id)", async () => {
+    const port = makePort();
+    const { message_id: _drop, ...rest } = realDelivered.data;
+    void _drop;
+    const out = await processMailersendEvent({ ...realDelivered, data: rest }, port);
+    expect(out).toBe("no_message_id");
+    expect(port.findCommunicationByMessageId).not.toHaveBeenCalled();
+  });
+
+  it("flat activity.hard_bounced → resolves by message_id, attention(hard_bounce), no opt-out", async () => {
+    const find = vi.fn(async () => ({ id: "comm-real", client_id: "client-1", subscriber_id: "sub-1" }));
+    const port = makePort({ findCommunicationByMessageId: find });
+    const out = await processMailersendEvent(event("activity.hard_bounced", REAL_MESSAGE_ID), port);
+    expect(out).toBe("attention_only");
+    expect(find).toHaveBeenCalledWith(REAL_MESSAGE_ID);
+    expect(port.setContactOptOutEmail).not.toHaveBeenCalled();
+    expect(port.setClientAttentionReason).toHaveBeenCalledWith("client-1", ATTENTION_REASON.hard_bounce);
+  });
+
+  it("flat activity.unsubscribed → resolves by message_id, opt-out + attention(opt_out)", async () => {
+    const find = vi.fn(async () => ({ id: "comm-real", client_id: "client-1", subscriber_id: "sub-1" }));
+    const port = makePort({ findCommunicationByMessageId: find });
+    const out = await processMailersendEvent(event("activity.unsubscribed", REAL_MESSAGE_ID), port);
+    expect(out).toBe("opt_out");
+    expect(find).toHaveBeenCalledWith(REAL_MESSAGE_ID);
+    expect(port.setContactOptOutEmail).toHaveBeenCalledWith("contact-1");
+    expect(port.setClientAttentionReason).toHaveBeenCalledWith("client-1", ATTENTION_REASON.opt_out);
+  });
+
+  it("flat activity.spam_complaint → resolves by message_id, opt-out + attention(spam_complaint)", async () => {
+    const find = vi.fn(async () => ({ id: "comm-real", client_id: "client-1", subscriber_id: "sub-1" }));
+    const port = makePort({ findCommunicationByMessageId: find });
+    const out = await processMailersendEvent(event("activity.spam_complaint", REAL_MESSAGE_ID), port);
+    expect(out).toBe("opt_out");
+    expect(find).toHaveBeenCalledWith(REAL_MESSAGE_ID);
+    expect(port.setContactOptOutEmail).toHaveBeenCalledWith("contact-1");
+    expect(port.setClientAttentionReason).toHaveBeenCalledWith(
+      "client-1",
+      ATTENTION_REASON.spam_complaint,
+    );
+  });
+});
+
+describe("POST — real activity.delivered payload (end-to-end)", () => {
+  it("validly signed → 200, then communications status updated to delivered", async () => {
+    process.env.MAILERSEND_WEBHOOK_SECRET = SECRET;
+    const calls = installFakeDb({
+      comm: { id: "comm-real", client_id: "client-1", subscriber_id: "sub-1" },
+    });
+    const raw = JSON.stringify(realDelivered);
+    const res = await POST(makeReq(raw, sign(raw)));
+    expect(res.status).toBe(200);
+    expect(h.pending).toHaveLength(1);
+    await Promise.all(h.pending);
+    const upd = calls.find((c) => c.table === "communications" && c.op === "update");
+    expect(upd?.patch).toMatchObject({ status: "delivered" });
+    expect(upd?.patch?.delivered_at).toEqual(expect.any(String));
   });
 });
