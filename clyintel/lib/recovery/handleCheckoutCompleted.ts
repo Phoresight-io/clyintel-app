@@ -217,7 +217,7 @@ export async function handleRecoveryCheckoutCompleted(
   //       thrown error is an infra fault (DB/lookup); the link is already paid,
   //       so log and swallow rather than bubbling into waitUntil. ──────────────
   try {
-    const deps = createLiveCaptureDeps();
+    const deps = createLiveCaptureDeps({ paymentAt: event.capturedAt, source: event.source });
     const result = await processCaptureEvent(event, deps);
     console.log(
       `stripe-webhook: recovery capture for link ${link.id} (event=${eventId}) → ${JSON.stringify(result)}`,

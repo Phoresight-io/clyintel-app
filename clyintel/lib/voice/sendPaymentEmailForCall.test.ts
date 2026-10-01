@@ -8,7 +8,12 @@ import {
   type PaymentEmailPort,
 } from "./sendPaymentEmailForCall";
 import type { HandoffCall } from "./handoffEmail";
-import type { SendEmailStepContext, SendEmailStepResult } from "../outreach/sendEmailStep";
+import {
+  sendEmailStep as realSendEmailStep,
+  type SendEmailPort,
+  type SendEmailStepContext,
+  type SendEmailStepResult,
+} from "../outreach/sendEmailStep";
 import type { ContactRow } from "../outreach/selectRecipients";
 
 const CALL_ID = "vc-1";
@@ -46,6 +51,7 @@ const baseCall = (over: Partial<HandoffCall> = {}): HandoffCall => ({
   client_id: CLIENT,
   invoice_id: "inv-1",
   outcome: null, // mid-call
+  is_test: false, // a live (non-test) call unless a test says otherwise
   invoice_outstanding_cents: 27000,
   ...over,
 });
@@ -185,6 +191,7 @@ describe("5. target priority → the recipient override passed to sendEmailStep"
       invoiceId: "inv-1",
       recipient: { email: "new@example.com" },
       clientOptOutEmail: false,
+      suppressOutreachStamp: false, // live call → the send may stamp outreach
     });
   });
 
@@ -331,5 +338,60 @@ describe("pure helpers", () => {
       recipient: { contactId: "c-dun" },
       toAddress: "ap@acme.com",
     });
+  });
+});
+
+// ── Test calls never count as outreach — not even emails sent from inside them ──
+// These run the REAL sendEmailStep (live mode) over a fake SendEmailPort, so the
+// assertion is on whether the invoice's outreach marker actually gets stamped.
+describe("outreach stamp for in-call emails", () => {
+  function realStepPort() {
+    const sendPort: SendEmailPort = {
+      loadRecipientContact: vi.fn(async () => DUNNING),
+      loadActiveSystemDefaultEmailTemplate: vi.fn(async () => ({ id: "tpl-1", subject: "Invoice", body: "Pay: {{payment_link}}" }) as never),
+      loadRenderVars: vi.fn(async () => ({
+        client_name: "Acme", contact_name: "", invoice_number: "1010", amount_due: "$375.00",
+        due_date: "2026-08-01", invoice_date: "2026-07-01", subscriber_name: "Phoresight", payment_link: "https://pay.example/x",
+      })),
+      loadExistingAttemptNumbers: vi.fn(async () => [] as number[]),
+      insertPendingCommunication: vi.fn(async () => "comm-1"),
+      finalizeCommunication: vi.fn(async () => {}),
+      insertRecoveryAttempt: vi.fn(async () => "ra-1"),
+      dispatchEmail: vi.fn(async () => ({ messageId: "ms-1" })),
+      markOutreachStarted: vi.fn(async () => {}),
+      now: () => NOW,
+    };
+    return sendPort;
+  }
+
+  it("in-call email during a TEST call → email still sent, NO outreach stamp", async () => {
+    const sendPort = realStepPort();
+    const { port } = fakePort({
+      call: baseCall({ is_test: true }),
+      step: (ctx, mode) => realSendEmailStep(ctx, mode as "live", sendPort),
+    });
+    const res = await run(port);
+    expect(res).toMatchObject({ action: "sent" });
+    expect(sendPort.dispatchEmail).toHaveBeenCalledOnce(); // the email itself is unchanged
+    expect(port.sendEmailStep.mock.calls[0][0].suppressOutreachStamp).toBe(true);
+    expect(sendPort.markOutreachStarted).not.toHaveBeenCalled();
+  });
+
+  it("in-call email during a LIVE call → email sent AND outreach stamped with sent_at", async () => {
+    const sendPort = realStepPort();
+    const { port } = fakePort({
+      call: baseCall({ is_test: false }),
+      step: (ctx, mode) => realSendEmailStep(ctx, mode as "live", sendPort),
+    });
+    const res = await run(port);
+    expect(res).toMatchObject({ action: "sent" });
+    expect(sendPort.dispatchEmail).toHaveBeenCalledOnce();
+    expect(sendPort.markOutreachStarted).toHaveBeenCalledWith("inv-1", NOW);
+  });
+
+  it("is_test missing on the call record → fail closed (no stamp)", async () => {
+    const { port } = fakePort({ call: { ...baseCall(), is_test: undefined as unknown as boolean } });
+    await run(port);
+    expect(port.sendEmailStep.mock.calls[0][0].suppressOutreachStamp).toBe(true);
   });
 });

@@ -8,12 +8,11 @@ import type { SendEmailStepContext } from "@/lib/outreach/sendEmailStep";
 // registers no cron. Same testability convention as sendEmailStep: no I/O and no
 // clock in this module — `now` is injected, all DB access goes through a Port.
 //
-// It SUPERSEDES lib/outreach/eligibility.ts's selection and must NOT call it:
-//   - eligibility.ts: past-due = `due_date < now` at TIMESTAMP granularity; one
-//     attempt per invoice ever; writes a SIMULATION recovery_attempts row directly.
-//   - runCadence:      past-due = `due_date < today` at DATE granularity (below);
-//     business-day cadence entry; a multi-step walk; terminus-checked first; and it
-//     drives sendEmailStep (real recorded dry-run rows), never SIMULATION rows.
+// It SUPERSEDED the Brick-A eligibility stub (lib/outreach/eligibility.ts, since
+// removed), which wrote a SIMULATION recovery_attempts row per past-due invoice on
+// every QBO sync. runCadence: past-due = `due_date < today` at DATE granularity
+// (below); business-day cadence entry; a multi-step walk; terminus-checked first;
+// and it drives sendEmailStep (real recorded dry-run rows), never SIMULATION rows.
 // The old SIMULATION rows remain as historical artifacts; this engine ignores them.
 
 // ── Canonical "today" — UTC SEAM (grounded 2026-08-27) ───────────────────────
@@ -57,7 +56,7 @@ export function isTerminated(inv: {
 // ── Past-due at DATE granularity (canonical convention) ──────────────────────
 // due_date STRICTLY before today → past due. `due_date == today` is NOT yet past
 // due (this closes the ledger's `due==today` item). Null due_date → not past due
-// (fail closed, same posture as eligibility.ts). due_date is a DATE column, so it
+// (fail closed). due_date is a DATE column, so it
 // arrives as 'YYYY-MM-DD'; lexicographic compare of ISO dates is chronological.
 export function isPastDue(dueDate: string | null, today: string): boolean {
   if (!dueDate) return false;

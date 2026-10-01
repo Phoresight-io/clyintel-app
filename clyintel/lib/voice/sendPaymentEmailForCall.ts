@@ -190,6 +190,10 @@ export async function sendPaymentEmailForCall(
           invoiceId: call.invoice_id,
           recipient: target.recipient,
           clientOptOutEmail: emailCtx.clientOptOutEmail ?? undefined,
+          // A test call is never outreach, nor is an email sent from inside one:
+          // the email still sends, but the invoice's outreach marker is not
+          // stamped. Fail closed — anything but an explicit false suppresses.
+          suppressOutreachStamp: call.is_test !== false,
         },
         args.mode,
       );

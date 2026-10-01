@@ -16,6 +16,7 @@ vi.mock("../qbo/client", () => ({}));
 import { handleRecoveryCheckoutCompleted } from "./handleCheckoutCompleted";
 import { getSupabase } from "../supabase";
 import { processCaptureEvent } from "../capture/processCaptureEvent";
+import { createLiveCaptureDeps } from "../capture/captureDepsLive";
 
 type Result = { data: unknown; error: unknown };
 
@@ -101,6 +102,12 @@ describe("handleRecoveryCheckoutCompleted", () => {
       dollarsRecovered: 3900, // amount_total / 100
       invoicePastDue: true, // due_date 2026-05-01 < capturedAt 2026-06-28
       capturedAt: "2026-06-28T00:00:00.000Z",
+    });
+    // Deps are built for THIS payment: the outreach gate cuts off at the real
+    // Stripe event time.
+    expect(createLiveCaptureDeps).toHaveBeenCalledWith({
+      paymentAt: "2026-06-28T00:00:00.000Z",
+      source: "stripe_recovery",
     });
   });
 

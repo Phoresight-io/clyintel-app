@@ -62,6 +62,7 @@ function makePort(over: Partial<SendEmailPort> = {}): SendEmailPort {
     finalizeCommunication: vi.fn(async () => {}),
     insertRecoveryAttempt: vi.fn(async () => "ra-1"),
     dispatchEmail: vi.fn(async () => ({ messageId: "ms-123" })),
+    markOutreachStarted: vi.fn(async () => {}),
     now: () => "2026-07-04T00:00:00.000Z",
     ...over,
   };
@@ -152,6 +153,7 @@ describe("sendEmailStep — dry-run", () => {
     const res = await sendEmailStep(CTX, "dry_run", port);
 
     expect(port.dispatchEmail).not.toHaveBeenCalled(); // core dry-run guarantee
+    expect(port.markOutreachStarted).not.toHaveBeenCalled(); // a dry run is never outreach
     expect(port.insertPendingCommunication).toHaveBeenCalledOnce();
     expect(port.finalizeCommunication).toHaveBeenCalledWith("comm-1", {
       status: COMM_STATUS.wouldSend,
@@ -194,6 +196,32 @@ describe("sendEmailStep — live", () => {
     expect(raArg.attempt_number).toBe(2); // one past the simulation row
     expect(res.outcome).toBe("sent");
     expect(res.mailersendMessageId).toBe("ms-123");
+    // MailerSend accepted → the invoice's outreach-started marker is stamped with sent_at.
+    expect(port.markOutreachStarted).toHaveBeenCalledOnce();
+    expect(port.markOutreachStarted).toHaveBeenCalledWith("inv-1", "2026-07-04T00:00:00.000Z");
+  });
+
+  it("suppressOutreachStamp (email from inside a test call) → sent as usual, NO stamp", async () => {
+    const port = makePort();
+    const res = await sendEmailStep({ ...CTX, suppressOutreachStamp: true }, "live", port);
+    expect(res.outcome).toBe("sent");
+    expect(port.dispatchEmail).toHaveBeenCalledOnce();
+    expect(port.markOutreachStarted).not.toHaveBeenCalled();
+  });
+
+  it("stamp failure never fails the send (still sent, records still written)", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const port = makePort({
+      markOutreachStarted: vi.fn(async () => {
+        throw new Error("db down");
+      }),
+    });
+    const res = await sendEmailStep(CTX, "live", port);
+    expect(res.outcome).toBe("sent");
+    expect(port.finalizeCommunication).toHaveBeenCalledWith("comm-1", expect.objectContaining({ status: COMM_STATUS.sent }));
+    expect(port.insertRecoveryAttempt).toHaveBeenCalledOnce();
+    expect(errSpy).toHaveBeenCalled();
+    errSpy.mockRestore();
   });
 
   it("live send failure → communications failed, recovery failed + not counted, no throw", async () => {
@@ -213,6 +241,7 @@ describe("sendEmailStep — live", () => {
       .calls[0][0] as { status: string; counted_toward_limit: boolean };
     expect(raArg.status).toBe("failed"); // C1: a failed send is recorded as failed, not scheduled
     expect(raArg.counted_toward_limit).toBe(false); // C1: nothing sent → does not count
+    expect(port.markOutreachStarted).not.toHaveBeenCalled(); // provider rejected → no outreach
   });
 });
 

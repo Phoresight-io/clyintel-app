@@ -53,11 +53,11 @@ export async function reconcileInvoiceFromCapture(
   const { subscriberId, qboInvoiceId, invoiceFaceCents, invoiceBalanceCents, dueDate } = input;
 
   // 1. Resolve the local invoice row (subscriber-scoped, source='qbo'). Read the
-  //    CURRENT outstanding + reminder_count BEFORE overwriting them — the pre-
+  //    CURRENT outstanding + outreach_started_at BEFORE overwriting them — the pre-
   //    update outstanding is the balance-drop anchor of last resort.
   const { data: inv, error: invErr } = await service
     .from("invoices")
-    .select("id, amount_outstanding_cents, reminder_count")
+    .select("id, amount_outstanding_cents, outreach_started_at")
     .eq("subscriber_id", subscriberId)
     .eq("source", "qbo")
     .eq("external_id", qboInvoiceId)
@@ -121,7 +121,7 @@ export async function reconcileInvoiceFromCapture(
     source: "qbo",
     prevOutstandingCents,
     newOutstandingCents,
-    reminderCount: inv.reminder_count ?? 0,
+    outreachStartedAt: inv.outreach_started_at ?? null,
     syncedAt: now.toISOString(),
   });
   let balanceEventEmitted = false;

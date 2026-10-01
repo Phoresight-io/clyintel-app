@@ -10,7 +10,6 @@ export interface QboSyncResult {
   customersUpserted: number;
   invoicesUpserted: number;
   invoicesSkipped: number;
-  outreachAttemptsCreated: number;
   balanceEventsEmitted: number;
 }
 
@@ -32,7 +31,6 @@ export async function syncQbo(): Promise<QboSyncResult> {
     customersUpserted: data.customersUpserted ?? 0,
     invoicesUpserted: data.invoicesUpserted ?? 0,
     invoicesSkipped: data.invoicesSkipped ?? 0,
-    outreachAttemptsCreated: data.outreachAttemptsCreated ?? 0,
     balanceEventsEmitted: data.balanceEventsEmitted ?? 0,
   };
 }

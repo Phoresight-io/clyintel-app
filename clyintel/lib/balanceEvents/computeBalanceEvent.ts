@@ -23,10 +23,13 @@ export interface ComputeBalanceEventInput {
   // Outstanding as of this sync.
   newOutstandingCents: number;
 
-  // reminder_count at emission time. Drives BOTH emission-time booleans.
-  reminderCount: number;
+  // invoices.outreach_started_at at emission time (the write-once first-real-
+  // contact marker, any channel), or null when no outreach has started. Drives
+  // BOTH emission-time booleans.
+  outreachStartedAt: string | null;
 
-  // ISO timestamp of this sync, recorded in evidence for audit / re-derivation.
+  // ISO timestamp of this sync — the moment the drop was DETECTED. Recorded in
+  // evidence, and the cut-off the outreach marker is compared against.
   syncedAt: string;
 }
 
@@ -45,7 +48,22 @@ export interface BalanceEventRow {
     prevOutstandingCents: number;
     newOutstandingCents: number;
     syncedAt: string;
+    outreachStartedAt: string | null;
   };
+}
+
+/**
+ * LOCKED RULE: outreach on ANY channel started on the invoice before the payment
+ * → billable; otherwise not. No time window. True iff the marker is set AND it is
+ * at or before `cutoff`. Fail closed: a missing or unparseable timestamp on either
+ * side is "not started".
+ */
+export function outreachStartedBy(outreachStartedAt: string | null, cutoff: string): boolean {
+  if (outreachStartedAt == null) return false;
+  const started = Date.parse(outreachStartedAt);
+  const cut = Date.parse(cutoff);
+  if (Number.isNaN(started) || Number.isNaN(cut)) return false;
+  return started <= cut;
 }
 
 export function computeBalanceEvent(
@@ -57,7 +75,7 @@ export function computeBalanceEvent(
     source,
     prevOutstandingCents,
     newOutstandingCents,
-    reminderCount,
+    outreachStartedAt,
     syncedAt,
   } = input;
 
@@ -77,9 +95,10 @@ export function computeBalanceEvent(
   // prev > new here, so delta > 0 and both CHECK constraints hold.
   const deltaCents = prevOutstandingCents - newOutstandingCents;
 
-  // Emission-time evaluation: whether outreach had fired by the time we observed
-  // this drop. For the beta, fee eligibility mirrors it exactly.
-  const outreachHadFired = reminderCount > 0;
+  // Emission-time evaluation: whether outreach had started by the time we observed
+  // this drop (detection time is the only payment-time bound available here). Fee
+  // eligibility mirrors it exactly.
+  const outreachHadFired = outreachStartedBy(outreachStartedAt, syncedAt);
 
   return {
     subscriber_id: subscriberId,
@@ -94,6 +113,7 @@ export function computeBalanceEvent(
       prevOutstandingCents,
       newOutstandingCents,
       syncedAt,
+      outreachStartedAt,
     },
   };
 }
