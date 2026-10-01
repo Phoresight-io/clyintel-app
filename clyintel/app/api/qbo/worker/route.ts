@@ -82,11 +82,15 @@ async function runWorker(req: NextRequest) {
     return new NextResponse("server error", { status: 500 });
   }
 
-  const deps = createLiveCaptureDeps();
   const batchDeps = {
     handlers: HANDLERS,
+    // Deps are built PER EVENT so the outreach gate knows this payment's time
+    // (the frozen core's getInvoiceAttribution doesn't receive it).
     runCore: (event: Parameters<typeof processCaptureEvent>[0]) =>
-      processCaptureEvent(event, deps),
+      processCaptureEvent(
+        event,
+        createLiveCaptureDeps({ paymentAt: event.capturedAt, source: event.source }),
+      ),
     nowIso: () => new Date().toISOString(),
   };
 

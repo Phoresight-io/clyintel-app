@@ -882,6 +882,7 @@ export type Database = {
           issue_date: string | null
           last_reminder_at: string | null
           line_items: Json | null
+          outreach_started_at: string | null
           raw_source_data: Json | null
           recovery_started_at: string | null
           reminder_count: number
@@ -907,6 +908,7 @@ export type Database = {
           issue_date?: string | null
           last_reminder_at?: string | null
           line_items?: Json | null
+          outreach_started_at?: string | null
           raw_source_data?: Json | null
           recovery_started_at?: string | null
           reminder_count?: number
@@ -932,6 +934,7 @@ export type Database = {
           issue_date?: string | null
           last_reminder_at?: string | null
           line_items?: Json | null
+          outreach_started_at?: string | null
           raw_source_data?: Json | null
           recovery_started_at?: string | null
           reminder_count?: number
@@ -1725,6 +1728,7 @@ export type Database = {
           handoff_email_status: string | null
           id: string
           invoice_id: string | null
+          is_test: boolean
           outcome: string | null
           payment_committed: boolean
           recording_url: string | null
@@ -1754,6 +1758,7 @@ export type Database = {
           handoff_email_status?: string | null
           id?: string
           invoice_id?: string | null
+          is_test?: boolean
           outcome?: string | null
           payment_committed?: boolean
           recording_url?: string | null
@@ -1783,6 +1788,7 @@ export type Database = {
           handoff_email_status?: string | null
           id?: string
           invoice_id?: string | null
+          is_test?: boolean
           outcome?: string | null
           payment_committed?: boolean
           recording_url?: string | null

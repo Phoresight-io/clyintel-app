@@ -48,6 +48,9 @@ export interface HandoffCall {
   client_id: string;
   invoice_id: string | null;
   outcome: string | null;
+  // voice_calls.is_test: a test-mode call. Emails sent from inside one still send
+  // but never stamp outreach_started_at.
+  is_test: boolean;
   // The linked invoice's amount_outstanding_cents (null when no invoice).
   invoice_outstanding_cents: number | null;
 }
@@ -85,7 +88,7 @@ export function createHandoffPort(service: SupabaseClient<Database>): HandoffPor
     async loadCall(voiceCallId) {
       const { data, error } = await service
         .from("voice_calls")
-        .select("id, subscriber_id, client_id, invoice_id, outcome, invoices(amount_outstanding_cents)")
+        .select("id, subscriber_id, client_id, invoice_id, outcome, is_test, invoices(amount_outstanding_cents)")
         .eq("id", voiceCallId)
         .maybeSingle();
       if (error) throw new Error(`voice/handoff: voice_calls load failed: ${error.message}`);
@@ -101,6 +104,7 @@ export function createHandoffPort(service: SupabaseClient<Database>): HandoffPor
         client_id: data.client_id,
         invoice_id: data.invoice_id,
         outcome: data.outcome,
+        is_test: data.is_test,
         invoice_outstanding_cents: one?.amount_outstanding_cents ?? null,
       };
     },

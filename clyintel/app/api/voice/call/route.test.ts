@@ -2,11 +2,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Route: server-built variables are merged under body.variables (caller wins),
 // and a build failure never blocks the call.
+const inserts: Array<Record<string, unknown>> = [];
 vi.mock("@/lib/supabase", () => ({
   getSupabase: () => ({
     from: () => {
       const b: Record<string, unknown> = {};
-      for (const m of ["insert", "select", "update", "eq"]) b[m] = () => b;
+      for (const m of ["select", "update", "eq"]) b[m] = () => b;
+      b.insert = (row: Record<string, unknown>) => {
+        inserts.push(row);
+        return b;
+      };
       b.single = async () => ({ data: { id: "vc-1" }, error: null });
       b.then = (resolve: (v: unknown) => void) => resolve({ data: null, error: null });
       return b;
@@ -17,6 +22,11 @@ vi.mock("@/lib/supabase", () => ({
 const build = vi.fn();
 vi.mock("@/lib/voice/buildCallVariables", () => ({
   buildCallVariables: (...a: unknown[]) => build(...a),
+}));
+
+const stamp = vi.fn(async () => "stamped");
+vi.mock("@/lib/outreach/markOutreachStarted", () => ({
+  markOutreachStarted: (...a: unknown[]) => stamp(...(a as [])),
 }));
 
 import { POST } from "./route";
@@ -30,6 +40,8 @@ const sentVariables = () => JSON.parse(fetchMock.mock.calls[0][1].body).assistan
 
 beforeEach(() => {
   build.mockReset();
+  stamp.mockClear();
+  inserts.length = 0;
   fetchMock.mockReset();
   fetchMock.mockResolvedValue({ ok: true, status: 201, json: async () => ({ id: "vapi-1" }) });
   vi.stubGlobal("fetch", fetchMock);
@@ -90,5 +102,60 @@ describe("voice/call — server-built variables", () => {
     const res = await POST(req(baseBody));
     expect(res.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("voice/call — outreach-started stamp", () => {
+  it("Vapi accepted (200) → stamps the invoice once, channel voice, with an ISO started_at", async () => {
+    build.mockResolvedValue({});
+    const res = await POST(req(baseBody));
+    expect(res.status).toBe(200);
+    expect(stamp).toHaveBeenCalledOnce();
+    const [, invoiceId, startedAt, channel] = stamp.mock.calls[0] as unknown as [unknown, string, string, string];
+    expect(invoiceId).toBe("inv");
+    expect(channel).toBe("voice");
+    expect(Number.isNaN(Date.parse(startedAt))).toBe(false);
+  });
+
+  it("test mode (test: true) → call placed but NO stamp (test calls are not outreach)", async () => {
+    vi.stubEnv("VAPI_ASSISTANT_ID_TEST", "a-test");
+    build.mockResolvedValue({});
+    const res = await POST(req({ ...baseBody, test: true }));
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).assistantId).toBe("a-test");
+    expect(stamp).not.toHaveBeenCalled();
+  });
+
+  it("route writes is_test from the request's test flag (false by default, true in test mode)", async () => {
+    vi.stubEnv("VAPI_ASSISTANT_ID_TEST", "a-test");
+    build.mockResolvedValue({});
+    await POST(req(baseBody));
+    await POST(req({ ...baseBody, test: true }));
+    await POST(req({ ...baseBody, test: "yes" })); // only a strict true is test mode
+    expect(inserts.map((r) => r.is_test)).toEqual([false, true, false]);
+  });
+
+  it("Vapi rejected the call → no stamp (nothing was placed)", async () => {
+    build.mockResolvedValue({});
+    fetchMock.mockResolvedValue({ ok: false, status: 400, json: async () => ({ message: "bad number" }) });
+    const res = await POST(req(baseBody));
+    expect(res.status).toBe(502);
+    expect(stamp).not.toHaveBeenCalled();
+  });
+
+  it("network error reaching Vapi → no stamp", async () => {
+    build.mockResolvedValue({});
+    fetchMock.mockRejectedValue(new Error("ECONNRESET"));
+    const res = await POST(req(baseBody));
+    expect(res.status).toBe(502);
+    expect(stamp).not.toHaveBeenCalled();
+  });
+
+  it("validation failure (missing invoiceId) → no stamp", async () => {
+    const { invoiceId: _omit, ...noInvoice } = baseBody;
+    void _omit;
+    await POST(req(noInvoice));
+    expect(stamp).not.toHaveBeenCalled();
   });
 });
