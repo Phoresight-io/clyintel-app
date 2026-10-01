@@ -111,7 +111,12 @@ export interface RowHandler {
   buildEvent(
     realmId: string,
     paymentId: string,
-  ): Promise<{ event: CaptureEvent; reconcileInput: ReconcileInput }>;
+  ): Promise<{
+    event: CaptureEvent;
+    reconcileInput: ReconcileInput;
+    /** QBO Payment MetaData.CreateTime (fee-gate payment time) or null. */
+    paymentRecordedAt: string | null;
+  }>;
   /**
    * Reconcile the local operational tables to the captured payment. Called AFTER
    * a non-'rejected' capture. Optional: a source with no local invoice to
@@ -140,7 +145,15 @@ export interface RowUpdate {
 export interface RowProcessDeps {
   /** Source slug → handler. Unknown source → thrown error → failure path. */
   handlers: Record<string, RowHandler>;
-  runCore: (event: CaptureEvent) => Promise<CaptureResult>;
+  /**
+   * Run the frozen core for ONE payment. `payment` carries the times the fee
+   * gate needs; the route builds a fresh CaptureDeps per call from them (the
+   * frozen core never passes payment time into getInvoiceAttribution).
+   */
+  runCore: (
+    event: CaptureEvent,
+    payment: { paymentRecordedAt: string | null },
+  ) => Promise<CaptureResult>;
   nowIso: () => string;
 }
 
@@ -178,8 +191,8 @@ export async function processWebhookEventRow(
 
     const outcomes: string[] = [];
     for (const { realmId, paymentId } of entities) {
-      const { event, reconcileInput } = await handler.buildEvent(realmId, paymentId);
-      const result = await runCore(event);
+      const { event, reconcileInput, paymentRecordedAt } = await handler.buildEvent(realmId, paymentId);
+      const result = await runCore(event, { paymentRecordedAt });
       outcomes.push(summarizeResult(result));
 
       // Reconcile the local invoice to reality on any capture that isn't

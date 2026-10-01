@@ -82,11 +82,22 @@ async function runWorker(req: NextRequest) {
     return new NextResponse("server error", { status: 500 });
   }
 
-  const deps = createLiveCaptureDeps();
+  // CaptureDeps are built PER PAYMENT (not per batch): the fee gate compares the
+  // invoice's outreach marker against THIS payment's time — QBO CreateTime,
+  // else TxnDate (event.capturedAt). Neither → no fee.
   const batchDeps = {
     handlers: HANDLERS,
-    runCore: (event: Parameters<typeof processCaptureEvent>[0]) =>
-      processCaptureEvent(event, deps),
+    runCore: (
+      event: Parameters<typeof processCaptureEvent>[0],
+      payment: { paymentRecordedAt: string | null },
+    ) =>
+      processCaptureEvent(
+        event,
+        createLiveCaptureDeps({
+          paymentRecordedAt: payment.paymentRecordedAt,
+          paymentTxnDate: event.capturedAt,
+        }),
+      ),
     nowIso: () => new Date().toISOString(),
   };
 

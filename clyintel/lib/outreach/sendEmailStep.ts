@@ -8,6 +8,7 @@ import {
   type ContactRow,
 } from "@/lib/outreach/selectRecipients";
 import { isChannelAllowed } from "@/lib/outreach/isChannelAllowed";
+import { markOutreachStarted } from "@/lib/outreach/markOutreachStarted";
 import type { Database } from "@/types/supabase";
 
 // Recorded, gated, DRY-RUN-FIRST email send step (Brick 1a).
@@ -247,6 +248,8 @@ export interface SendEmailPort {
     text: string;
     html: string;
   }): Promise<{ messageId: string | null }>;
+  // Write-once invoices.outreach_started_at stamp (fee gate). Must never throw.
+  markOutreachStarted(args: { subscriberId: string; invoiceId: string; startedAt: string }): Promise<void>;
   now(): string; // ISO timestamp (injectable for deterministic tests)
 }
 
@@ -355,6 +358,21 @@ export async function sendEmailStep(
     mailersend_message_id: messageId,
     sent_at: sentAt,
   });
+
+  // Fee-gate outreach marker (locked rule: email counts when the live send
+  // succeeded AND MailerSend returned a message id). Write-once; a failure is
+  // logged and never fails the send — the schema backfill covers gaps.
+  if (outcome === "sent" && messageId && sentAt) {
+    try {
+      await port.markOutreachStarted({
+        subscriberId: ctx.subscriberId,
+        invoiceId: ctx.invoiceId,
+        startedAt: sentAt,
+      });
+    } catch (err) {
+      console.error(`sendEmailStep: outreach marker failed for invoice ${ctx.invoiceId}`, err);
+    }
+  }
 
   // Link a fresh REAL recovery_attempts row. Status + counting are decided HERE,
   // by outcome, and passed explicitly to the port (the rule lives with the
@@ -526,6 +544,9 @@ function createDefaultPort(): SendEmailPort {
     },
     async dispatchEmail(params) {
       return sendEmail({ to: params.to, subject: params.subject, text: params.text, html: params.html });
+    },
+    async markOutreachStarted(args) {
+      await markOutreachStarted(service, args);
     },
     now() {
       return new Date().toISOString();

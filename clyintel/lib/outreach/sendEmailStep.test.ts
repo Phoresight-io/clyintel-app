@@ -62,6 +62,7 @@ function makePort(over: Partial<SendEmailPort> = {}): SendEmailPort {
     finalizeCommunication: vi.fn(async () => {}),
     insertRecoveryAttempt: vi.fn(async () => "ra-1"),
     dispatchEmail: vi.fn(async () => ({ messageId: "ms-123" })),
+    markOutreachStarted: vi.fn(async () => {}),
     now: () => "2026-07-04T00:00:00.000Z",
     ...over,
   };
@@ -213,6 +214,56 @@ describe("sendEmailStep — live", () => {
       .calls[0][0] as { status: string; counted_toward_limit: boolean };
     expect(raArg.status).toBe("failed"); // C1: a failed send is recorded as failed, not scheduled
     expect(raArg.counted_toward_limit).toBe(false); // C1: nothing sent → does not count
+  });
+});
+
+// ── Fee-gate outreach marker (invoices.outreach_started_at) ────────────────
+describe("sendEmailStep — outreach marker", () => {
+  it("live 'sent' with a MailerSend id → marker stamped once with the send time", async () => {
+    const port = makePort();
+    await sendEmailStep(CTX, "live", port);
+    expect(port.markOutreachStarted).toHaveBeenCalledOnce();
+    expect(port.markOutreachStarted).toHaveBeenCalledWith({
+      subscriberId: "sub-1",
+      invoiceId: "inv-1",
+      startedAt: "2026-07-04T00:00:00.000Z",
+    });
+  });
+
+  it("live 'sent' but MailerSend returned NO message id → no marker (locked rule needs the id)", async () => {
+    const port = makePort({ dispatchEmail: vi.fn(async () => ({ messageId: null })) });
+    const res = await sendEmailStep(CTX, "live", port);
+    expect(res.outcome).toBe("sent");
+    expect(port.markOutreachStarted).not.toHaveBeenCalled();
+  });
+
+  it("dry-run (would_send) → no marker", async () => {
+    const port = makePort();
+    await sendEmailStep(CTX, "dry_run", port);
+    expect(port.markOutreachStarted).not.toHaveBeenCalled();
+  });
+
+  it("live send failure → no marker", async () => {
+    const port = makePort({ dispatchEmail: vi.fn(async () => { throw new Error("MailerSend 422"); }) });
+    await sendEmailStep(CTX, "live", port);
+    expect(port.markOutreachStarted).not.toHaveBeenCalled();
+  });
+
+  it("gated no-op (opt-out) → no marker", async () => {
+    const port = makePort({ loadRecipientContact: vi.fn(async () => contact({ opt_out_email: true })) });
+    await sendEmailStep(CTX, "live", port);
+    expect(port.markOutreachStarted).not.toHaveBeenCalled();
+  });
+
+  it("a marker failure does NOT fail the send — result and recovery attempt are unchanged", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const port = makePort({ markOutreachStarted: vi.fn(async () => { throw new Error("db down"); }) });
+    const res = await sendEmailStep(CTX, "live", port);
+    expect(res.outcome).toBe("sent");
+    expect(res.recoveryAttemptId).toBe("ra-1");
+    expect(port.insertRecoveryAttempt).toHaveBeenCalledOnce();
+    expect(err).toHaveBeenCalled();
+    err.mockRestore();
   });
 });
 

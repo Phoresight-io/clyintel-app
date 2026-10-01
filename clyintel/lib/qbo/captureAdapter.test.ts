@@ -10,7 +10,7 @@ vi.mock("./client", () => ({
   linkedInvoiceIds: vi.fn(),
 }));
 
-import { buildCaptureEventFromPayment, resolveInvoicePastDue } from "./captureAdapter";
+import { buildCaptureEventFromPayment, readPaymentCreateTime, resolveInvoicePastDue } from "./captureAdapter";
 import { getSupabase } from "../supabase";
 import { getValidAccessToken } from "./tokens";
 import { getPayment, getInvoice, linkedInvoiceIds } from "./client";
@@ -53,7 +53,7 @@ beforeEach(() => {
 
 describe("buildCaptureEventFromPayment", () => {
   it("happy path → fully-populated CaptureEvent + reconcileInput with correct mapping", async () => {
-    const { event, reconcileInput } = await buildCaptureEventFromPayment(REALM, PAYMENT_ID);
+    const { event, reconcileInput, paymentRecordedAt } = await buildCaptureEventFromPayment(REALM, PAYMENT_ID);
 
     expect(event).toEqual({
       source: "qbo",
@@ -73,13 +73,31 @@ describe("buildCaptureEventFromPayment", () => {
       invoiceFaceCents: 120000, // TotalAmt 1200 → cents
       invoiceBalanceCents: 120000, // Balance 1200 → cents
       dueDate: "2026-05-01",
+      // Base fixture has no raw.MetaData → no CreateTime → TxnDate fallback only.
+      paymentRecordedAt: null,
+      paymentTxnDate: "2026-06-28T00:00:00.000Z",
     });
+    expect(paymentRecordedAt).toBeNull();
 
     // Provider filter is 'quickbooks'; token fetched with the resolved subscriber.
     expect(getValidAccessToken).toHaveBeenCalledWith("sub_1");
     // The 4th arg is the injected force-refresh callback (reactive-401 recovery).
     expect(getPayment).toHaveBeenCalledWith(REALM, PAYMENT_ID, "tok", expect.any(Function));
     expect(getInvoice).toHaveBeenCalledWith(REALM, "130", "tok", expect.any(Function));
+  });
+
+  it("payment raw.MetaData.CreateTime → returned as paymentRecordedAt AND carried on reconcileInput", async () => {
+    vi.mocked(getPayment).mockResolvedValue({
+      Id: "500",
+      TotalAmt: 1200,
+      TxnDate: "2026-06-28",
+      raw: { MetaData: { CreateTime: "2026-06-28T10:15:00-07:00", LastUpdatedTime: "2026-06-29T00:00:00-07:00" } },
+    });
+    const { event, reconcileInput, paymentRecordedAt } = await buildCaptureEventFromPayment(REALM, PAYMENT_ID);
+    expect(paymentRecordedAt).toBe("2026-06-28T10:15:00-07:00");
+    expect(reconcileInput.paymentRecordedAt).toBe("2026-06-28T10:15:00-07:00");
+    // The frozen CaptureEvent shape is unchanged — CreateTime never rides on it.
+    expect(event).not.toHaveProperty("paymentRecordedAt");
   });
 
   it("invoicePastDue false when DueDate >= TxnDate", async () => {
@@ -149,5 +167,23 @@ describe("resolveInvoicePastDue (pure helper)", () => {
   it("DueDate null/undefined → false", () => {
     expect(resolveInvoicePastDue(null, "2026-06-28")).toBe(false);
     expect(resolveInvoicePastDue(undefined, "2026-06-28")).toBe(false);
+  });
+});
+
+describe("readPaymentCreateTime", () => {
+  it("valid CreateTime → returned verbatim", () => {
+    expect(readPaymentCreateTime({ raw: { MetaData: { CreateTime: "2026-09-22T21:41:37-07:00" } } })).toBe(
+      "2026-09-22T21:41:37-07:00",
+    );
+  });
+  it("absent raw / MetaData / CreateTime → null", () => {
+    expect(readPaymentCreateTime({})).toBeNull();
+    expect(readPaymentCreateTime({ raw: {} })).toBeNull();
+    expect(readPaymentCreateTime({ raw: { MetaData: {} } })).toBeNull();
+    expect(readPaymentCreateTime({ raw: { MetaData: { CreateTime: "" } } })).toBeNull();
+  });
+  it("malformed / non-string CreateTime → null (gate falls back to TxnDate)", () => {
+    expect(readPaymentCreateTime({ raw: { MetaData: { CreateTime: "not-a-date" } } })).toBeNull();
+    expect(readPaymentCreateTime({ raw: { MetaData: { CreateTime: 1727000000 } } })).toBeNull();
   });
 });

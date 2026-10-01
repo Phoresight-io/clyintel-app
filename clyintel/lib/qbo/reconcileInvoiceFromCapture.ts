@@ -35,6 +35,10 @@ export interface ReconcileInput {
   invoiceBalanceCents: number;
   /** invoice.DueDate (YYYY-MM-DD) or null. */
   dueDate: string | null;
+  /** QBO Payment MetaData.CreateTime (when the payment was recorded) or null. */
+  paymentRecordedAt: string | null;
+  /** The payment's TxnDate (as CaptureEvent.capturedAt) or null. Fallback only. */
+  paymentTxnDate: string | null;
 }
 
 export type ReconcileStatus = "reconciled" | "invoice_not_found";
@@ -50,14 +54,22 @@ export async function reconcileInvoiceFromCapture(
   service: Pick<SupabaseClient, "from"> = getSupabase(),
   now: Date = new Date(),
 ): Promise<ReconcileResult> {
-  const { subscriberId, qboInvoiceId, invoiceFaceCents, invoiceBalanceCents, dueDate } = input;
+  const {
+    subscriberId,
+    qboInvoiceId,
+    invoiceFaceCents,
+    invoiceBalanceCents,
+    dueDate,
+    paymentRecordedAt,
+    paymentTxnDate,
+  } = input;
 
   // 1. Resolve the local invoice row (subscriber-scoped, source='qbo'). Read the
-  //    CURRENT outstanding + reminder_count BEFORE overwriting them — the pre-
+  //    CURRENT outstanding + outreach_started_at BEFORE overwriting them — the pre-
   //    update outstanding is the balance-drop anchor of last resort.
   const { data: inv, error: invErr } = await service
     .from("invoices")
-    .select("id, amount_outstanding_cents, reminder_count")
+    .select("id, amount_outstanding_cents, outreach_started_at")
     .eq("subscriber_id", subscriberId)
     .eq("source", "qbo")
     .eq("external_id", qboInvoiceId)
@@ -121,7 +133,10 @@ export async function reconcileInvoiceFromCapture(
     source: "qbo",
     prevOutstandingCents,
     newOutstandingCents,
-    reminderCount: inv.reminder_count ?? 0,
+    // Same payment times + marker the billing gate used → fee_eligible here
+    // agrees with the rev_share_ledger outcome for this payment.
+    outreachStartedAt: inv.outreach_started_at ?? null,
+    payment: { recordedAt: paymentRecordedAt, txnDate: paymentTxnDate },
     syncedAt: now.toISOString(),
   });
   let balanceEventEmitted = false;

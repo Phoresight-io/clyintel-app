@@ -8,7 +8,8 @@ import type { SendEmailStepContext } from "@/lib/outreach/sendEmailStep";
 // registers no cron. Same testability convention as sendEmailStep: no I/O and no
 // clock in this module — `now` is injected, all DB access goes through a Port.
 //
-// It SUPERSEDES lib/outreach/eligibility.ts's selection and must NOT call it:
+// It SUPERSEDED lib/outreach/eligibility.ts's selection (that Brick-A module was
+// removed in the fee-gate fix, 2026-09-30):
 //   - eligibility.ts: past-due = `due_date < now` at TIMESTAMP granularity; one
 //     attempt per invoice ever; writes a SIMULATION recovery_attempts row directly.
 //   - runCadence:      past-due = `due_date < today` at DATE granularity (below);
@@ -57,7 +58,7 @@ export function isTerminated(inv: {
 // ── Past-due at DATE granularity (canonical convention) ──────────────────────
 // due_date STRICTLY before today → past due. `due_date == today` is NOT yet past
 // due (this closes the ledger's `due==today` item). Null due_date → not past due
-// (fail closed, same posture as eligibility.ts). due_date is a DATE column, so it
+// (fail closed). due_date is a DATE column, so it
 // arrives as 'YYYY-MM-DD'; lexicographic compare of ISO dates is chronological.
 export function isPastDue(dueDate: string | null, today: string): boolean {
   if (!dueDate) return false;

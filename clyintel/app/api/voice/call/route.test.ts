@@ -2,16 +2,23 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Route: server-built variables are merged under body.variables (caller wins),
 // and a build failure never blocks the call.
+const voiceUpdates: Array<Record<string, unknown>> = [];
 vi.mock("@/lib/supabase", () => ({
   getSupabase: () => ({
     from: () => {
       const b: Record<string, unknown> = {};
-      for (const m of ["insert", "select", "update", "eq"]) b[m] = () => b;
+      for (const m of ["insert", "select", "eq"]) b[m] = () => b;
+      b.update = (p: Record<string, unknown>) => { voiceUpdates.push(p); return b; };
       b.single = async () => ({ data: { id: "vc-1" }, error: null });
       b.then = (resolve: (v: unknown) => void) => resolve({ data: null, error: null });
       return b;
     },
   }),
+}));
+
+const markOutreachStarted = vi.fn(async (..._a: unknown[]) => {});
+vi.mock("@/lib/outreach/markOutreachStarted", () => ({
+  markOutreachStarted: (...a: unknown[]) => markOutreachStarted(...a),
 }));
 
 const build = vi.fn();
@@ -29,6 +36,8 @@ const baseBody = { subscriberId: "sub", clientId: "cl", invoiceId: "inv", toNumb
 const sentVariables = () => JSON.parse(fetchMock.mock.calls[0][1].body).assistantOverrides.variableValues;
 
 beforeEach(() => {
+  voiceUpdates.length = 0;
+  markOutreachStarted.mockClear();
   build.mockReset();
   fetchMock.mockReset();
   fetchMock.mockResolvedValue({ ok: true, status: 201, json: async () => ({ id: "vapi-1" }) });
@@ -90,5 +99,42 @@ describe("voice/call — server-built variables", () => {
     const res = await POST(req(baseBody));
     expect(res.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Fee-gate outreach marker: voice counts once the call is PLACED (Vapi 200 with
+// a call id), regardless of outcome, stamped with the same time as started_at.
+describe("voice/call — outreach marker", () => {
+  it("Vapi 200 with a call id → marker stamped with the SAME timestamp as voice_calls.started_at", async () => {
+    build.mockResolvedValue({});
+    const res = await POST(req(baseBody));
+    expect(res.status).toBe(200);
+    expect(markOutreachStarted).toHaveBeenCalledTimes(1);
+    const [, args] = markOutreachStarted.mock.calls[0] as [unknown, { subscriberId: string; invoiceId: string; startedAt: string }];
+    const dialUpdate = voiceUpdates.find((u) => u.status === "ringing");
+    expect(args).toEqual({ subscriberId: "sub", invoiceId: "inv", startedAt: dialUpdate?.started_at });
+  });
+
+  it("Vapi rejects the call (non-2xx) → no marker", async () => {
+    build.mockResolvedValue({});
+    fetchMock.mockResolvedValue({ ok: false, status: 400, json: async () => ({ message: "bad number" }) });
+    const res = await POST(req(baseBody));
+    expect(res.status).toBe(502);
+    expect(markOutreachStarted).not.toHaveBeenCalled();
+  });
+
+  it("Vapi network error → no marker", async () => {
+    build.mockResolvedValue({});
+    fetchMock.mockRejectedValue(new Error("ECONNRESET"));
+    await POST(req(baseBody));
+    expect(markOutreachStarted).not.toHaveBeenCalled();
+  });
+
+  it("Vapi 200 but NO call id → no marker (not provably placed)", async () => {
+    build.mockResolvedValue({});
+    fetchMock.mockResolvedValue({ ok: true, status: 201, json: async () => ({}) });
+    const res = await POST(req(baseBody));
+    expect(res.status).toBe(200);
+    expect(markOutreachStarted).not.toHaveBeenCalled();
   });
 });

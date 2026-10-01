@@ -1,5 +1,6 @@
 import { getSupabase } from "../supabase";
 import type { CaptureDeps, LedgerInsert } from "./captureDeps";
+import { isOutreachBeforePayment } from "./outreachBeforePayment";
 
 // Live, Supabase-backed CaptureDeps — the first real implementation of the
 // detection core's dependency seam. The worker (later step) injects this into
@@ -30,8 +31,22 @@ const INVOICE_SOURCE = "qbo"; // invoices.source
 // insert path keys off this (ledger.source + invoice_number enrichment).
 const STRIPE_RECOVERY_SOURCE = "stripe_recovery";
 
-export function createLiveCaptureDeps(): CaptureDeps {
+// Per-payment context for the fee gate (locked rules, 2026-09-30). The frozen
+// core never passes the payment time into getInvoiceAttribution, so the caller
+// builds ONE deps instance per captured payment and closes over its times here.
+//   paymentRecordedAt  QBO Payment MetaData.CreateTime (preferred)
+//   paymentTxnDate     QBO Payment TxnDate (date-only fallback)
+// No opts (or neither time) → outreachSent is always false → no fee. That is how
+// the stripe_recovery rail fails closed (recovery-link collection is off).
+export interface LiveCaptureDepsOpts {
+  paymentRecordedAt?: string | null;
+  paymentTxnDate?: string | null;
+}
+
+export function createLiveCaptureDeps(opts: LiveCaptureDepsOpts = {}): CaptureDeps {
   const service = getSupabase();
+  const paymentRecordedAt = opts.paymentRecordedAt ?? null;
+  const paymentTxnDate = opts.paymentTxnDate ?? null;
 
   return {
     async resolveSubscriber(ref) {
@@ -76,7 +91,7 @@ export function createLiveCaptureDeps(): CaptureDeps {
       // translate QBO id → local uuid first.
       const { data: invoices, error: invErr } = await service
         .from("invoices")
-        .select("id")
+        .select("id, outreach_started_at")
         .eq("external_id", sourceInvoiceId)
         .eq("source", INVOICE_SOURCE)
         .eq("subscriber_id", subscriberId);
@@ -99,35 +114,19 @@ export function createLiveCaptureDeps(): CaptureDeps {
         );
         return { found: false, outreachSent: false };
       }
-      const invId = invoices[0].id;
 
-      // outreachSent = a sent recovery_attempt OR a sent outbound communication.
-      // Short-circuit: if either has a sent_at row, we're done.
-      const { data: ra, error: raErr } = await service
-        .from("recovery_attempts")
-        .select("id")
-        .eq("invoice_id", invId)
-        .not("sent_at", "is", null)
-        .limit(1);
-      if (raErr) {
-        throw new Error(`getInvoiceAttribution recovery_attempts check failed: ${raErr.message}`);
-      }
-      if (ra && ra.length > 0) {
-        return { found: true, outreachSent: true };
-      }
-
-      const { data: comm, error: commErr } = await service
-        .from("communications")
-        .select("id")
-        .eq("invoice_id", invId)
-        .eq("direction", "outbound")
-        .not("sent_at", "is", null)
-        .limit(1);
-      if (commErr) {
-        throw new Error(`getInvoiceAttribution communications check failed: ${commErr.message}`);
-      }
-
-      return { found: true, outreachSent: !!(comm && comm.length > 0) };
+      // outreachSent = outreach STARTED before THIS payment. The only outreach
+      // source is the write-once invoices.outreach_started_at marker (stamped on
+      // a live email send with a MailerSend id, or a placed voice call).
+      // recovery_attempts / communications are deliberately NOT read: Brick-A
+      // SIMULATION attempts carry sent_at with no real send, and neither table
+      // was time-checked against the payment.
+      const outreachSent = isOutreachBeforePayment(
+        invoices[0].outreach_started_at ?? null,
+        paymentRecordedAt,
+        paymentTxnDate,
+      );
+      return { found: true, outreachSent };
     },
 
     async isSubscriberActive(subscriberId) {

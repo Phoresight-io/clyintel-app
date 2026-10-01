@@ -8,7 +8,7 @@ import { reconcileInvoiceFromCapture, type ReconcileInput } from "./reconcileInv
 //                   .insert(row)
 // An inserted balance_event is retained so a SECOND reconcile reads it back as the
 // anchor — this is what exercises idempotency/convergence for real.
-function makeDb(invoiceRow: { id: string; external_id: string; amount_outstanding_cents: number; reminder_count: number } | null) {
+function makeDb(invoiceRow: { id: string; external_id: string; amount_outstanding_cents: number; outreach_started_at: string | null } | null) {
   const balanceEventsByInvoice = new Map<string, Array<Record<string, unknown>>>();
   const writes = {
     invoiceUpdates: [] as Array<{ id: unknown; payload: Record<string, unknown> }>,
@@ -72,12 +72,15 @@ const baseInput = (over: Partial<ReconcileInput> = {}): ReconcileInput => ({
   invoiceFaceCents: 95475,
   invoiceBalanceCents: 0,
   dueDate: "2026-06-26",
+  // QBO CreateTime / TxnDate of the captured payment.
+  paymentRecordedAt: "2026-09-13T15:30:00-07:00",
+  paymentTxnDate: "2026-09-13T00:00:00.000Z",
   ...over,
 });
 
 describe("reconcileInvoiceFromCapture", () => {
   it("full payment → status paid, amount_paid=face, in_recovery cleared, balance-drop emitted", async () => {
-    const db = makeDb({ id: "inv1", external_id: "49", amount_outstanding_cents: 95475, reminder_count: 1 });
+    const db = makeDb({ id: "inv1", external_id: "49", amount_outstanding_cents: 95475, outreach_started_at: "2026-09-01T12:00:00.000Z" });
     const res = await reconcileInvoiceFromCapture(baseInput(), db.client, NOW);
 
     expect(res).toEqual({ status: "reconciled", balanceEventEmitted: true });
@@ -100,12 +103,12 @@ describe("reconcileInvoiceFromCapture", () => {
       prev_outstanding_cents: 95475,
       new_outstanding_cents: 0,
       delta_cents: 95475,
-      fee_eligible: true, // reminder_count 1 → outreach had fired
+      fee_eligible: true, // outreach marker (09-01) before payment CreateTime (09-13)
     });
   });
 
   it("partial payment → status partial, amount_paid=face−balance, drop emitted to the new balance", async () => {
-    const db = makeDb({ id: "inv1", external_id: "49", amount_outstanding_cents: 95475, reminder_count: 0 });
+    const db = makeDb({ id: "inv1", external_id: "49", amount_outstanding_cents: 95475, outreach_started_at: null });
     const res = await reconcileInvoiceFromCapture(baseInput({ invoiceBalanceCents: 20000 }), db.client, NOW);
 
     expect(res.status).toBe("reconciled");
@@ -118,8 +121,24 @@ describe("reconcileInvoiceFromCapture", () => {
       prev_outstanding_cents: 95475,
       new_outstanding_cents: 20000,
       delta_cents: 75475,
-      fee_eligible: false, // reminder_count 0 → outreach had not fired
+      fee_eligible: false, // no outreach marker → outreach had not started
     });
+  });
+
+  it("marker AFTER the payment was recorded → fee_eligible false (same rule as the billing gate)", async () => {
+    const db = makeDb({ id: "inv1", external_id: "49", amount_outstanding_cents: 95475, outreach_started_at: "2026-09-14T00:00:00.000Z" });
+    await reconcileInvoiceFromCapture(baseInput(), db.client, NOW);
+    expect(db.writes.balanceInserts[0]).toMatchObject({ outreach_had_fired: false, fee_eligible: false });
+  });
+
+  it("no CreateTime → TxnDate fallback: marker on an earlier UTC date → eligible; same date → not", async () => {
+    const early = makeDb({ id: "inv1", external_id: "49", amount_outstanding_cents: 95475, outreach_started_at: "2026-09-12T23:59:59.000Z" });
+    await reconcileInvoiceFromCapture(baseInput({ paymentRecordedAt: null }), early.client, NOW);
+    expect(early.writes.balanceInserts[0]).toMatchObject({ fee_eligible: true });
+
+    const sameDay = makeDb({ id: "inv1", external_id: "49", amount_outstanding_cents: 95475, outreach_started_at: "2026-09-13T01:00:00.000Z" });
+    await reconcileInvoiceFromCapture(baseInput({ paymentRecordedAt: null }), sameDay.client, NOW);
+    expect(sameDay.writes.balanceInserts[0]).toMatchObject({ fee_eligible: false });
   });
 
   it("local invoice not synced yet → invoice_not_found, zero writes", async () => {
@@ -131,7 +150,7 @@ describe("reconcileInvoiceFromCapture", () => {
   });
 
   it("IDEMPOTENT: reconciling the same capture twice CONVERGES — one balance_event, identical invoice writes", async () => {
-    const db = makeDb({ id: "inv1", external_id: "49", amount_outstanding_cents: 95475, reminder_count: 1 });
+    const db = makeDb({ id: "inv1", external_id: "49", amount_outstanding_cents: 95475, outreach_started_at: "2026-09-01T12:00:00.000Z" });
 
     const first = await reconcileInvoiceFromCapture(baseInput(), db.client, NOW);
     const second = await reconcileInvoiceFromCapture(baseInput(), db.client, NOW);

@@ -217,6 +217,10 @@ export async function handleRecoveryCheckoutCompleted(
   //       thrown error is an infra fault (DB/lookup); the link is already paid,
   //       so log and swallow rather than bubbling into waitUntil. ──────────────
   try {
+    // FAILS CLOSED BY DESIGN (fee-gate fix, 2026-09-30): no payment times are
+    // passed, so getInvoiceAttribution always returns outreachSent=false and the
+    // core records no fee. Recovery-link (stripe_recovery) collection is off —
+    // Clyintel is not collecting payments for subscribers.
     const deps = createLiveCaptureDeps();
     const result = await processCaptureEvent(event, deps);
     console.log(

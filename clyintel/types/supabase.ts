@@ -882,6 +882,7 @@ export type Database = {
           issue_date: string | null
           last_reminder_at: string | null
           line_items: Json | null
+          outreach_started_at: string | null
           raw_source_data: Json | null
           recovery_started_at: string | null
           reminder_count: number
@@ -907,6 +908,7 @@ export type Database = {
           issue_date?: string | null
           last_reminder_at?: string | null
           line_items?: Json | null
+          outreach_started_at?: string | null
           raw_source_data?: Json | null
           recovery_started_at?: string | null
           reminder_count?: number
@@ -932,6 +934,7 @@ export type Database = {
           issue_date?: string | null
           last_reminder_at?: string | null
           line_items?: Json | null
+          outreach_started_at?: string | null
           raw_source_data?: Json | null
           recovery_started_at?: string | null
           reminder_count?: number

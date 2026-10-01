@@ -3,6 +3,7 @@ import { getSupabase } from "@/lib/supabase";
 import { serverEnv } from "@/lib/config/env.server";
 import type { Database } from "@/types/supabase";
 import { buildCallVariables } from "@/lib/voice/buildCallVariables";
+import { markOutreachStarted } from "@/lib/outreach/markOutreachStarted";
 
 // Outbound voice-call trigger. Creates a voice_calls row FIRST (status 'queued')
 // via the service-role client — writes bypass RLS, same pattern as the other
@@ -184,18 +185,26 @@ export async function POST(req: NextRequest) {
 
   // 3. Success — record the provider id and flip to 'ringing'.
   const vapiCallId = typeof vapiBody?.id === "string" ? vapiBody.id : null;
+  const startedAt = new Date().toISOString();
   const { error: updateError } = await service
     .from("voice_calls")
     .update({
       vapi_call_id: vapiCallId,
       status: "ringing",
-      started_at: new Date().toISOString(),
+      started_at: startedAt,
     } satisfies VoiceCallUpdate)
     .eq("id", voiceCallId);
 
   if (updateError) {
     // The call is already placed — don't fail the request; log for follow-up.
     console.error("voice/call: post-dial row update failed", updateError);
+  }
+
+  // Fee-gate outreach marker (locked rule: voice counts once the call is placed
+  // — Vapi 200 with a call id — whatever the outcome). Write-once, same
+  // timestamp as started_at; never throws, so it can't fail the request.
+  if (vapiCallId) {
+    await markOutreachStarted(service, { subscriberId, invoiceId, startedAt });
   }
 
   return NextResponse.json({ voiceCallId, vapiCallId, status: "ringing" });

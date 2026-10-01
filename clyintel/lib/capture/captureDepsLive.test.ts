@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Alias-less vitest: mock the service client via its relative specifier.
 vi.mock("../supabase", () => ({ getSupabase: vi.fn() }));
 
-import { createLiveCaptureDeps } from "./captureDepsLive";
+import { createLiveCaptureDeps, type LiveCaptureDepsOpts } from "./captureDepsLive";
 import { getSupabase } from "../supabase";
 import type { LedgerInsert } from "./captureDeps";
 
@@ -34,9 +34,9 @@ function makeSupabase(queues: Record<string, Result[]>) {
   return { from };
 }
 
-function depsWith(queues: Record<string, Result[]>) {
+function depsWith(queues: Record<string, Result[]>, opts?: LiveCaptureDepsOpts) {
   vi.mocked(getSupabase).mockReturnValue(makeSupabase(queues) as never);
-  return createLiveCaptureDeps();
+  return createLiveCaptureDeps(opts);
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -91,39 +91,54 @@ describe("getInvoiceAttribution", () => {
     });
   });
 
-  it("invoice found + a sent recovery_attempt → outreachSent true", async () => {
-    const deps = depsWith({
-      invoices: [{ data: [{ id: "inv_uuid" }], error: null }],
-      recovery_attempts: [{ data: [{ id: "ra1" }], error: null }],
-    });
-    expect(await deps.getInvoiceAttribution("s1", "130")).toEqual({
-      found: true,
-      outreachSent: true,
-    });
+  // Payment recorded in QBO 2026-09-23 04:41:37Z (CreateTime), TxnDate 09-23.
+  const PAY = { paymentRecordedAt: "2026-09-22T21:41:37-07:00", paymentTxnDate: "2026-09-23T00:00:00.000Z" };
+  const inv = (outreach_started_at: string | null) => ({
+    invoices: [{ data: [{ id: "inv_uuid", outreach_started_at }], error: null }],
   });
 
-  it("invoice found + an outbound sent communication → outreachSent true", async () => {
-    const deps = depsWith({
-      invoices: [{ data: [{ id: "inv_uuid" }], error: null }],
-      recovery_attempts: [{ data: [], error: null }], // none sent
+  it("marker BEFORE the payment's CreateTime → outreachSent true (invoice 1036 shape)", async () => {
+    const deps = depsWith(inv("2026-09-10T04:52:22.947Z"), PAY);
+    expect(await deps.getInvoiceAttribution("s1", "129")).toEqual({ found: true, outreachSent: true });
+  });
+
+  it("marker AFTER the payment's CreateTime → outreachSent false", async () => {
+    const deps = depsWith(inv("2026-09-23T05:00:00.000Z"), PAY);
+    expect(await deps.getInvoiceAttribution("s1", "129")).toEqual({ found: true, outreachSent: false });
+  });
+
+  it("SIMULATION-only invoice (null marker) → outreachSent false; recovery_attempts/communications are NEVER queried", async () => {
+    // Pre-fix, a Brick-A SIMULATION recovery_attempt (sent_at set, no real send)
+    // made outreachSent true. Its row is queued here: if the gate still read
+    // recovery_attempts it would see it. The gate must ignore it entirely.
+    const supa = makeSupabase({
+      invoices: [{ data: [{ id: "inv_uuid", outreach_started_at: null }], error: null }],
+      recovery_attempts: [
+        { data: [{ id: "ra_sim", notes: "SIMULATION—BRICK-A-V1—NO_REAL_SEND", sent_at: "2026-07-04T23:36:33Z" }], error: null },
+      ],
       communications: [{ data: [{ id: "c1" }], error: null }],
     });
-    expect(await deps.getInvoiceAttribution("s1", "130")).toEqual({
-      found: true,
-      outreachSent: true,
-    });
+    vi.mocked(getSupabase).mockReturnValue(supa as never);
+    const deps = createLiveCaptureDeps(PAY);
+    expect(await deps.getInvoiceAttribution("s1", "49")).toEqual({ found: true, outreachSent: false });
+    const tables = supa.from.mock.calls.map((c) => c[0]);
+    expect(tables).toEqual(["invoices"]);
   });
 
-  it("invoice found + neither → outreachSent false", async () => {
-    const deps = depsWith({
-      invoices: [{ data: [{ id: "inv_uuid" }], error: null }],
-      recovery_attempts: [{ data: [], error: null }],
-      communications: [{ data: [], error: null }],
-    });
-    expect(await deps.getInvoiceAttribution("s1", "130")).toEqual({
-      found: true,
-      outreachSent: false,
-    });
+  it("no-opts deps (stripe_recovery rail) → outreachSent false even with an old marker (fails closed)", async () => {
+    const deps = depsWith(inv("2026-01-01T00:00:00.000Z"));
+    expect(await deps.getInvoiceAttribution("s1", "145")).toEqual({ found: true, outreachSent: false });
+  });
+
+  it("no CreateTime → TxnDate fallback: earlier UTC date → true, same UTC date → false", async () => {
+    const fallback = { paymentRecordedAt: null, paymentTxnDate: "2026-09-26T00:00:00.000Z" };
+    expect(
+      await depsWith(inv("2026-09-25T23:59:59.000Z"), fallback).getInvoiceAttribution("s1", "34"),
+    ).toEqual({ found: true, outreachSent: true });
+    // Invoice 1010 shape: call placed 09-26 21:47Z, payment TxnDate 09-26 → can't order → no fee.
+    expect(
+      await depsWith(inv("2026-09-26T21:47:01.611Z"), fallback).getInvoiceAttribution("s1", "34"),
+    ).toEqual({ found: true, outreachSent: false });
   });
 
   it(">1 local invoices → found:false and warns", async () => {

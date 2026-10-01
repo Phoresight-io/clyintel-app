@@ -17,9 +17,9 @@ import type { Database } from "@/types/supabase";
 //     that isn't explicitly `false` → DENY. It never throws into a send path;
 //     it returns false.
 //
-// This is distinct from lib/outreach/eligibility.ts `isContactAllowed`, which is
-// the (timing / quiet-hours) permissibility seam. Both must pass before a real
-// send — this one is the opt-out/consent gate.
+// This is the opt-out/consent gate. (The former lib/outreach/eligibility.ts
+// `isContactAllowed` timing stub was removed with the Brick-A SIMULATION path in
+// the fee-gate fix, 2026-09-30.)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type Channel = "email" | "sms" | "voice";
