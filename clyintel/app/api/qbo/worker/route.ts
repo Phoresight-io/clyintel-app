@@ -85,11 +85,19 @@ async function runWorker(req: NextRequest) {
   const batchDeps = {
     handlers: HANDLERS,
     // Deps are built PER EVENT so the outreach gate knows this payment's time
-    // (the frozen core's getInvoiceAttribution doesn't receive it).
-    runCore: (event: Parameters<typeof processCaptureEvent>[0]) =>
+    // (the frozen core's getInvoiceAttribution doesn't receive it): QBO
+    // CreateTime (paymentRecordedAt), else TxnDate (event.capturedAt).
+    runCore: (
+      event: Parameters<typeof processCaptureEvent>[0],
+      payment: { paymentRecordedAt: string | null },
+    ) =>
       processCaptureEvent(
         event,
-        createLiveCaptureDeps({ paymentAt: event.capturedAt, source: event.source }),
+        createLiveCaptureDeps({
+          paymentAt: event.capturedAt,
+          source: event.source,
+          paymentRecordedAt: payment.paymentRecordedAt,
+        }),
       ),
     nowIso: () => new Date().toISOString(),
   };

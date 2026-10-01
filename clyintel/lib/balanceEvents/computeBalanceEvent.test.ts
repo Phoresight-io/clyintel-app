@@ -45,7 +45,45 @@ describe("computeBalanceEvent", () => {
         newOutstandingCents: 4_000,
         syncedAt: "2026-08-24T00:00:00.000Z",
         outreachStartedAt: null,
+        paymentRecordedAt: null,
+        paymentTxnDate: null,
       },
+    });
+  });
+
+  describe("capture path (payment times given) — same rule as the billing gate", () => {
+    const pay = { recordedAt: "2026-08-23T04:41:37.000Z", txnDate: "2026-08-23T00:00:00.000Z" };
+
+    it("marker before CreateTime → both true; payment times recorded in evidence", () => {
+      const row = computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-23T04:41:36.000Z", payment: pay });
+      expect(row?.outreach_had_fired).toBe(true);
+      expect(row?.fee_eligible).toBe(true);
+      expect(row?.evidence).toMatchObject({
+        paymentRecordedAt: "2026-08-23T04:41:37.000Z",
+        paymentTxnDate: "2026-08-23T00:00:00.000Z",
+      });
+    });
+
+    it("marker after CreateTime but BEFORE syncedAt → both false (detection time is not the payment time)", () => {
+      // The full-sync rule (marker <= syncedAt) would say true here.
+      const row = computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-23T12:00:00.000Z", payment: pay });
+      expect(row?.outreach_had_fired).toBe(false);
+      expect(row?.fee_eligible).toBe(false);
+    });
+
+    it("no CreateTime + same UTC date as TxnDate → false; earlier date → true", () => {
+      const noCt = { recordedAt: null, txnDate: pay.txnDate };
+      expect(computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-23T00:00:01.000Z", payment: noCt })?.fee_eligible).toBe(false);
+      expect(computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-22T23:59:59.000Z", payment: noCt })?.fee_eligible).toBe(true);
+    });
+
+    it("payment with no usable times → false (fail closed)", () => {
+      const row = computeBalanceEvent({
+        ...base,
+        outreachStartedAt: "2020-01-01T00:00:00.000Z",
+        payment: { recordedAt: null, txnDate: null },
+      });
+      expect(row?.fee_eligible).toBe(false);
     });
   });
 

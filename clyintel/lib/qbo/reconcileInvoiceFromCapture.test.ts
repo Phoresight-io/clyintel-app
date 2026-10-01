@@ -1,5 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// reconcile receives its client by injection; the mock only feeds the REAL
+// billing-gate deps used by the agreement test below.
+vi.mock("../supabase", () => ({ getSupabase: vi.fn() }));
+
 import { reconcileInvoiceFromCapture, type ReconcileInput } from "./reconcileInvoiceFromCapture";
+import { createLiveCaptureDeps } from "../capture/captureDepsLive";
+import { getSupabase } from "../supabase";
 
 // Stateful Supabase fake. Honors exactly the calls reconcile makes:
 //   invoices:       .select(...).eq(subscriber_id).eq(source).eq(external_id).maybeSingle()
@@ -72,6 +79,9 @@ const baseInput = (over: Partial<ReconcileInput> = {}): ReconcileInput => ({
   invoiceFaceCents: 95475,
   invoiceBalanceCents: 0,
   dueDate: "2026-06-26",
+  // The captured payment: recorded in QBO 2026-09-13 15:30Z, TxnDate 2026-09-13.
+  paymentRecordedAt: "2026-09-13T08:30:00-07:00",
+  paymentTxnDate: "2026-09-13T00:00:00.000Z",
   ...over,
 });
 
@@ -100,7 +110,7 @@ describe("reconcileInvoiceFromCapture", () => {
       prev_outstanding_cents: 95475,
       new_outstanding_cents: 0,
       delta_cents: 95475,
-      fee_eligible: true, // outreach started 9/10, before this 9/14 capture
+      fee_eligible: true, // outreach started 9/10, before the payment recorded 9/13
     });
   });
 
@@ -122,7 +132,7 @@ describe("reconcileInvoiceFromCapture", () => {
     });
   });
 
-  it("outreach marker AFTER the capture → drop recorded but NOT fee-eligible", async () => {
+  it("outreach marker AFTER the payment → drop recorded but NOT fee-eligible", async () => {
     const db = makeDb({ id: "inv1", external_id: "49", amount_outstanding_cents: 95475, outreach_started_at: "2026-09-15T00:00:00.000Z" });
     await reconcileInvoiceFromCapture(baseInput(), db.client, NOW);
     expect(db.writes.balanceInserts[0]).toMatchObject({
@@ -137,7 +147,55 @@ describe("reconcileInvoiceFromCapture", () => {
     await reconcileInvoiceFromCapture(baseInput(), db.client, NOW);
     expect(db.writes.balanceInserts[0]).toMatchObject({
       fee_eligible: true,
-      evidence: { outreachStartedAt: "2026-09-10T04:52:22.947Z", syncedAt: NOW.toISOString() },
+      evidence: {
+        outreachStartedAt: "2026-09-10T04:52:22.947Z",
+        syncedAt: NOW.toISOString(),
+        paymentRecordedAt: "2026-09-13T08:30:00-07:00",
+        paymentTxnDate: "2026-09-13T00:00:00.000Z",
+      },
+    });
+  });
+
+  it("marker AFTER CreateTime but on the SAME day (before detection) → NOT fee-eligible (REVERSES #158)", async () => {
+    // #158 compared the marker to the detection time (syncedAt = 9/14), so this
+    // 9/13 21:00Z outreach — sent after the client paid at 15:30Z — was eligible.
+    const db = makeDb({ id: "inv1", external_id: "49", amount_outstanding_cents: 95475, outreach_started_at: "2026-09-13T21:00:00.000Z" });
+    await reconcileInvoiceFromCapture(baseInput(), db.client, NOW);
+    expect(db.writes.balanceInserts[0]).toMatchObject({ outreach_had_fired: false, fee_eligible: false });
+  });
+
+  // Agreement: balance_events.fee_eligible must equal the billing gate's
+  // outreachSent for the SAME marker and payment times (the gate is the REAL
+  // createLiveCaptureDeps over a stubbed invoices read).
+  describe("agrees with the billing gate", () => {
+    function gateFor(marker: string | null, input: ReconcileInput) {
+      const builder: Record<string, unknown> = {};
+      for (const m of ["select", "eq"]) builder[m] = () => builder;
+      builder.then = (onF: (v: unknown) => unknown) =>
+        Promise.resolve({ data: [{ id: "inv1", outreach_started_at: marker }], error: null }).then(onF);
+      vi.mocked(getSupabase).mockReturnValue({ from: () => builder } as never);
+      return createLiveCaptureDeps({
+        paymentAt: input.paymentTxnDate as string,
+        source: "qbo",
+        paymentRecordedAt: input.paymentRecordedAt,
+      }).getInvoiceAttribution("sub_1", "49");
+    }
+
+    it.each([
+      ["before CreateTime", "2026-09-13T15:29:59.000Z", {}, true],
+      ["equal to CreateTime", "2026-09-13T15:30:00.000Z", {}, false],
+      ["after CreateTime, same day", "2026-09-13T15:30:01.000Z", {}, false],
+      ["no CreateTime, earlier UTC date", "2026-09-12T23:00:00.000Z", { paymentRecordedAt: null }, true],
+      ["no CreateTime, same UTC date", "2026-09-13T00:30:00.000Z", { paymentRecordedAt: null }, false],
+      ["no marker", null, {}, false],
+    ] as const)("%s → fee_eligible === gate outreachSent (%s)", async (_label, marker, over, expected) => {
+      const input = baseInput(over as Partial<ReconcileInput>);
+      const db = makeDb({ id: "inv1", external_id: "49", amount_outstanding_cents: 95475, outreach_started_at: marker });
+      await reconcileInvoiceFromCapture(input, db.client, NOW);
+      const gate = await gateFor(marker, input);
+      expect(gate.outreachSent).toBe(expected);
+      expect(db.writes.balanceInserts[0].fee_eligible).toBe(gate.outreachSent);
+      expect(db.writes.balanceInserts[0].outreach_had_fired).toBe(gate.outreachSent);
     });
   });
 

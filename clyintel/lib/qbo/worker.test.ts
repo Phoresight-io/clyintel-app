@@ -170,8 +170,14 @@ describe("processWebhookEventRow — capture-time reconcile", () => {
     invoiceFaceCents: 95475,
     invoiceBalanceCents: 0,
     dueDate: "2026-06-26",
+    paymentRecordedAt: "2026-09-13T15:30:00-07:00",
+    paymentTxnDate: "2026-09-13T00:00:00.000Z",
   };
-  const buildEvent = async () => ({ event: { source: "qbo" } as never, reconcileInput: RI });
+  const buildEvent = async () => ({
+    event: { source: "qbo" } as never,
+    reconcileInput: RI,
+    paymentRecordedAt: "2026-09-13T15:30:00-07:00",
+  });
 
   // The payment landed in QBO regardless of fee outcome, so reconcile runs on
   // every non-'rejected' capture and receives the reconcileInput from buildEvent.
@@ -188,6 +194,21 @@ describe("processWebhookEventRow — capture-time reconcile", () => {
     expect(reconcile).toHaveBeenCalledTimes(1);
     expect(reconcile).toHaveBeenCalledWith(RI);
     expect(out.outcomes).toContain("reconcile:reconciled");
+  });
+
+  it("runCore receives THIS payment's CreateTime (fee-gate payment time) alongside the event", async () => {
+    const runCore = vi.fn(async () => ({ status: "no_fee" as const, reason: "no_outreach" as const }));
+    await processWebhookEventRow(row(), makeDeps({ buildEvent, runCore }));
+    expect(runCore).toHaveBeenCalledWith({ source: "qbo" }, { paymentRecordedAt: "2026-09-13T15:30:00-07:00" });
+  });
+
+  it("a null CreateTime is passed through as null (the gate then falls back to TxnDate)", async () => {
+    const runCore = vi.fn(async () => ({ status: "no_fee" as const, reason: "no_outreach" as const }));
+    await processWebhookEventRow(
+      row(),
+      makeDeps({ runCore, buildEvent: async () => ({ ...(await buildEvent()), paymentRecordedAt: null }) }),
+    );
+    expect(runCore).toHaveBeenCalledWith({ source: "qbo" }, { paymentRecordedAt: null });
   });
 
   it("reconcile is SKIPPED on a 'rejected' capture (no trustworthy subscriber/invoice)", async () => {

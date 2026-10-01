@@ -35,6 +35,10 @@ export interface ReconcileInput {
   invoiceBalanceCents: number;
   /** invoice.DueDate (YYYY-MM-DD) or null. */
   dueDate: string | null;
+  /** QBO Payment MetaData.CreateTime (when the payment was recorded) or null. */
+  paymentRecordedAt: string | null;
+  /** The payment's TxnDate as CaptureEvent.capturedAt (00:00Z). Fallback only. */
+  paymentTxnDate: string | null;
 }
 
 export type ReconcileStatus = "reconciled" | "invoice_not_found";
@@ -50,7 +54,15 @@ export async function reconcileInvoiceFromCapture(
   service: Pick<SupabaseClient, "from"> = getSupabase(),
   now: Date = new Date(),
 ): Promise<ReconcileResult> {
-  const { subscriberId, qboInvoiceId, invoiceFaceCents, invoiceBalanceCents, dueDate } = input;
+  const {
+    subscriberId,
+    qboInvoiceId,
+    invoiceFaceCents,
+    invoiceBalanceCents,
+    dueDate,
+    paymentRecordedAt,
+    paymentTxnDate,
+  } = input;
 
   // 1. Resolve the local invoice row (subscriber-scoped, source='qbo'). Read the
   //    CURRENT outstanding + outreach_started_at BEFORE overwriting them — the pre-
@@ -122,6 +134,9 @@ export async function reconcileInvoiceFromCapture(
     prevOutstandingCents,
     newOutstandingCents,
     outreachStartedAt: inv.outreach_started_at ?? null,
+    // Same payment times + marker the billing gate used → fee_eligible here
+    // agrees with the rev_share_ledger outcome for this payment.
+    payment: { recordedAt: paymentRecordedAt, txnDate: paymentTxnDate },
     syncedAt: now.toISOString(),
   });
   let balanceEventEmitted = false;
