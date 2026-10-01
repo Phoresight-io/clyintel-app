@@ -1,5 +1,5 @@
 -- Migration: add_invoices_outreach_started_at
--- NOT YET APPLIED — deliver for review; Charles applies to clyintel-dev, then prod.
+-- APPLIED to Test (clyintel-dev) 2026-10-01 (out-of-band, version 20261001025250); NOT yet applied to Prod.
 --
 -- ⚠️ PER-DATABASE INPUT. Before EACH apply, replace the ONE placeholder
 --    __VAPI_ASSISTANT_ID_TEST__   (in the `_mig_outreach_cfg` insert below)

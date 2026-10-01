@@ -54,27 +54,25 @@ describe("computeBalanceEvent", () => {
   describe("capture path (payment times given) — same rule as the billing gate", () => {
     const pay = { recordedAt: "2026-08-23T04:41:37.000Z", txnDate: "2026-08-23T00:00:00.000Z" };
 
-    it("marker before CreateTime → both true; payment times recorded in evidence", () => {
+    it("marker before CreateTime → outreach_had_fired true; payment times recorded in evidence", () => {
       const row = computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-23T04:41:36.000Z", payment: pay });
       expect(row?.outreach_had_fired).toBe(true);
-      expect(row?.fee_eligible).toBe(true);
       expect(row?.evidence).toMatchObject({
         paymentRecordedAt: "2026-08-23T04:41:37.000Z",
         paymentTxnDate: "2026-08-23T00:00:00.000Z",
       });
     });
 
-    it("marker after CreateTime but BEFORE syncedAt → both false (detection time is not the payment time)", () => {
+    it("marker after CreateTime but BEFORE syncedAt → false (detection time is not the payment time)", () => {
       // The full-sync rule (marker <= syncedAt) would say true here.
       const row = computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-23T12:00:00.000Z", payment: pay });
       expect(row?.outreach_had_fired).toBe(false);
-      expect(row?.fee_eligible).toBe(false);
     });
 
     it("no CreateTime + same UTC date as TxnDate → false; earlier date → true", () => {
       const noCt = { recordedAt: null, txnDate: pay.txnDate };
-      expect(computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-23T00:00:01.000Z", payment: noCt })?.fee_eligible).toBe(false);
-      expect(computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-22T23:59:59.000Z", payment: noCt })?.fee_eligible).toBe(true);
+      expect(computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-23T00:00:01.000Z", payment: noCt })?.outreach_had_fired).toBe(false);
+      expect(computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-22T23:59:59.000Z", payment: noCt })?.outreach_had_fired).toBe(true);
     });
 
     it("payment with no usable times → false (fail closed)", () => {
@@ -83,7 +81,7 @@ describe("computeBalanceEvent", () => {
         outreachStartedAt: "2020-01-01T00:00:00.000Z",
         payment: { recordedAt: null, txnDate: null },
       });
-      expect(row?.fee_eligible).toBe(false);
+      expect(row?.outreach_had_fired).toBe(false);
     });
   });
 
@@ -93,31 +91,27 @@ describe("computeBalanceEvent", () => {
     expect(row?.new_outstanding_cents).toBe(0);
   });
 
-  it("no outreach marker (null) → outreach_had_fired / fee_eligible both false", () => {
+  it("no outreach marker (null) → outreach_had_fired false", () => {
     const row = computeBalanceEvent({ ...base, outreachStartedAt: null });
     expect(row?.outreach_had_fired).toBe(false);
-    expect(row?.fee_eligible).toBe(false);
     expect(row?.evidence.outreachStartedAt).toBeNull();
   });
 
-  it("marker BEFORE the detected drop → both true, marker recorded in evidence", () => {
+  it("marker BEFORE the detected drop → true, marker recorded in evidence", () => {
     const row = computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-10T04:52:22.947Z" });
     expect(row?.outreach_had_fired).toBe(true);
-    expect(row?.fee_eligible).toBe(true);
-    expect(row?.fee_eligible).toBe(row?.outreach_had_fired);
     expect(row?.evidence.outreachStartedAt).toBe("2026-08-10T04:52:22.947Z");
   });
 
-  it("marker AFTER the detected drop → both false (outreach did not precede the payment)", () => {
+  it("marker AFTER the detected drop → false (outreach did not precede the payment)", () => {
     const row = computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-24T00:00:00.001Z" });
     expect(row?.outreach_had_fired).toBe(false);
-    expect(row?.fee_eligible).toBe(false);
     expect(row?.evidence.outreachStartedAt).toBe("2026-08-24T00:00:00.001Z");
   });
 
   it("marker EXACTLY at the detection instant → true (started 'by' the drop)", () => {
     const row = computeBalanceEvent({ ...base, outreachStartedAt: base.syncedAt });
-    expect(row?.fee_eligible).toBe(true);
+    expect(row?.outreach_had_fired).toBe(true);
   });
 
   it("no drop → null regardless of the marker (the marker never manufactures an event)", () => {

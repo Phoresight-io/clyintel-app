@@ -82,7 +82,6 @@ export type Database = {
           delta_cents: number
           detected_at: string
           evidence: Json | null
-          fee_eligible: boolean
           id: string
           invoice_id: string
           new_outstanding_cents: number
@@ -96,7 +95,6 @@ export type Database = {
           delta_cents: number
           detected_at?: string
           evidence?: Json | null
-          fee_eligible: boolean
           id?: string
           invoice_id: string
           new_outstanding_cents: number
@@ -110,7 +108,6 @@ export type Database = {
           delta_cents?: number
           detected_at?: string
           evidence?: Json | null
-          fee_eligible?: boolean
           id?: string
           invoice_id?: string
           new_outstanding_cents?: number

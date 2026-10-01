@@ -52,7 +52,6 @@ export interface BalanceEventRow {
   new_outstanding_cents: number;
   delta_cents: number;
   outreach_had_fired: boolean;
-  fee_eligible: boolean;
   evidence: {
     prevOutstandingCents: number;
     newOutstandingCents: number;
@@ -107,7 +106,7 @@ export function computeBalanceEvent(
   // prev > new here, so delta > 0 and both CHECK constraints hold.
   const deltaCents = prevOutstandingCents - newOutstandingCents;
 
-  // Emission-time evaluation; fee eligibility mirrors it exactly.
+  // Emission-time evaluation (outreach_had_fired agrees with the billing gate).
   //  - capture path (payment known): outreach strictly before THIS payment, by the
   //    billing gate's own helper and inputs.
   //  - full-sync path: whether outreach had started by the time we observed this
@@ -124,7 +123,6 @@ export function computeBalanceEvent(
     new_outstanding_cents: newOutstandingCents,
     delta_cents: deltaCents,
     outreach_had_fired: outreachHadFired,
-    fee_eligible: outreachHadFired,
     evidence: {
       prevOutstandingCents,
       newOutstandingCents,
