@@ -169,7 +169,7 @@ export async function buildCaptureEventFromPayment(
       invoice.Balance != null ? Math.round(invoice.Balance * 100) : Math.round(invoiceFaceValue * 100),
     dueDate: invoice.DueDate ?? null,
     // Same payment times the billing gate uses, so the balance_events row's
-    // fee_eligible agrees with the ledger outcome for this payment.
+    // outreach_had_fired agrees with the ledger outcome for this payment.
     paymentRecordedAt,
     paymentTxnDate: capturedAt,
   };

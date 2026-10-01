@@ -213,8 +213,8 @@ describe.skipIf(!DB_URL)("tenant isolation (RLS)", () => {
       );
       // balance_events → subscriber_id (SELECT-only policy; still seeded as service)
       await q(
-        "INSERT INTO public.balance_events (subscriber_id, invoice_id, source, delta_cents, prev_outstanding_cents, new_outstanding_cents, fee_eligible, outreach_had_fired) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-        [sub, invoiceId, sourceId, -100, 1000, 900, false, false],
+        "INSERT INTO public.balance_events (subscriber_id, invoice_id, source, delta_cents, prev_outstanding_cents, new_outstanding_cents, outreach_had_fired) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        [sub, invoiceId, sourceId, -100, 1000, 900, false],
       );
       // rev_share_ledger → subscriber_id (SELECT-only policy)
       await q(

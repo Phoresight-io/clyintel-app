@@ -134,7 +134,7 @@ export async function reconcileInvoiceFromCapture(
     prevOutstandingCents,
     newOutstandingCents,
     outreachStartedAt: inv.outreach_started_at ?? null,
-    // Same payment times + marker the billing gate used → fee_eligible here
+    // Same payment times + marker the billing gate used → outreach_had_fired here
     // agrees with the rev_share_ledger outcome for this payment.
     payment: { recordedAt: paymentRecordedAt, txnDate: paymentTxnDate },
     syncedAt: now.toISOString(),

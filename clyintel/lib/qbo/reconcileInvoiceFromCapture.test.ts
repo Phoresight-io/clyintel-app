@@ -110,7 +110,7 @@ describe("reconcileInvoiceFromCapture", () => {
       prev_outstanding_cents: 95475,
       new_outstanding_cents: 0,
       delta_cents: 95475,
-      fee_eligible: true, // outreach started 9/10, before the payment recorded 9/13
+      outreach_had_fired: true, // outreach started 9/10, before the payment recorded 9/13
     });
   });
 
@@ -128,16 +128,15 @@ describe("reconcileInvoiceFromCapture", () => {
       prev_outstanding_cents: 95475,
       new_outstanding_cents: 20000,
       delta_cents: 75475,
-      fee_eligible: false, // no outreach marker → outreach had not started
+      outreach_had_fired: false, // no outreach marker → outreach had not started
     });
   });
 
-  it("outreach marker AFTER the payment → drop recorded but NOT fee-eligible", async () => {
+  it("outreach marker AFTER the payment → drop recorded but outreach_had_fired = false", async () => {
     const db = makeDb({ id: "inv1", external_id: "49", amount_outstanding_cents: 95475, outreach_started_at: "2026-09-15T00:00:00.000Z" });
     await reconcileInvoiceFromCapture(baseInput(), db.client, NOW);
     expect(db.writes.balanceInserts[0]).toMatchObject({
       outreach_had_fired: false,
-      fee_eligible: false,
       evidence: { outreachStartedAt: "2026-09-15T00:00:00.000Z" },
     });
   });
@@ -146,7 +145,7 @@ describe("reconcileInvoiceFromCapture", () => {
     const db = makeDb({ id: "inv1", external_id: "49", amount_outstanding_cents: 95475, outreach_started_at: "2026-09-10T04:52:22.947Z" });
     await reconcileInvoiceFromCapture(baseInput(), db.client, NOW);
     expect(db.writes.balanceInserts[0]).toMatchObject({
-      fee_eligible: true,
+      outreach_had_fired: true,
       evidence: {
         outreachStartedAt: "2026-09-10T04:52:22.947Z",
         syncedAt: NOW.toISOString(),
@@ -156,15 +155,15 @@ describe("reconcileInvoiceFromCapture", () => {
     });
   });
 
-  it("marker AFTER CreateTime but on the SAME day (before detection) → NOT fee-eligible (REVERSES #158)", async () => {
+  it("marker AFTER CreateTime but on the SAME day (before detection) → NOT outreach_had_fired (REVERSES #158)", async () => {
     // #158 compared the marker to the detection time (syncedAt = 9/14), so this
     // 9/13 21:00Z outreach — sent after the client paid at 15:30Z — was eligible.
     const db = makeDb({ id: "inv1", external_id: "49", amount_outstanding_cents: 95475, outreach_started_at: "2026-09-13T21:00:00.000Z" });
     await reconcileInvoiceFromCapture(baseInput(), db.client, NOW);
-    expect(db.writes.balanceInserts[0]).toMatchObject({ outreach_had_fired: false, fee_eligible: false });
+    expect(db.writes.balanceInserts[0]).toMatchObject({ outreach_had_fired: false });
   });
 
-  // Agreement: balance_events.fee_eligible must equal the billing gate's
+  // Agreement: balance_events.outreach_had_fired must equal the billing gate's
   // outreachSent for the SAME marker and payment times (the gate is the REAL
   // createLiveCaptureDeps over a stubbed invoices read).
   describe("agrees with the billing gate", () => {
@@ -188,13 +187,12 @@ describe("reconcileInvoiceFromCapture", () => {
       ["no CreateTime, earlier UTC date", "2026-09-12T23:00:00.000Z", { paymentRecordedAt: null }, true],
       ["no CreateTime, same UTC date", "2026-09-13T00:30:00.000Z", { paymentRecordedAt: null }, false],
       ["no marker", null, {}, false],
-    ] as const)("%s → fee_eligible === gate outreachSent (%s)", async (_label, marker, over, expected) => {
+    ] as const)("%s → outreach_had_fired === gate outreachSent (%s)", async (_label, marker, over, expected) => {
       const input = baseInput(over as Partial<ReconcileInput>);
       const db = makeDb({ id: "inv1", external_id: "49", amount_outstanding_cents: 95475, outreach_started_at: marker });
       await reconcileInvoiceFromCapture(input, db.client, NOW);
       const gate = await gateFor(marker, input);
       expect(gate.outreachSent).toBe(expected);
-      expect(db.writes.balanceInserts[0].fee_eligible).toBe(gate.outreachSent);
       expect(db.writes.balanceInserts[0].outreach_had_fired).toBe(gate.outreachSent);
     });
   });
