@@ -201,6 +201,19 @@ describe("sendEmailStep — live", () => {
     expect(port.markOutreachStarted).toHaveBeenCalledWith("inv-1", "2026-07-04T00:00:00.000Z");
   });
 
+  it("live 'sent' but MailerSend returned NO message id → sent as usual, NO stamp (locked rule needs the id)", async () => {
+    const port = makePort({ dispatchEmail: vi.fn(async () => ({ messageId: null })) });
+    const res = await sendEmailStep(CTX, "live", port);
+    expect(res.outcome).toBe("sent");
+    expect(port.markOutreachStarted).not.toHaveBeenCalled();
+  });
+
+  it("live 'sent' with an EMPTY message id → NO stamp", async () => {
+    const port = makePort({ dispatchEmail: vi.fn(async () => ({ messageId: "" })) });
+    await sendEmailStep(CTX, "live", port);
+    expect(port.markOutreachStarted).not.toHaveBeenCalled();
+  });
+
   it("suppressOutreachStamp (email from inside a test call) → sent as usual, NO stamp", async () => {
     const port = makePort();
     const res = await sendEmailStep({ ...CTX, suppressOutreachStamp: true }, "live", port);

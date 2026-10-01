@@ -1,5 +1,5 @@
 import { getSupabase } from "../supabase";
-import { outreachStartedBy } from "../balanceEvents/computeBalanceEvent";
+import { isOutreachBeforePayment } from "./outreachBeforePayment";
 import type { CaptureDeps, LedgerInsert } from "./captureDeps";
 
 // Live, Supabase-backed CaptureDeps — the first real implementation of the
@@ -31,49 +31,52 @@ const INVOICE_SOURCE = "qbo"; // invoices.source
 // insert path keys off this (ledger.source + invoice_number enrichment).
 const STRIPE_RECOVERY_SOURCE = "stripe_recovery";
 
-// Payment-source registry slug for QuickBooks captures. QBO payments carry only
-// a DATE (TxnDate), so their outreach cutoff is the end of that day (below).
+// Payment-source registry slug for QuickBooks captures. QBO payment time is the
+// Payment's MetaData.CreateTime, falling back to its date-only TxnDate (below).
 const QBO_SOURCE = "qbo";
 
 /** Per-payment context for the outreach gate. The frozen core calls
  *  getInvoiceAttribution(subscriberId, sourceInvoiceId) WITHOUT the payment time,
  *  so deps are built once per CaptureEvent and carry it here instead. */
 export interface LiveCaptureDepsOptions {
-  /** CaptureEvent.capturedAt of the payment being gated. */
+  /** CaptureEvent.capturedAt of the payment being gated (qbo: TxnDate at 00:00Z). */
   paymentAt: string;
-  /** CaptureEvent.source — decides how paymentAt is read (date-only for 'qbo'). */
+  /** CaptureEvent.source — decides how the payment time is read. */
   source: string;
+  /** qbo only: QBO Payment MetaData.CreateTime (when the payment was recorded in
+   *  QuickBooks), or null/omitted when absent or unparseable. */
+  paymentRecordedAt?: string | null;
+}
+
+function parses(value: string | null): boolean {
+  return value != null && value.trim() !== "" && !Number.isNaN(Date.parse(value));
 }
 
 /**
- * The latest instant outreach may have started and still make THIS payment
- * billable (LOCKED RULE: outreach on any channel started before the payment →
- * billable; no time window). null = unparseable payment time → gate fails closed.
+ * The payment times handed to isOutreachBeforePayment (LOCKED RULE, 2026-09-30:
+ * fee only if the outreach timestamp is BEFORE the payment timestamp).
  *
- *  - qbo: capturedAt is the payment's TxnDate (a DATE, normalized to 00:00Z by the
- *    adapter). Cutoff = the END of that calendar day in UTC (23:59:59.999Z), so
- *    same-day outreach counts and outreach on any later day never does. UTC because
- *    no company/subscriber timezone is stored (the same seam runCadence documents)
- *    and the frozen QBO client exposes only TxnDate; it is also the frame capturedAt
- *    and cycle_close already use. For a company WEST of UTC (all US subscribers) the
- *    UTC day ends before the local day does, so this can never count outreach from a
- *    later local day — it can only miss same-local-day outreach sent in the local
- *    evening after 00:00Z (under-bill, never over-bill).
- *  - anything else (stripe_recovery): capturedAt is a real event timestamp → used as-is.
+ *  - qbo: recordedAt = MetaData.CreateTime (strict instant compare). Absent or
+ *    unparseable → txnDate = capturedAt (the TxnDate): outreach's UTC date must be
+ *    strictly before it, so same-day outreach is NOT billable (it may have been
+ *    sent after the client paid). Neither → no fee.
+ *  - anything else (stripe_recovery): capturedAt is a real event timestamp →
+ *    strict instant compare against it. No date fallback.
  */
-export function outreachCutoff(source: string, paymentAt: string): string | null {
-  const ms = Date.parse(paymentAt);
-  if (Number.isNaN(ms)) return null;
-  if (source !== QBO_SOURCE) return new Date(ms).toISOString();
-  const d = new Date(ms);
-  return new Date(
-    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999),
-  ).toISOString();
+export function paymentTimesFor(opts: LiveCaptureDepsOptions): {
+  recordedAt: string | null;
+  txnDate: string | null;
+} {
+  if (opts.source === QBO_SOURCE) {
+    return { recordedAt: opts.paymentRecordedAt ?? null, txnDate: opts.paymentAt };
+  }
+  return { recordedAt: opts.paymentAt, txnDate: null };
 }
 
 export function createLiveCaptureDeps(opts: LiveCaptureDepsOptions): CaptureDeps {
   const service = getSupabase();
-  const cutoff = outreachCutoff(opts.source, opts.paymentAt);
+  const payment = paymentTimesFor(opts);
+  const paymentTimeKnown = parses(payment.recordedAt) || parses(payment.txnDate);
 
   return {
     async resolveSubscriber(ref) {
@@ -143,19 +146,25 @@ export function createLiveCaptureDeps(opts: LiveCaptureDepsOptions): CaptureDeps
       }
       // outreachSent = the invoice's write-once outreach marker (first REAL contact
       // on any channel: MailerSend-accepted email or Vapi-accepted call — see
-      // lib/outreach/markOutreachStarted) is set AND at or before this payment's
-      // cutoff. recovery_attempts / communications are deliberately NOT read: the
-      // Brick-A SIMULATION rows there (sent_at set, no real send) must never bill.
-      if (cutoff == null) {
+      // lib/outreach/markOutreachStarted) is set AND strictly before this payment
+      // (see paymentTimesFor). recovery_attempts / communications are deliberately
+      // NOT read: the Brick-A SIMULATION rows there (sent_at set, no real send)
+      // must never bill.
+      if (!paymentTimeKnown) {
         console.warn(
-          `captureDepsLive.getInvoiceAttribution: unparseable paymentAt "${opts.paymentAt}" ` +
-            `(source=${opts.source}); treating outreach as not sent`,
+          `captureDepsLive.getInvoiceAttribution: no usable payment time ` +
+            `(paymentAt="${opts.paymentAt}", paymentRecordedAt="${opts.paymentRecordedAt ?? ""}", ` +
+            `source=${opts.source}); treating outreach as not sent`,
         );
         return { found: true, outreachSent: false };
       }
       return {
         found: true,
-        outreachSent: outreachStartedBy(invoices[0].outreach_started_at ?? null, cutoff),
+        outreachSent: isOutreachBeforePayment(
+          invoices[0].outreach_started_at ?? null,
+          payment.recordedAt,
+          payment.txnDate,
+        ),
       };
     },
 

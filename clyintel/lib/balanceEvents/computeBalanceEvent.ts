@@ -11,6 +11,8 @@
 //   balance_events_delta_matches → delta_cents = prev - new
 // (both are guaranteed by the guard + arithmetic below).
 
+import { isOutreachBeforePayment } from "../capture/outreachBeforePayment";
+
 export interface ComputeBalanceEventInput {
   // Context passed straight through to the row.
   subscriberId: string;
@@ -29,8 +31,15 @@ export interface ComputeBalanceEventInput {
   outreachStartedAt: string | null;
 
   // ISO timestamp of this sync — the moment the drop was DETECTED. Recorded in
-  // evidence, and the cut-off the outreach marker is compared against.
+  // evidence, and (full-sync path only) the cut-off the marker is compared against.
   syncedAt: string;
+
+  // Capture-time path only: the times of the payment that caused this drop
+  // (QBO MetaData.CreateTime + TxnDate). When present, BOTH booleans come from
+  // isOutreachBeforePayment — the same rule and inputs as the billing gate — so
+  // balance_events agrees with rev_share_ledger. Omitted/null = full-sync path
+  // (no payment record): booleans compare the marker to syncedAt, as before.
+  payment?: { recordedAt: string | null; txnDate: string | null } | null;
 }
 
 // Shape is intentionally the subset of public.balance_events["Insert"] that this
@@ -49,6 +58,8 @@ export interface BalanceEventRow {
     newOutstandingCents: number;
     syncedAt: string;
     outreachStartedAt: string | null;
+    paymentRecordedAt: string | null;
+    paymentTxnDate: string | null;
   };
 }
 
@@ -77,6 +88,7 @@ export function computeBalanceEvent(
     newOutstandingCents,
     outreachStartedAt,
     syncedAt,
+    payment,
   } = input;
 
   // First-ever observation: no anchor, so nothing to compare against. Never
@@ -95,10 +107,14 @@ export function computeBalanceEvent(
   // prev > new here, so delta > 0 and both CHECK constraints hold.
   const deltaCents = prevOutstandingCents - newOutstandingCents;
 
-  // Emission-time evaluation: whether outreach had started by the time we observed
-  // this drop (detection time is the only payment-time bound available here). Fee
-  // eligibility mirrors it exactly.
-  const outreachHadFired = outreachStartedBy(outreachStartedAt, syncedAt);
+  // Emission-time evaluation; fee eligibility mirrors it exactly.
+  //  - capture path (payment known): outreach strictly before THIS payment, by the
+  //    billing gate's own helper and inputs.
+  //  - full-sync path: whether outreach had started by the time we observed this
+  //    drop (detection time is the only payment-time bound available there).
+  const outreachHadFired = payment
+    ? isOutreachBeforePayment(outreachStartedAt, payment.recordedAt, payment.txnDate)
+    : outreachStartedBy(outreachStartedAt, syncedAt);
 
   return {
     subscriber_id: subscriberId,
@@ -114,6 +130,8 @@ export function computeBalanceEvent(
       newOutstandingCents,
       syncedAt,
       outreachStartedAt,
+      paymentRecordedAt: payment?.recordedAt ?? null,
+      paymentTxnDate: payment?.txnDate ?? null,
     },
   };
 }

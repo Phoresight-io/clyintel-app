@@ -358,12 +358,13 @@ export async function sendEmailStep(
     outcome = "would_send";
   }
 
-  // Outreach-started stamp: a live send MailerSend accepted is first real contact
-  // on the email channel. Never on dry-run / would_send / send_failed, nor when the
+  // Outreach-started stamp: a live send MailerSend accepted (with a message id —
+  // LOCKED RULE 2026-09-30) is first real contact on the email channel. Never on
+  // dry-run / would_send / send_failed / a missing message id, nor when the
   // caller suppresses it (an email sent from inside a test call). Stamped
   // before the record writes below so a later record failure can't lose it, and
   // guarded so a stamp failure never fails the send (it already left the building).
-  if (outcome === "sent" && sentAt && !ctx.suppressOutreachStamp) {
+  if (outcome === "sent" && messageId && sentAt && !ctx.suppressOutreachStamp) {
     try {
       await port.markOutreachStarted(ctx.invoiceId, sentAt);
     } catch (err) {
