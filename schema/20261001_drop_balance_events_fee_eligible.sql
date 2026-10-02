@@ -1,5 +1,8 @@
 -- Migration: drop_balance_events_fee_eligible
--- NOT YET APPLIED — deliver for review; Charles applies to clyintel-dev, then prod.
+-- Test (clyintel-dev): STEP 1 + STEP 2 APPLIED 2026-10-01 (STEP 2 via the SQL editor;
+--   not in the supabase_migrations ledger — see schema/MIGRATIONS.md 2026-10-02).
+-- Prod (clyintel-prod): NOT YET APPLIED. STEP 1 before the develop->main release;
+--   STEP 2 only after Prod is deployed and healthy.
 --
 -- balance_events.fee_eligible is a write-once flag that nothing reads (it
 -- duplicated the billing gate's decision; rev_share_ledger is the source of
