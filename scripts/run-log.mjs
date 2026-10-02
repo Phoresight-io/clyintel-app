@@ -1,4 +1,5 @@
 import { appendFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 // Run log: one durable record per factory run. Writes a JSONL line to
 // .factory/runs/log.jsonl (committed with the branch, so it travels in the PR and
@@ -45,8 +46,12 @@ export function writeRunLog({ brief, reviewSummary }) {
     run_id: process.env.GITHUB_RUN_ID || "local",
     branch: process.env.BRANCH || "unknown",
     actor: process.env.SLACK_USER || process.env.GITHUB_ACTOR || "unknown",
-    brief,
-    plan_title: parseTitle(read(".factory/plan.md")),
+    // NOT the brief itself: this file is committed (so it ends up in main's history) and POSTed to
+    // a third-party Sheet, and briefs in an AR product tend to name customers and invoices. The
+    // full brief stays in the workflow log (limited retention) and the PR body.
+    brief_sha256: createHash("sha256").update(brief ?? "").digest("hex").slice(0, 12),
+    brief_chars: (brief ?? "").length,
+    plan_title: parseTitle(read(".factory/plan.md")).slice(0, 80),
     test_result: testResult(),
     review_verdict: reviewVerdict(reviewSummary),
     repo: process.env.GITHUB_REPOSITORY || "Phoresight-io/clyintel-app",
