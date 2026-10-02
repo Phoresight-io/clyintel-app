@@ -21,7 +21,13 @@ const startCommit = baseCommit(repoRoot);
 const instructionBaseline = snapshot(repoRoot);
 
 const channel = process.env.SLACK_CHANNEL; // undefined when run outside Slack
-const brief = process.env.BRIEF ?? "No brief provided";
+// The workflow always sets BRIEF (to "" when neither the dispatch payload nor the input has
+// one), so `??` would never fall back: refuse an empty brief before any paid agent run.
+const brief = (process.env.BRIEF ?? "").trim();
+if (!brief) {
+  console.error("No brief provided; refusing to start a run with an empty brief.");
+  process.exit(1);
+}
 
 // Load the same prompt bodies the .claude/agents/*.md files hold, so filesystem
 // and programmatic definitions stay in sync. (Programmatic wins if both exist.)
