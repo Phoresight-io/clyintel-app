@@ -189,6 +189,22 @@ jobs:
             printf '%s\n' "$BAD" | sed 's/^/    - /' >&2
             exit 1
           fi
+          # The run record's PATH is allowed above, but its CONTENT is written by the agent job (a
+          # `git add -A` after the agents finish), so it could hold anything, e.g. an env dump, that
+          # would then sit in main's history behind a log file nobody reads. Refuse unless it is
+          # exactly what run-log.mjs writes: one line of JSON, small, only the known keys, and only
+          # short scalar values. `git show ref:path` prints the plain blob (no filters run).
+          REC="$(git show "refs/heads/$BRANCH:.factory/runs/run-${{ github.run_id }}.json" 2>/dev/null || true)"
+          if [ -n "$REC" ]; then
+            if [ "$(printf '%s\n' "$REC" | wc -l)" -ne 1 ] || [ "$(printf %s "$REC" | wc -c)" -gt 2048 ] \
+               || ! printf %s "$REC" | jq -e '
+                    type == "object"
+                    and ((keys - ["ts","run_id","branch","actor","brief_sha256","brief_chars","plan_title","test_result","review_verdict","repo"]) | length == 0)
+                    and all(.[]; (type == "number") or (type == "string" and length <= 200))' >/dev/null 2>&1; then
+              echo "Run record has unexpected content; refusing to push." >&2
+              exit 1
+            fi
+          fi
           # Symlinks (120000) and submodules/gitlinks (160000) are refused outright: a feature
           # never needs one, and a symlink under e.g. clyintel/public/ pointing outside the repo
           # would be resolved by the Vercel preview build. Only the NEW mode is checked, so

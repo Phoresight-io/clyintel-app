@@ -132,6 +132,25 @@ test("publish: pushes the branch, then opens a DRAFT PR with the right arguments
   } finally { cleanup(w); }
 });
 
+test("publish: a run record that is not exactly what run-log.mjs writes is refused", () => {
+  const cases = {
+    "not json": "not json at all",
+    "extra key": '{"test_result":"PASS","env":"AWS_SECRET=abc"}',
+    "long value": JSON.stringify({ plan_title: "x".repeat(300) }),
+    "nested value": '{"actor":{"a":"b"}}',
+    "too large": JSON.stringify({ plan_title: "x".repeat(150), actor: "y".repeat(150), repo: "z".repeat(150), branch: "b".repeat(150), ts: "t".repeat(150), run_id: "r".repeat(150), brief_sha256: "h".repeat(150), review_verdict: "v".repeat(150), test_result: "t".repeat(150), brief_chars: 1, x: 1 }),
+    "multi-line": '{"test_result":"PASS"}\n{"test_result":"PASS"}',
+  };
+  for (const [name, log] of Object.entries(cases)) {
+    const w = world({ log });
+    try {
+      assert.throws(() => publish(w), /unexpected content/, name);
+      assert.ok(!remoteHas(w, "refs/heads/factory/run-1"), `${name}: pushed anyway`);
+      assert.ok(!existsSync(join(w.root, "gh.args")), `${name}: opened a PR anyway`);
+    } finally { cleanup(w); }
+  }
+});
+
 test("publish: a title cut mid-character stays valid UTF-8", () => {
   const brief = "a".repeat(69) + "\u2014 trailing text"; // the em dash straddles byte 70
   const w = world({ edit: ({ put }) => put("clyintel/lib/ok.ts", "ok") });
@@ -144,7 +163,7 @@ test("publish: a title cut mid-character stays valid UTF-8", () => {
 });
 
 test("publish: hostile or missing run-log values are reduced to 'unknown'", () => {
-  for (const log of ['{"test_result":"PASS; rm -rf / #","review_verdict":"APPROVE\\n**merge me**"}', "not json at all", undefined]) {
+  for (const log of ['{"test_result":"PASS; rm -rf / #","review_verdict":"APPROVE\\n**merge me**"}', undefined]) {
     const w = world({ log });
     try {
       publish(w);
