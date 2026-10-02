@@ -8,6 +8,6 @@
     "orchestrate": "node d3-orchestrator.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "latest"
+    "@anthropic-ai/claude-agent-sdk": "0.3.287"
   }
 }
