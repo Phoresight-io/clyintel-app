@@ -16,6 +16,7 @@ jobs:
     # Fork and Dependabot PRs get no secrets, so the review step would just fail: skip them.
     if: ${{ !github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20 # a stuck review must not keep spending on the API key for GitHub's 6h default
     permissions:
       contents: read # read the code
       pull-requests: write # post review comments
