@@ -80,7 +80,7 @@ jobs:
       # via $GITHUB_ENV. The publish job re-validates the bundle regardless.
       - name: Export commits as a git bundle
         run: |
-          git bundle create "$RUNNER_TEMP/factory.bundle" "factory/run-${{ github.run_id }}" ^main
+          git bundle create "$RUNNER_TEMP/factory.bundle" "factory/run-${{ github.run_id }}" "^${{ github.sha }}"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -140,6 +140,9 @@ jobs:
           VERDICT="$(printf %s "$LOGLINE" | jq -r '.review_verdict // "unknown"' 2>/dev/null || echo unknown)"
           case "$TEST_RESULT" in PASS|FAIL|none) ;; *) TEST_RESULT=unknown ;; esac
           case "$VERDICT" in APPROVE|"REQUEST CHANGES"|BLOCK) ;; *) VERDICT=unknown ;; esac
+          AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
+            push -u origin "$BRANCH"
           # No `|| true`: if PR creation fails, the run fails.
           PR_URL="$(gh pr create --repo "$GITHUB_REPOSITORY" \
             --head "$BRANCH" --base main --draft \
