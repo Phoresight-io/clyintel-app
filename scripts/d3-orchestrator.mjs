@@ -111,9 +111,15 @@ async function run(prompt) {
   return final.result;
 }
 
-const testFailed = () =>
-  existsSync(".factory/test-report.md") &&
-  /##\s*Result:\s*FAIL/i.test(readFileSync(".factory/test-report.md", "utf8"));
+// The test gate fails CLOSED: only an explicit "## Result: PASS" counts as passing.
+// A missing report, an unparseable one, or a tester that hit maxTurns all count as
+// "not passed". If the report has several Result lines, the last one decides, and
+// the unfilled template line "## Result: PASS | FAIL" is not a result.
+const testPassed = () => {
+  if (!existsSync(".factory/test-report.md")) return false;
+  const results = [...readFileSync(".factory/test-report.md", "utf8").matchAll(/##\s*Result:\s*\**\s*(PASS|FAIL)\b(?!\s*\|)/gi)];
+  return results.length > 0 && results[results.length - 1][1].toUpperCase() === "PASS";
+};
 
 async function pipeline() {
   await postSlack(channel, `▶️ Design → build → test → review: ${brief}`);
@@ -132,11 +138,13 @@ In order:
 Report the tester's PASS/FAIL result. Do not review or deploy yet.`);
 
   // Test gate: one fix loop if tests failed, so a red build doesn't reach review.
-  if (testFailed()) {
-    await postSlack(channel, "⚠️ Tests failed — sending back to the coder once.");
-    await run(`The tester reported FAIL in .factory/test-report.md. Use the coder
-agent to fix the implementation (not the tests) per the failures listed, commit,
-then use the tester agent to re-run and rewrite .factory/test-report.md.`);
+  if (!testPassed()) {
+    await postSlack(channel, "⚠️ Tests did not pass — sending back to the coder once.");
+    await run(`.factory/test-report.md is missing, unparseable, or reports FAIL. Use
+the coder agent to fix the implementation (not the tests) per the failures listed
+(or, if there is no report, to make sure the work is complete and committed), then
+use the tester agent to re-run the tests and rewrite .factory/test-report.md ending
+with a line "## Result: PASS" or "## Result: FAIL".`);
   }
 
   // Review last — reads the diff AND the test report.
@@ -150,7 +158,7 @@ exactly like this (diff/log/show also need the two --no- flags):
   git --no-pager -c core.fsmonitor=false -c log.showSignature=false diff --no-ext-diff --no-textconv main...HEAD
 Tell the reviewer to use that form.`);
 
-  const stillFailing = testFailed();
+  const stillFailing = !testPassed();
 
   // Durable run log: one record per run (in-repo JSONL, + optional Sheet row).
   const record = writeRunLog({ brief, reviewSummary: verdict });
@@ -160,7 +168,7 @@ Tell the reviewer to use that form.`);
   // workflow right after this script) and merges to main; Vercel auto-deploys main.
   await postSlack(
     channel,
-    `${verdict}\n\n${stillFailing ? "❌ Tests still failing — fix before merging. " : "✅ Build + test + review complete. "}` +
+    `${verdict}\n\n${stillFailing ? "❌ Tests did not pass (or no test report) — fix before merging. " : "✅ Build + test + review complete. "}` +
       `A pull request for branch \`${process.env.BRANCH ?? "(unknown)"}\` is being opened for human review; ` +
       `merging it to main deploys via Vercel.\n` +
       `📋 Logged: *${record.plan_title}* — tests ${record.test_result}, review ${record.review_verdict}.`
