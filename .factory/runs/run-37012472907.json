@@ -1,0 +1,1 @@
+{"ts":"2026-10-02T13:27:01.013Z","run_id":"37012472907","branch":"factory/run-37012472907","actor":"Phoresight-io","brief_sha256":"bd55c60475a6","brief_chars":61,"plan_title":"Add one-line HTML comment to top of clyintel/types/README.md","test_result":"PASS","review_verdict":"APPROVE","repo":"Phoresight-io/clyintel-app","num_turns":15,"total_cost_usd":0.8944,"guard_denials":10}

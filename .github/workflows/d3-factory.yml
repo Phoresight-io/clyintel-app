@@ -1,0 +1,344 @@
+name: D3 Factory
+
+on:
+  # Primary trigger: Slack → webhook → repository_dispatch
+  repository_dispatch:
+    types: [d3-run]
+  # Fallback for testing WITHOUT Slack: run manually from the Actions tab
+  workflow_dispatch:
+    inputs:
+      brief:
+        description: "what to build"
+        required: true
+
+# There is deliberately no deploy job. The deploy gate is: a human reviews the
+# factory PR and merges to main, and Vercel auto-deploys main (see CLAUDE.md).
+#
+# Two jobs on purpose. Every step in a job shares $GITHUB_ENV and $GITHUB_PATH, so
+# an agent with Bash (e.g. after a prompt injection) could poison PATH or BASH_ENV
+# for every later step in ITS job. So the job that runs agents has NO write token,
+# and the job that has one (publish) never executes anything the agents wrote: it
+# only receives their commits as a git bundle, which carries objects, not hooks,
+# config or scripts.
+jobs:
+  pipeline:
+    # KILL SWITCH: merging this workflow does not arm it. It runs only when the repository
+    # variable D3_FACTORY_ENABLED is exactly "true" (Settings -> Secrets and variables ->
+    # Actions -> Variables). Set it only after the Vercel preview question is settled:
+    # pushing factory/run-* makes Vercel build a preview of unreviewed agent code with the
+    # Preview environment's variables. With it unset, a run is skipped (publish is skipped
+    # too, as it needs this job) and notify-failure tells Slack so.
+    if: ${{ vars.D3_FACTORY_ENABLED == 'true' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    # A stuck run must not burn API spend for GitHub's 6h default, and /d3 calls
+    # don't run in parallel. Note this is not a FIFO queue: GitHub keeps at most ONE
+    # pending run per group and cancels an older pending run when a newer one
+    # arrives, so rapid /d3 calls can be dropped.
+    timeout-minutes: 60
+    concurrency:
+      group: d3-factory
+      cancel-in-progress: false
+    permissions:
+      contents: read # no write token in the job that runs agents
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # reviewer needs history for git diff main...HEAD
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22" # same as ci.yml
+          # No npm cache on purpose: this job runs agents with shell access on the default
+          # branch, and a cache saved after they ran could be restored by other workflows.
+
+      # Factory infra is self-contained in scripts/ with its own package.json and
+      # lockfile, so the app's dependencies are never touched.
+      - name: Install factory dependencies (clean, from lockfile)
+        working-directory: scripts
+        run: npm ci
+
+      # The tester has to run the app's own suite (vitest, tsc), so install the app's dependencies
+      # before any agent runs. This is the trusted base commit's lockfile, installed by us, not by an
+      # agent. --ignore-scripts: dependency lifecycle scripts would run here with the runner's
+      # environment, and vitest/tsc do not need them. The orchestrator refuses to start without it.
+      - name: Install the app's dependencies (clean, from lockfile, no install scripts)
+        working-directory: clyintel
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Create working branch
+        run: |
+          BR="factory/run-${{ github.run_id }}"
+          git checkout -b "$BR"
+          git config user.name "d3-factory"
+          git config user.email "factory@phoresight.io"
+          echo "BRANCH=$BR" >> "$GITHUB_ENV"
+
+      - name: Run pipeline (Planner → Coder → Tester → Reviewer)
+        working-directory: scripts
+        env:
+          # A dedicated, spend-capped key can be set as D3_FACTORY_ANTHROPIC_API_KEY (so it can be
+          # capped and rotated apart from PR review); until then the shared ANTHROPIC_API_KEY is used.
+          ANTHROPIC_API_KEY: ${{ secrets.D3_FACTORY_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          BRIEF: ${{ github.event.client_payload.brief || inputs.brief }}
+          SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
+          SLACK_USER: ${{ github.event.client_payload.user }}
+          RUN_LOG_SHEET_WEBHOOK: ${{ secrets.RUN_LOG_SHEET_WEBHOOK }}
+        run: node d3-orchestrator.mjs
+
+      - name: Commit run log + any factory artifacts meant to persist
+        run: |
+          git add -A
+          git -c core.hooksPath=/dev/null commit -m "factory run ${{ github.run_id }}" || echo "nothing to commit"
+
+      # Hand the commits to the publish job. The branch name comes from the
+      # workflow expression, NOT from $BRANCH, which an agent could have rewritten
+      # via $GITHUB_ENV. The publish job re-validates the bundle regardless.
+      - name: Export commits as a git bundle
+        run: |
+          git bundle create "$RUNNER_TEMP/factory.bundle" "factory/run-${{ github.run_id }}" "^${{ github.sha }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: factory-bundle
+          path: ${{ runner.temp }}/factory.bundle
+          if-no-files-found: error
+          retention-days: 3
+
+  # KNOWN FOLLOW-UP: PRs opened with the default GITHUB_TOKEN do not trigger other
+  # workflows, so ci.yml will NOT run on a factory PR (claude-review.yml does run once
+  # a human marks it ready, because that is a user event). Fixing CI needs a PAT or
+  # GitHub App token here, or `ready_for_review` in ci.yml's pull_request types. Not wired.
+  # The repo setting "Allow GitHub Actions to create and approve pull requests" is
+  # needed for `gh pr create` either way.
+  publish:
+    needs: pipeline # skipped if the pipeline failed, so a failed run opens no PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Trusted checkout of the base commit only. Nothing the agents wrote is
+      # checked out or executed in this job.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: factory-bundle
+          path: ${{ runner.temp }}/bundle
+
+      - name: Push branch and open PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
+          BRIEF: ${{ github.event.client_payload.brief || inputs.brief }}
+          BRANCH: factory/run-${{ github.run_id }}
+        run: |
+          BUNDLE="$RUNNER_TEMP/bundle/factory.bundle"
+          git bundle verify "$BUNDLE"
+          # The bundle is untrusted: accept exactly one ref, our branch.
+          HEADS="$(git bundle list-heads "$BUNDLE" | awk '{print $2}')"
+          if [ "$HEADS" != "refs/heads/$BRANCH" ]; then
+            echo "Unexpected refs in bundle: $HEADS" >&2
+            exit 1
+          fi
+          git fetch -q --no-tags "$BUNDLE" "refs/heads/$BRANCH:refs/heads/$BRANCH"
+          # Push ONE commit holding exactly the tree checked below. A push uploads every
+          # commit in the chain, so without this an agent could commit a credential (or a
+          # protected file) and delete it in a later commit: the net diff passes every check
+          # here and the secret still lands in the branch history on GitHub.
+          TREE="$(git rev-parse "refs/heads/$BRANCH^{tree}")"
+          # Everything that goes into the commit is fixed by the tree and the base commit (dates
+          # come from the base commit), so re-running this job after a push that succeeded but a
+          # later step failed rebuilds the SAME commit: the push is then a no-op instead of a
+          # rejected non-fast-forward, and `gh pr create` can be retried.
+          BASE_DATE="$(git show -s --format=%cI "$GITHUB_SHA")"
+          SQUASHED="$(GIT_AUTHOR_NAME=d3-factory GIT_AUTHOR_EMAIL=d3-factory@users.noreply.github.com \
+            GIT_COMMITTER_NAME=d3-factory GIT_COMMITTER_EMAIL=d3-factory@users.noreply.github.com \
+            GIT_AUTHOR_DATE="$BASE_DATE" GIT_COMMITTER_DATE="$BASE_DATE" \
+            git -c core.hooksPath=/dev/null commit-tree "$TREE" -p "$GITHUB_SHA" -m "Factory run ${{ github.run_id }}")"
+          git update-ref "refs/heads/$BRANCH" "$SQUASHED"
+          # The factory's commits must not touch the factory itself, the Slack endpoint, CI,
+          # or anything that steers a Claude Code session (.claude/, any CLAUDE.md, git
+          # attributes/ignore). The agent job's own tripwire only watches files on disk, and
+          # a coder can commit a change and then restore the working tree. This is the
+          # check that holds: it compares two commits in this trusted checkout, so it runs no
+          # filters or drivers. -z so git does not quote unusual paths (a quoted name would
+          # start with " and slip past the ^ anchors); --no-renames so moving a file out of a
+          # protected directory still lists the old path.
+          #
+          # Also protected: the cross-tenant isolation tests (tenant-isolation*, agent-isolation*, any *isolation*.test.*) (weakening it would ship with a
+          # "Tests: PASS" claim), and the build/deploy/data surface that a human must own:
+          # vercel.json (it defines the every-minute QBO worker and settlement crons),
+          # next.config.*, and schema/ (SQL migrations, which can include RLS policies). And
+          # vitest.config.* (it decides whether tenant-isolation runs at all), env-config.test.ts (stops server secrets leaking to client bundles; gates live Stripe
+          # charges) and test/stubs/ (aliased into every suite). And
+          # .ai/ (the product constitution, schema detail, Stripe IDs and specs that
+          # clyintel/CLAUDE.md tells every agent to read) and .mcp.json (registers MCP servers
+          # for Claude sessions): changing either rewrites the rules agents work under.
+          # Matched case-INSENSITIVELY (grep -i): the tree is checked on Linux, but a reviewer on a
+          # case-insensitive checkout (macOS) would get `.Claude/settings.json` written into `.claude/`.
+          PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)(tenant|agent)-isolation[^/]*$|(^|/)[^/]*isolation[^/]*\.(test|spec)\.[cm]?[jt]sx?$|(^|/)env-config\.test\.[cm]?[jt]s$|^(clyintel/)?test/stubs/|(^|/)vercel\.(json|[cm]?[jt]s)$|(^|/)\.vercelignore$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/|(^|/)\.ai/|(^|/)\.mcp\.json$|(^|/)\.env($|\.)|(^|/)\.gitmodules$|(^|/)(\.husky|\.vscode|\.devcontainer)/|(^|/)(middleware|proxy)\.[cm]?[jt]s$|(^|/)\.npmrc$|(^|/)CODEOWNERS$|(^|/)vitest\.config\.[cm]?[jt]s$|(^|/)supabase/'
+          CHANGED_FILES() { git diff --name-only -z --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH"; }
+          # Under .factory/ (only .factory/runs/ can get past .gitignore) the ONE file a run may add
+          # is its own run record; anything else there would ride along into main.
+          BAD="$( { CHANGED_FILES | { grep -izE "$PROTECTED" || true; }
+                    CHANGED_FILES | { grep -izE '^\.factory/' || true; } | { grep -zvE "^\.factory/runs/run-${{ github.run_id }}\.json$" || true; }
+                  } | tr '\0' '\n')"
+          if [ -n "$BAD" ]; then
+            echo "Factory commits touch protected paths; refusing to push:" >&2
+            # Names come from the agent: indent them so none can start a line that the
+            # runner would read as a workflow command (::add-mask::, ::stop-commands::, ...).
+            printf '%s\n' "$BAD" | sed 's/^/    - /' >&2
+            exit 1
+          fi
+          # The run record's PATH is allowed above, but its CONTENT is written by the agent job (a
+          # `git add -A` after the agents finish), so it could hold anything, e.g. an env dump, that
+          # would then sit in main's history behind a log file nobody reads. Refuse unless it is
+          # exactly what run-log.mjs writes: one line of JSON, small, only the known keys, and only
+          # short scalar values. `git show ref:path` prints the plain blob (no filters run).
+          REC="$(git show "refs/heads/$BRANCH:.factory/runs/run-${{ github.run_id }}.json" 2>/dev/null || true)"
+          if [ -n "$REC" ]; then
+            if [ "$(printf '%s\n' "$REC" | wc -l)" -ne 1 ] || [ "$(printf %s "$REC" | wc -c)" -gt 2048 ] \
+               || ! printf %s "$REC" | jq -e '
+                    type == "object"
+                    and ((keys - ["ts","run_id","branch","actor","brief_sha256","brief_chars","plan_title","test_result","review_verdict","repo","num_turns","total_cost_usd","guard_denials"]) | length == 0)
+                    and all(.[]; (type == "number") or (type == "string" and length <= 200))' >/dev/null 2>&1; then
+              echo "Run record has unexpected content; refusing to push." >&2
+              exit 1
+            fi
+          fi
+          # Symlinks (120000) and submodules/gitlinks (160000) are refused outright: a feature
+          # never needs one, and a symlink under e.g. clyintel/public/ pointing outside the repo
+          # would be resolved by the Vercel preview build. Only the NEW mode is checked, so
+          # deleting one is fine. (A path containing a newline can only cause a refusal here.)
+          if git diff --raw --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH" | awk '{print $2}' | grep -qE '^(120000|160000)$'; then
+            echo "Factory commits add symlinks or submodules; refusing to push." >&2
+            exit 1
+          fi
+          # A run that changed no code (only its own record) gets no PR: nothing to review, and a
+          # PR holding just a log file is noise. Say so in Slack instead.
+          if [ -z "$(CHANGED_FILES | tr '\0' '\n' | { grep -vE '^\.factory/runs/' || true; })" ]; then
+            echo "Run changed no files outside .factory/runs/; not pushing and not opening a PR."
+            if [ -n "$SLACK_BOT_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
+              curl -s -X POST https://slack.com/api/chat.postMessage \
+                -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+                -H "Content-Type: application/json; charset=utf-8" \
+                -d "$(jq -n --arg c "$SLACK_CHANNEL" \
+                       --arg t "ℹ️ Factory run ${{ github.run_id }} finished with no code changes; no PR opened." \
+                       '{channel:$c, text:$t}')" || true
+            fi
+            exit 0
+          fi
+          echo "What this run will push (each line prefixed with \"| \" so none can read as a workflow command):"
+          git diff --stat=120 --no-ext-diff --no-textconv --no-renames "$GITHUB_SHA" "refs/heads/$BRANCH" | sed 's/^/    | /'
+          echo "Review that list for anything that looks like data or a credential."
+          # Not blocked (features legitimately change them) but flagged loudly in the PR body (including
+          # billing/tenant-data code: CLAUDE.md rule 7 wants a human to confirm billing logic),
+          # because a missed detail here costs the most: dependencies and the auth/tenant
+          # middleware. Names come from the agent, so reduce them to a safe character set
+          # (no backticks, so they cannot break out of the code fence) and cap the list.
+          SENSITIVE='\.sql$|(^|/)(package(-lock)?\.json|tsconfig[^/]*\.json|\.gitignore)$|^(clyintel/)?lib/(settlement|revshare|ledgerSync|balanceEvents|recovery|qbo|providers|subscriber|outreach|config|contacts|capture|voice)/|^(clyintel/)?lib/(stripe[^/]*|supabase[^/]*|crypto|data|demo-mode|email|voice-calls|invoiceSources|adapters|validatePaymentLink)\.ts$|^clyintel/app/api/|(^|/)instrumentation\.[cm]?[jt]s$'
+          WARN_FILES="$(CHANGED_FILES | { grep -izE "$SENSITIVE" || true; } | tr '\0' '\n' | tr -c 'A-Za-z0-9_./+@\n-' '?' | head -n 25)"
+          WARN_NOTE=""
+          if [ -n "$WARN_FILES" ]; then
+            WARN_NOTE="$(printf '⚠️ Touches sensitive files (dependencies: check package.json for new install scripts such as postinstall/prepare; tsconfig paths, billing/settlement/Stripe/QBO code, inbound webhooks, tenant-data routes, Supabase clients, crypto, demo-mode switch, instrumentation, nested .gitignore). CLAUDE.md rule 7: billing or payment logic needs a human to confirm it. Review these carefully:\n\n```\n%s\n```' "$WARN_FILES")"
+          fi
+          # Weakened tests are easy to miss in a big diff: list EXISTING test files that were
+          # modified or deleted (new ones are not flagged). Same sanitising as above.
+          TEST_FILES="$(git diff --name-status -z --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH" \
+            | tr '\0' '\n' | awk 'NR%2==1{s=$0;next} s ~ /^[MD]$/ {print}' \
+            | { grep -E '\.(test|spec)\.[cm]?[jt]sx?$' || true; } | tr -c 'A-Za-z0-9_./+@\n-' '?' | head -n 15)"
+          if [ -n "$TEST_FILES" ]; then
+            TEST_NOTE="$(printf '⚠️ Modifies or deletes existing tests. Check that no assertion was weakened:\n\n```\n%s\n```' "$TEST_FILES")"
+            if [ -n "$WARN_NOTE" ]; then
+              WARN_NOTE="$(printf '%s\n\n%s' "$WARN_NOTE" "$TEST_NOTE")"
+            else
+              WARN_NOTE="$TEST_NOTE"
+            fi
+          fi
+          # Show the run's self-reported outcome on the PR, but NEVER trust it: the log
+          # is written inside the agent job, so a prompt-injected agent could claim
+          # PASS/APPROVE. Values are reduced to known words (anything else is
+          # "unknown") only to keep injection out of the PR text. Factory PRs are
+          # therefore ALWAYS drafts; a human marks one ready after reviewing the diff
+          # (and, until CI runs on factory PRs, after checking the app's CI by hand).
+          LOGLINE="$(git show "refs/heads/$BRANCH:.factory/runs/run-${{ github.run_id }}.json" 2>/dev/null | tail -n 1 || true)"
+          TEST_RESULT="$(printf %s "$LOGLINE" | jq -r '.test_result // "unknown"' 2>/dev/null || echo unknown)"
+          VERDICT="$(printf %s "$LOGLINE" | jq -r '.review_verdict // "unknown"' 2>/dev/null || echo unknown)"
+          case "$TEST_RESULT" in PASS|FAIL|none) ;; *) TEST_RESULT=unknown ;; esac
+          case "$VERDICT" in APPROVE|"REQUEST CHANGES"|BLOCK) ;; *) VERDICT=unknown ;; esac
+          # The brief is user text: show it as plain text in a code fence (no mentions, links or
+          # images), with backticks removed so it cannot close the fence.
+          BRIEF_NOTE="$(printf '```\n%s\n```' "$(printf %s "$BRIEF" | tr -d '`')")"
+          AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
+            push -u origin "$BRANCH"
+          # No `|| true`: if PR creation fails, the run fails.
+          PR_URL="$(gh pr create --repo "$GITHUB_REPOSITORY" \
+            --head "$BRANCH" --base main --draft \
+            --title "Factory: $(printf %s "$BRIEF" | tr '\n' ' ' | cut -c1-70 | iconv -c -f UTF-8 -t UTF-8)" \
+            --body "Opened by D3 Factory run ${{ github.run_id }}.
+
+          Brief:
+          ${BRIEF_NOTE}
+
+          Self-reported by the factory run (UNVERIFIED, written by the same agents that made the change):
+          Tests: ${TEST_RESULT} | Factory reviewer verdict: ${VERDICT}
+
+          Opened as a DRAFT. Review the diff yourself and run the app's CI before marking it ready.
+
+          ${WARN_NOTE}
+
+          Review the diff, then merge to main to deploy (Vercel auto-deploys main).")"
+          echo "Opened $PR_URL"
+          # Best-effort Slack notice with the real PR link (never fails the run).
+          if [ -n "$SLACK_BOT_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
+            curl -s -X POST https://slack.com/api/chat.postMessage \
+              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+              -H "Content-Type: application/json; charset=utf-8" \
+              -d "$(jq -n --arg c "$SLACK_CHANNEL" \
+                     --arg t "🔀 PR opened for review: $PR_URL (DRAFT; self-reported tests: $TEST_RESULT, reviewer: $VERDICT) — merge it to main to deploy (Vercel auto-deploys main)." \
+                     '{channel:$c, text:$t}')" || true
+          fi
+
+  # If either job fails (e.g. publish REFUSES a push because commits touch protected paths),
+  # the person who ran /d3 was already told "a pull request is being opened". Say that it
+  # failed. Fixed message only: it never includes the brief or the offending paths.
+  notify-failure:
+    needs: [pipeline, publish]
+    if: ${{ always() && (needs.pipeline.result == 'failure' || needs.publish.result == 'failure' || needs.pipeline.result == 'skipped' || needs.pipeline.result == 'cancelled' || needs.publish.result == 'cancelled') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Tell Slack the run failed
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PIPELINE_RESULT: ${{ needs.pipeline.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+        run: |
+          if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_CHANNEL" ]; then
+            echo "No Slack token/channel configured; nothing to notify."
+            exit 0
+          fi
+          if [ "$PIPELINE_RESULT" = "skipped" ]; then
+            MSG="⏸️ D3 Factory is switched off (the repository variable D3_FACTORY_ENABLED is not 'true', or the run was not started from main), so nothing ran."
+          elif [ "$PIPELINE_RESULT" = "cancelled" ] || [ "$PUBLISH_RESULT" = "cancelled" ]; then
+            MSG="⚠️ D3 Factory run was cancelled or timed out before finishing. No PR was opened. See $RUN_URL"
+          elif [ "$PIPELINE_RESULT" = "success" ]; then
+            MSG="❌ D3 Factory run failed while publishing (the push may have been refused, so no PR was opened). See $RUN_URL"
+          else
+            MSG="❌ D3 Factory run failed in the agent job. See $RUN_URL"
+          fi
+          curl -s -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "$(jq -n --arg c "$SLACK_CHANNEL" --arg t "$MSG" '{channel:$c, text:$t}')" || true
