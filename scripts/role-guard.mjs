@@ -34,7 +34,9 @@ const TEST_DIR = /^(clyintel\/)?tests?\//;
 const TESTER_REPORT = /^\.factory\/test-report\.md$/;
 // The multi-tenant isolation test guards against one customer seeing another's
 // financial data. The tester may add tests but must not weaken this one.
-const TESTER_PROTECTED = /(^|\/)tenant-isolation[^/]*$/;
+// Likewise env-config.test.ts (no server secrets in client bundles; gates live Stripe
+// charges) and the vitest stubs aliased into every suite.
+const TESTER_PROTECTED = /(^|\/)tenant-isolation[^/]*$|(^|\/)env-config\.test\.[cm]?[jt]s$|^(clyintel\/)?test\/stubs\//;
 
 // Reviewer's Bash is limited to read-only git in ONE canonical form. The prefix
 // disables things a coder could have planted in .git/config to run code when the
@@ -76,9 +78,13 @@ const SAFE_ARG = /^[A-Za-z0-9_.\/:@~^,%+][A-Za-z0-9_.\/:@~^=,%+-]*$/;
 // human). package.json is deliberately NOT blocked: a feature legitimately adds dependencies.
 const CODER_PROTECTED = new RegExp(
   [
-    "^(\\.claude|\\.github|scripts|\\.git)/",
+    "^(\\.claude|\\.github|scripts|api|\\.git)/",
+    "^(\\.gitignore|\\.gitattributes)$",
+    "(^|/)(CLAUDE\\.md|CLAUDE\\.local\\.md|\\.gitattributes)$",
+    "(^|/)\\.claude/",
+    "(^|/)env-config\\.test\\.[cm]?[jt]s$",
+    "^(clyintel/)?test/stubs/",
     "^\\.factory/runs/",
-    "^\\.gitignore$",
     "(^|/)tenant-isolation[^/]*$",
     "(^|/)vercel\\.json$",
     "(^|/)next\\.config\\.[cm]?[jt]s$",

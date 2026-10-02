@@ -222,6 +222,8 @@ test("publish: commits that touch protected paths are refused, and nothing is pu
     "next.config": ({ put }) => put("clyintel/next.config.ts", "export default {}"),
     "schema migration": ({ put }) => put("clyintel/schema/099_new.sql", "alter table x;"),
     "root schema dir": ({ put }) => put("schema/099_new.sql", "alter table x;"),
+    "weaken env-config test": ({ put }) => put("clyintel/lib/config/env-config.test.ts", "// emptied"),
+    "test stubs": ({ put }) => put("clyintel/test/stubs/server-only.ts", "x"),
     "product context .ai/": ({ put }) => put(".ai/specs/new.md", "steer"),
     "nested .ai/": ({ put }) => put("clyintel/.ai/context.md", "steer"),
     "root .mcp.json": ({ put }) => put(".mcp.json", "{}"),
@@ -300,6 +302,27 @@ test("publish: sensitive file names from the agent cannot inject markup or break
     assert.equal((fence.match(/```/g) || []).length, 2, "exactly one opening and one closing fence");
     assert.doesNotMatch(fence, /<img|a`b/);
     assert.match(fence, /a\?b\/package\.json/);
+  } finally { cleanup(w); }
+});
+
+test("publish: pushes ONE commit of the checked tree, so a committed-then-deleted secret never reaches GitHub", () => {
+  const w = world({
+    edit: ({ put, git, j1 }) => {
+      put("leak.env", "ANTHROPIC_API_KEY=sk-ant-SECRET");
+      git("add", "-A");
+      git("commit", "-qm", "oops");
+      git("rm", "-q", "leak.env");
+      put("clyintel/lib/ok.ts", "ok");
+    },
+  });
+  try {
+    publish(w);
+    const base = sh(w.j2, "git", ["rev-parse", "HEAD"]).trim();
+    const commits = sh(w.remote, "git", ["rev-list", "--count", `${base}..refs/heads/factory/run-1`]).trim();
+    assert.equal(commits, "1", "history must be squashed to a single commit");
+    const allText = sh(w.remote, "git", ["log", "-p", "--all"]);
+    assert.doesNotMatch(allText, /sk-ant-SECRET/);
+    assert.equal(sh(w.remote, "git", ["cat-file", "-t", "refs/heads/factory/run-1:clyintel/lib/ok.ts"]).trim(), "blob");
   } finally { cleanup(w); }
 });
 

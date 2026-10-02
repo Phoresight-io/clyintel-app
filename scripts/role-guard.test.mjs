@@ -1,6 +1,9 @@
 // Run with: node --test scripts/role-guard.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { decide, makeGuardHook, repoRelative, isReadOnlyGit } from "./role-guard.mjs";
 
 const ROOT = "/work/repo";
@@ -64,6 +67,9 @@ test("coder cannot Write/Edit factory, CI or git files", () => {
   // build/deploy surface: vercel.json (crons), next.config.*, schema/
   for (const f of ["vercel.json", "clyintel/vercel.json", "clyintel/next.config.ts", "next.config.mjs", "clyintel/schema/001.sql", "schema/002.sql"])
     for (const t of ["Write", "Edit"]) assert.ok(denied(call(t, { file_path: f }, as("coder"))), `${t} ${f}`);
+  // parity with the publish job's list: refuse up front instead of wasting a paid run
+  for (const f of ["api/slack-command.js", ".gitattributes", "clyintel/.gitattributes", "CLAUDE.md", "clyintel/CLAUDE.md", "clyintel/lib/CLAUDE.local.md", "clyintel/.claude/settings.json", "clyintel/lib/config/env-config.test.ts", "clyintel/test/stubs/server-only.ts"])
+    for (const t of ["Write", "Edit"]) assert.ok(denied(call(t, { file_path: f }, as("coder"))), `${t} ${f}`);
   // product context the agents are steered by (.ai/) and MCP server config
   for (const f of [".ai/constitution.md", "clyintel/.ai/specs/x.md", ".mcp.json", "clyintel/.mcp.json"])
     for (const t of ["Write", "Edit"]) assert.ok(denied(call(t, { file_path: f }, as("coder"))), `${t} ${f}`);
@@ -78,7 +84,7 @@ test("coder cannot Write/Edit factory, CI or git files", () => {
 test("tester can write test files and its report only", () => {
   const ok = [
     "clyintel/tests/new-feature.test.ts",
-    "clyintel/test/stubs/server-only.ts", // top-level test dir
+    "clyintel/test/helpers/db.ts", // top-level test dir
     "tests/helper.ts",
     "clyintel/lib/settlement/charge.spec.tsx", // test filename anywhere
     "clyintel/app/__tests__/page.test.tsx",
@@ -97,6 +103,8 @@ test("tester can write test files and its report only", () => {
     ".github/workflows/ci.yml",
     ".factory/plan.md", // tester must not rewrite the plan
     ".factory/runs/log.jsonl", // ...or forge the run log
+    "clyintel/lib/config/env-config.test.ts", // guards server secrets / live-charge gating
+    "clyintel/test/stubs/server-only.ts", // aliased into every suite
     "clyintel/tests/tenant-isolation.test.ts", // the multi-tenant isolation test must not be weakened
     "clyintel/tests/tenant-isolation.helpers.ts",
     "clyintel/latest/foo.ts", // "latest/" must not match "test"
@@ -202,4 +210,20 @@ test("hook fails closed and reports calls", async () => {
   assert.equal(n, 1);
   // malformed input (tool_input null) must deny, not throw
   assert.ok(denied(await hook({ tool_name: "Write", tool_input: null, agent_id: "a", agent_type: "tester" })));
+});
+
+test("coder protections cover everything the publish job refuses (kept in sync)", () => {
+  const wf = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../.github/workflows/d3-factory.yml"), "utf8");
+  const PROTECTED = new RegExp(wf.match(/PROTECTED='([^']+)'/)[1]);
+  const samples = [
+    ".claude/agents/x.md", ".github/workflows/x.yml", "scripts/x.mjs", "api/x.js", ".gitignore", ".gitattributes",
+    "clyintel/.gitattributes", "CLAUDE.md", "clyintel/lib/CLAUDE.md", "CLAUDE.local.md", "clyintel/.claude/settings.json",
+    "clyintel/tests/tenant-isolation.test.ts", "clyintel/lib/config/env-config.test.ts", "clyintel/test/stubs/server-only.ts",
+    "vercel.json", "clyintel/vercel.json", "clyintel/next.config.ts", "schema/1.sql", "clyintel/schema/1.sql",
+    ".ai/x.md", "clyintel/.ai/x.md", ".mcp.json", "clyintel/.mcp.json",
+  ];
+  for (const f of samples) {
+    assert.ok(PROTECTED.test(f), `sample not protected by publish: ${f}`);
+    assert.ok(denied(call("Write", { file_path: f }, as("coder"))), `publish refuses ${f} but the coder may write it`);
+  }
 });
