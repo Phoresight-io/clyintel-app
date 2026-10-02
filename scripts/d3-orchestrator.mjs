@@ -6,7 +6,7 @@ import { chdir } from "node:process";
 import { postSlack } from "./slack.mjs";
 import { writeRunLog, pushRunLogToSheet, parseTestResult } from "./run-log.mjs";
 import { makeGuardHook } from "./role-guard.mjs";
-import { baseCommit, tamperedPaths } from "./instruction-guard.mjs";
+import { baseCommit, snapshot, tamperedPaths } from "./instruction-guard.mjs";
 
 // This script lives in scripts/ but the factory operates on the repo root
 // (.factory/, git, the app code). Anchor the working directory at the repo root
@@ -14,9 +14,11 @@ import { baseCommit, tamperedPaths } from "./instruction-guard.mjs";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 chdir(repoRoot);
 
-// The commit this run started from, taken before any agent runs. Used to detect
-// agents tampering with the files that steer later sessions (see instruction-guard).
+// Taken before any agent runs: the commit this run started from (the reviewer diffs
+// against it), and a snapshot of the files that steer later sessions, used to detect
+// agent tampering between runs (see instruction-guard).
 const startCommit = baseCommit(repoRoot);
+const instructionBaseline = snapshot(repoRoot);
 
 const channel = process.env.SLACK_CHANNEL; // undefined when run outside Slack
 const brief = process.env.BRIEF ?? "No brief provided";
@@ -89,7 +91,7 @@ async function run(prompt) {
   // Every run() starts a new session that loads project settings and CLAUDE.md. If an
   // earlier agent planted or edited any (hooks in .claude/settings.json, a steering
   // CLAUDE.md), refuse to start the next session.
-  const tampered = tamperedPaths(repoRoot, startCommit);
+  const tampered = tamperedPaths(repoRoot, instructionBaseline);
   if (tampered.length) {
     throw new PipelineError(`agent modified instruction/settings files: ${tampered.slice(0, 5).join(", ")}`);
   }
@@ -164,8 +166,8 @@ the review, and end your reply with exactly one final line of the form
 
 The reviewer's only shell access is read-only git, and it is enforced to be written
 exactly like this (diff/log/show also need the two --no- flags):
-  git --no-pager -c core.fsmonitor=false -c log.showSignature=false diff --no-ext-diff --no-textconv main...HEAD
-Tell the reviewer to use that form.`);
+  git --no-pager -c core.fsmonitor=false -c log.showSignature=false diff --no-ext-diff --no-textconv ${startCommit}...HEAD
+(${startCommit} is the commit this run started from.) Tell the reviewer to use that form.`);
 
   const stillFailing = !testPassed();
 

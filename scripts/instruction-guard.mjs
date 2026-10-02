@@ -3,48 +3,67 @@
 // Each run() starts a new session that loads project settings and CLAUDE.md
 // (settingSources: ["project"]). The coder has Write + Bash, so it could plant
 // .claude/settings.json (shell hooks/env) or edit a CLAUDE.md, and the tester or
-// reviewer session would then pick it up outside the role guard's intent. Checked
-// before every run(): anything changed, added, deleted or ignored-but-present in
-// these paths, compared with the commit the run STARTED from, aborts the pipeline.
+// reviewer session would then pick it up outside the role guard's intent.
 //
-// The git calls run in the orchestrator process after an agent may have
-// booby-trapped .git/config, so they pass command-line overrides (which win over
-// repo config) that disable the things git would otherwise execute.
+// The orchestrator takes a snapshot of these files BEFORE any agent runs and
+// compares against it before every run(); any added, changed or removed file aborts
+// the pipeline. This deliberately does NOT use git: the check runs in the
+// orchestrator process after an agent may have planted config in .git, and git
+// commands that compare the working tree can run planted clean filters. Reading
+// and hashing the raw bytes with node:fs executes nothing.
 
+import { readdirSync, lstatSync, readFileSync, readlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { join, relative, sep } from "node:path";
 
-// Pathspec magic: any CLAUDE.md / CLAUDE.local.md at any depth (Claude Code loads
-// nested ones lazily), and any .claude/ directory at any depth.
-// node_modules is deliberately NOT excluded (a nested CLAUDE.md there could also be
-// loaded). Dependencies are pinned by scripts/package-lock.json, so this can't change
-// silently; if a dependency ever ships one, the first run fails loudly and the path
-// can be excluded then.
-export const WATCHED = [
-  ":(glob)**/CLAUDE.md",
-  ":(glob)**/CLAUDE.local.md",
-  ":(glob).claude/**",
-  ":(glob)**/.claude/**",
-];
+// Watched: any CLAUDE.md / CLAUDE.local.md at any depth (Claude Code loads nested
+// ones lazily) and everything under any .claude/ directory.
+// Skipped: .git (not instructions) and node_modules. Skipping node_modules is a
+// trade-off: an agent-run `npm ci` can create 100k+ files that we'd re-hash on every
+// run(), and a CLAUDE.md there is only loaded if an agent reads files in that exact
+// directory. scripts/node_modules is pinned by scripts/package-lock.json.
+const SKIP_DIRS = new Set([".git", "node_modules"]);
+const isWatchedFile = (name) => name === "CLAUDE.md" || name === "CLAUDE.local.md";
 
-const SAFE_GIT = [
-  "--no-pager",
-  "-c", "core.fsmonitor=false",
-  "-c", "core.hooksPath=/dev/null",
-  "-c", "log.showSignature=false",
-];
-
-const git = (cwd, ...args) =>
-  execFileSync("git", [...SAFE_GIT, ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-
-// Commit to compare against; take it BEFORE any agent runs.
-export const baseCommit = (cwd) => git(cwd, "rev-parse", "HEAD").trim();
-
-// Returns a list of offending paths (empty = untouched).
-export function tamperedPaths(cwd, base) {
-  const changed = git(cwd, "diff", "--name-only", "--no-ext-diff", "--no-textconv", base, "--", ...WATCHED)
-    .split("\n").map((s) => s.trim()).filter(Boolean);
-  // --ignored too: an agent can hide a file via .gitignore or .git/info/exclude.
-  const status = git(cwd, "status", "--porcelain", "--untracked-files=all", "--ignored", "--", ...WATCHED)
-    .split("\n").map((s) => s.trim()).filter(Boolean).map((l) => l.replace(/^\S+\s+/, ""));
-  return [...new Set([...changed, ...status])];
+// Map of repo-relative path -> sha256 of the raw bytes (or of the link target for a
+// symlink; symlinks are never followed).
+export function snapshot(root) {
+  const out = new Map();
+  const walk = (dir, inClaude) => {
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      if (ent.isDirectory()) {
+        if (SKIP_DIRS.has(ent.name)) continue;
+        walk(join(dir, ent.name), inClaude || ent.name === ".claude");
+        continue;
+      }
+      // A symlink named .claude counts as watched too (it would redirect settings).
+      if (!(inClaude || ent.name === ".claude" || isWatchedFile(ent.name))) continue;
+      const full = join(dir, ent.name);
+      const h = createHash("sha256");
+      if (lstatSync(full).isSymbolicLink()) h.update("symlink:" + readlinkSync(full));
+      else h.update(readFileSync(full));
+      out.set(relative(root, full).split(sep).join("/"), h.digest("hex"));
+    }
+  };
+  walk(root, false);
+  return out;
 }
+
+// Paths that differ from the baseline snapshot (empty = untouched).
+export function tamperedPaths(root, baseline) {
+  const now = snapshot(root);
+  const bad = [];
+  for (const [p, h] of now) if (baseline.get(p) !== h) bad.push(p);
+  for (const p of baseline.keys()) if (!now.has(p)) bad.push(p);
+  return bad.sort();
+}
+
+// The commit the run started from (for the reviewer's diff range and PR context).
+// Called once, BEFORE any agent runs, with command-line overrides for safety.
+export const baseCommit = (cwd) =>
+  execFileSync(
+    "git",
+    ["--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "rev-parse", "HEAD"],
+    { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
+  ).trim();

@@ -2,10 +2,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, appendFileSync, chmodSync } from "node:fs";
+import {
+  mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, appendFileSync, chmodSync, symlinkSync, unlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { baseCommit, tamperedPaths } from "./instruction-guard.mjs";
+import { snapshot, tamperedPaths, baseCommit } from "./instruction-guard.mjs";
 
 const ENV = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
 const sh = (cwd, ...a) => execFileSync("git", a, { cwd, env: ENV, stdio: "pipe" });
@@ -14,7 +16,7 @@ const put = (dir, rel, body = "x") => {
   writeFileSync(join(dir, rel), body);
 };
 
-// A repo shaped like ours: instructions + app code, committed, then BASE recorded.
+// A repo shaped like ours, with a baseline snapshot taken before any "agent" acts.
 function repo() {
   const dir = mkdtempSync(join(tmpdir(), "ig-"));
   sh(dir, "init", "-q", "-b", "main");
@@ -24,7 +26,7 @@ function repo() {
   put(dir, "clyintel/app/page.tsx", "page");
   sh(dir, "add", "-A");
   sh(dir, "commit", "-qm", "base");
-  return { dir, base: baseCommit(dir) };
+  return { dir, base: snapshot(dir) };
 }
 const check = (fn) => {
   const { dir, base } = repo();
@@ -36,6 +38,15 @@ const check = (fn) => {
   }
 };
 
+test("baseline watches instruction files only", () => {
+  const { dir, base } = repo();
+  try {
+    assert.deepEqual([...base.keys()].sort(), [".claude/agents/reviewer.md", "CLAUDE.md", "clyintel/CLAUDE.md"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("clean repo, and ordinary app changes, are not flagged", () => {
   assert.deepEqual(check(() => {}), []);
   assert.deepEqual(
@@ -44,6 +55,7 @@ test("clean repo, and ordinary app changes, are not flagged", () => {
       put(d, "clyintel/lib/new.ts", "new");
       put(d, ".factory/plan.md", "plan");
       put(d, "clyintel/tests/a.test.ts", "t");
+      put(d, "clyintel/node_modules/x/index.js", "dep"); // skipped on purpose
     }),
     []
   );
@@ -63,34 +75,58 @@ test("new settings / nested CLAUDE.md / deleted agent file are flagged", () => {
   assert.deepEqual(check((d) => rmSync(join(d, ".claude/agents/reviewer.md"))), [".claude/agents/reviewer.md"]);
 });
 
-test("a file hidden via .git/info/exclude or .gitignore is still flagged", () => {
-  const hiddenExclude = check((d) => {
-    put(d, ".claude/settings.json", "{}");
-    appendFileSync(join(d, ".git/info/exclude"), ".claude/settings.json\n");
-  });
-  assert.deepEqual(hiddenExclude, [".claude/settings.json"]);
-  const hiddenIgnore = check((d) => {
-    put(d, "clyintel/lib/CLAUDE.md", "steer");
-    appendFileSync(join(d, ".gitignore"), "CLAUDE.md\n");
-  });
-  assert.ok(hiddenIgnore.includes("clyintel/lib/CLAUDE.md"), JSON.stringify(hiddenIgnore));
+test("hiding a file from git does not hide it from the check", () => {
+  assert.deepEqual(
+    check((d) => {
+      put(d, ".claude/settings.json", "{}");
+      appendFileSync(join(d, ".git/info/exclude"), ".claude/settings.json\n");
+    }),
+    [".claude/settings.json"]
+  );
+  assert.ok(
+    check((d) => {
+      put(d, "clyintel/lib/CLAUDE.md", "steer");
+      appendFileSync(join(d, ".gitignore"), "CLAUDE.md\n");
+    }).includes("clyintel/lib/CLAUDE.md")
+  );
 });
 
-test("checking never runs code planted in .git/config (fsmonitor/hooks)", () => {
+test("replacing a watched file with a symlink is flagged (and never followed)", () => {
+  const flagged = check((d) => {
+    unlinkSync(join(d, "CLAUDE.md"));
+    symlinkSync("/etc/passwd", join(d, "CLAUDE.md"));
+  });
+  assert.deepEqual(flagged, ["CLAUDE.md"]);
+  // a symlink named .claude redirecting settings is flagged too
+  assert.deepEqual(check((d) => symlinkSync("/tmp", join(d, "clyintel/.claude"))), ["clyintel/.claude"]);
+});
+
+test("checking executes nothing planted in .git/config (it never calls git)", () => {
   const { dir, base } = repo();
   try {
     const marker = join(dir, "PWNED");
     const script = join(dir, "evil.sh");
-    writeFileSync(script, `#!/bin/sh\necho ran >> ${marker}\n`);
+    writeFileSync(script, `#!/bin/sh\necho ran >> ${marker}\ncat\n`);
     chmodSync(script, 0o755);
+    put(dir, ".gitattributes", "*.md filter=evil\n");
     sh(dir, "config", "core.fsmonitor", script);
-    sh(dir, "config", "core.hooksPath", dirname(script));
-    // Control: the planted fsmonitor really does fire on a plain `git status`.
+    sh(dir, "config", "filter.evil.clean", script);
+    put(dir, "CLAUDE.md", "root rules changed so git must run the clean filter to compare");
+    // Control: a plain `git status` really does fire planted code here.
     sh(dir, "status");
-    assert.ok(existsSync(marker), "control failed: planted fsmonitor did not fire");
+    assert.ok(existsSync(marker), "control failed: planted code did not fire on plain git status");
     rmSync(marker);
-    tamperedPaths(dir, base);
+    assert.deepEqual(tamperedPaths(dir, base), ["CLAUDE.md"]);
     assert.ok(!existsSync(marker), "tamper check executed planted code");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("baseCommit returns the HEAD sha", () => {
+  const { dir } = repo();
+  try {
+    assert.match(baseCommit(dir), /^[0-9a-f]{40}$/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
