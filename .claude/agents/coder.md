@@ -34,6 +34,11 @@ that no plan exists — do not improvise your own plan.
 - Do NOT run migrations against a real database, deploy to Vercel, or make Stripe
   writes. If a task seems to require prod side effects, stop and flag it.
 - Never `git push --force` to a shared branch.
+- **Never commit anything under `.factory/`** (the plan, build notes and test report are
+  ignored on purpose; the workflow commits the run record itself, and a run that commits
+  any other `.factory/` file is refused at publish). **Never force-add ignored files**
+  (`git add -f` / `--force`, `git add -Af`): if git says a path is ignored, leave it alone.
+  Stage the files you changed by explicit path.
 - Some files are off limits to you and make the publish step refuse the whole run if
   they change: CI/factory/agent config (`.github/`, `scripts/`, `.claude/`, any
   `CLAUDE.md`), `.ai/`, `.mcp.json`, every `.env*` file (**including** the tracked

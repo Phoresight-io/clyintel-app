@@ -7,6 +7,7 @@ import { postSlack } from "./slack.mjs";
 import { writeRunLog, pushRunLogToSheet, parseTestResult } from "./run-log.mjs";
 import { makeGuardHook } from "./role-guard.mjs";
 import { baseCommit, snapshot, tamperedPaths } from "./instruction-guard.mjs";
+import { logLine, createTracer, seconds, money } from "./factory-log.mjs";
 
 // This script lives in scripts/ but the factory operates on the repo root
 // (.factory/, git, the app code). Anchor the working directory at the repo root
@@ -92,7 +93,23 @@ const MAX_TURNS = 60;
 // continue if enforcement never ran. This is a tripwire, not a gate: it can only
 // report after the fact, so the real protection is the hook failing closed.
 let guardCalls = 0;
-const hooks = { PreToolUse: [{ hooks: [makeGuardHook(repoRoot, () => guardCalls++)] }] };
+
+// Everything below is logging only (one "[factory] <timestamp> ..." line per event, see
+// factory-log.mjs); none of it can change what an agent is allowed to do.
+const log = (message) => console.log(logLine(message));
+const usage = { turns: 0, cost: 0, denials: 0 }; // summed over every query() call
+const tracer = createTracer(log, usage);
+
+const quiet = (fn) => async (input) => {
+  try { fn(input); } catch {}
+  return {};
+};
+
+const hooks = {
+  PreToolUse: [{ hooks: [makeGuardHook(repoRoot, () => guardCalls++, tracer.onGuardDecision)] }],
+  SubagentStart: [{ hooks: [quiet(tracer.onSubagentStart)] }],
+  SubagentStop: [{ hooks: [quiet(tracer.onSubagentStop)] }],
+};
 
 class PipelineError extends Error {}
 
@@ -108,6 +125,7 @@ async function run(prompt) {
     throw new PipelineError(`agent modified instruction/settings files: ${tampered.slice(0, 5).join(", ")}`);
   }
   guardCalls = 0;
+  const startedAt = Date.now();
   const stream = query({
     prompt,
     options: {
@@ -135,6 +153,10 @@ async function run(prompt) {
     if (msg.type === "result") final = msg;
   }
   if (!final) throw new PipelineError("agent run ended without a result message");
+  // Cost and turns are on every result message, errors included, so a failed run is still counted.
+  usage.turns += Number(final.num_turns) || 0;
+  usage.cost += Number(final.total_cost_usd) || 0;
+  log(`run finished (${final.subtype}): ${final.num_turns} main-session turns, ${money(final.total_cost_usd)}, ${seconds(Date.now() - startedAt)}s; running total ${usage.turns} turns, ${money(usage.cost)}`);
   if (final.subtype !== "success" || final.is_error) {
     console.error("agent run failed:", final.subtype, final.errors ?? "");
     throw new PipelineError(`agent run failed (${final.subtype})`);
@@ -155,6 +177,13 @@ const testPassed = () =>
   parseTestResult(readFileSync(".factory/test-report.md", "utf8")) === "PASS";
 
 async function pipeline() {
+  // The tester has to be able to run the app's suite. The workflow installs the app's dependencies
+  // before this script; if that did not happen, stop now instead of paying for a run whose test
+  // result could only be "could not run".
+  if (!existsSync("clyintel/node_modules/.bin/vitest")) {
+    throw new PipelineError("the app's dependencies are not installed (clyintel/node_modules/.bin/vitest is missing); the tester could not run the suite");
+  }
+  log(`pipeline start (guard denials are logged as "role-guard DENIED")`);
   await postSlack(channel, `▶️ Design → build → test → review: ${brief}`);
 
   // Design + build + test, in one delegated run.
@@ -195,7 +224,7 @@ followed by paths.) Tell the reviewer to use that form.`);
   const stillFailing = !testPassed();
 
   // Durable run log: one record per run (in-repo JSONL, + optional Sheet row).
-  const record = writeRunLog({ brief, reviewSummary: verdict });
+  const record = writeRunLog({ brief, reviewSummary: verdict, usage });
   await pushRunLogToSheet(record);
 
   // Deploy is not offered here: a human reviews the factory PR (opened by the
@@ -217,7 +246,7 @@ try {
   // Note: exiting non-zero skips the workflow's commit/PR steps, so this record is
   // NOT committed. A failed run is only kept by the Sheet webhook (if configured)
   // and the workflow logs.
-  const record = writeRunLog({ brief, reviewSummary: `pipeline failed: ${reason}` });
+  const record = writeRunLog({ brief, reviewSummary: `pipeline failed: ${reason}`, usage });
   await pushRunLogToSheet(record);
   await postSlack(channel, `❌ D3 pipeline failed: ${reason}. No PR will be opened.`);
   process.exit(1); // fail the workflow so the commit/PR steps are skipped

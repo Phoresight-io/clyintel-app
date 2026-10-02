@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { decide, makeGuardHook, repoRelative, isReadOnlyGit } from "./role-guard.mjs";
+import { decide, makeGuardHook, repoRelative, isReadOnlyGit, stagingViolation } from "./role-guard.mjs";
 
 const ROOT = "/work/repo";
 const denied = (r) => r?.hookSpecificOutput?.permissionDecision === "deny";
@@ -227,4 +227,37 @@ test("coder protections cover everything the publish job refuses (kept in sync)"
     assert.ok(PROTECTED.test(f), `sample not protected by publish: ${f}`);
     assert.ok(denied(call("Write", { file_path: f }, as("coder"))), `publish refuses ${f} but the coder may write it`);
   }
+});
+
+test("coder and tester Bash: no force-add and no staging under .factory/ (a prior run committed .factory/plan.md)", () => {
+  const bad = [
+    "git add -f .factory/plan.md", "git add --force .factory/plan.md", "git add -Af", "git add -fA schema",
+    "git add .factory/plan.md", "git add ./.factory/test-report.md", "git add -A .factory", "git -c core.x=y add -f x",
+    "git -C . add .factory/", "cd x && git add -f a", "git add a; git add -f b", "git update-index --add .factory/plan.md",
+    "git stage .factory/notes.md",
+  ];
+  for (const role of ["coder", "tester"]) {
+    for (const c of bad) assert.ok(denied(call("Bash", { command: c }, as(role))), `${role} may run: ${c}`);
+  }
+  const ok = [
+    "git add clyintel/app/page.tsx", "git add -A", "git add .", "git commit -m 'note about .factory/ files'",
+    "git commit -m x", "git status", "npx vitest run", "git diff --stat", "echo force > f.txt", "git add file-with-f.ts",
+  ];
+  for (const role of ["coder", "tester"]) {
+    for (const c of ok) assert.ok(!denied(call("Bash", { command: c }, as(role))), `${role} blocked: ${c}`);
+  }
+  assert.equal(stagingViolation(undefined), null);
+  // planner and the main thread have no Bash at all; the reviewer's Bash is its own allowlist
+  assert.ok(denied(call("Bash", { command: "git add -f x" }, as("planner"))));
+});
+
+test("hook reports every decision to onDecision, and a throwing logger cannot change the decision", async () => {
+  const seen = [];
+  const hook = makeGuardHook(ROOT, () => {}, (input, out) => seen.push([input.tool_name, denied(out)]));
+  await hook({ tool_name: "Edit", tool_input: { file_path: "schema/README.md" }, agent_id: "a", agent_type: "coder" });
+  await hook({ tool_name: "Edit", tool_input: { file_path: "clyintel/app/page.tsx" }, agent_id: "a", agent_type: "coder" });
+  assert.deepEqual(seen, [["Edit", true], ["Edit", false]]);
+  const thrower = makeGuardHook(ROOT, () => {}, () => { throw new Error("log failed"); });
+  assert.ok(denied(await thrower({ tool_name: "Edit", tool_input: { file_path: "schema/README.md" }, agent_id: "a", agent_type: "coder" })));
+  assert.ok(!denied(await thrower({ tool_name: "Read", tool_input: { file_path: "x" }, agent_id: "a", agent_type: "coder" })));
 });

@@ -58,6 +58,14 @@ jobs:
         working-directory: scripts
         run: npm ci
 
+      # The tester has to run the app's own suite (vitest, tsc), so install the app's dependencies
+      # before any agent runs. This is the trusted base commit's lockfile, installed by us, not by an
+      # agent. --ignore-scripts: dependency lifecycle scripts would run here with the runner's
+      # environment, and vitest/tsc do not need them. The orchestrator refuses to start without it.
+      - name: Install the app's dependencies (clean, from lockfile, no install scripts)
+        working-directory: clyintel
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
       - name: Create working branch
         run: |
           BR="factory/run-${{ github.run_id }}"
@@ -199,7 +207,7 @@ jobs:
             if [ "$(printf '%s\n' "$REC" | wc -l)" -ne 1 ] || [ "$(printf %s "$REC" | wc -c)" -gt 2048 ] \
                || ! printf %s "$REC" | jq -e '
                     type == "object"
-                    and ((keys - ["ts","run_id","branch","actor","brief_sha256","brief_chars","plan_title","test_result","review_verdict","repo"]) | length == 0)
+                    and ((keys - ["ts","run_id","branch","actor","brief_sha256","brief_chars","plan_title","test_result","review_verdict","repo","num_turns","total_cost_usd","guard_denials"]) | length == 0)
                     and all(.[]; (type == "number") or (type == "string" and length <= 200))' >/dev/null 2>&1; then
               echo "Run record has unexpected content; refusing to push." >&2
               exit 1

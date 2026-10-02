@@ -55,3 +55,22 @@ test("writeRunLog: the committed record holds a hash of the brief, never the bri
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("writeRunLog: turns, cost and guard denials from the SDK results are written (and default to 0)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rl-"));
+  const prev = process.cwd();
+  try {
+    process.chdir(dir);
+    const rec = writeRunLog({ brief: "x", reviewSummary: "", usage: { turns: 7, cost: 0.123456, denials: 2 } });
+    const onDisk = JSON.parse(readFileSync(join(dir, ".factory/runs/run-local.json"), "utf8"));
+    assert.deepEqual([onDisk.num_turns, onDisk.total_cost_usd, onDisk.guard_denials], [7, 0.1235, 2]);
+    assert.equal(rec.total_cost_usd, 0.1235);
+    const bare = writeRunLog({ brief: "x", reviewSummary: "" });
+    assert.deepEqual([bare.num_turns, bare.total_cost_usd, bare.guard_denials], [0, 0, 0]);
+    const junk = writeRunLog({ brief: "x", reviewSummary: "", usage: { turns: "NaN", cost: undefined, denials: null } });
+    assert.deepEqual([junk.num_turns, junk.total_cost_usd, junk.guard_denials], [0, 0, 0]);
+  } finally {
+    process.chdir(prev);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

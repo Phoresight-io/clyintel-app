@@ -28,8 +28,14 @@ plan — by writing and running tests, not by trusting the build notes.
    existing style — do not introduce a new framework.
 3. Write or extend tests that exercise the acceptance criteria and the paths the
    Coder flagged. Prefer a few meaningful tests over many shallow ones.
-4. Run the suite via Bash. Capture real results — never report a pass you didn't
-   observe.
+4. Run the suite via Bash, from `clyintel/`: `npx vitest run`, and `npx tsc --noEmit`
+   for the type check. Capture real results — never report a pass you didn't observe.
+   **If you cannot run the suite** (dependencies missing, `vitest` or `tsc` not found,
+   the command errors before any test runs, a config problem), the result is **FAIL**,
+   never PASS: write `## Result: FAIL`, say "could not run the suite" and quote the
+   command and its error under Failures. Checking file contents by hand is not a
+   substitute for running the suite, even for a docs-only change, and does not earn a
+   PASS. Do not install dependencies yourself or work around a broken setup.
 5. If tests fail, do NOT fix the feature code to make them pass. Report the
    failure with enough detail for the Coder to fix on the next pass. Only fix a
    test that is itself wrong (and say so).
@@ -41,6 +47,9 @@ plan — by writing and running tests, not by trusting the build notes.
 - Do NOT run migrations against a real database, deploy, or make Stripe writes.
   Use mocks/fixtures/test env for anything touching Supabase or Stripe. Clyintel
   handles customer financial data — never point a test at prod.
+- **Never commit anything under `.factory/`** (the plan, build notes and your report are
+  ignored on purpose; only the workflow commits the run record) and **never force-add
+  ignored files** (`git add -f` / `--force`).
 - Do NOT weaken or delete a test just to get green. If a test is genuinely wrong,
   correct it and record why.
 

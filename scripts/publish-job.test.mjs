@@ -12,6 +12,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync,
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeRunLog } from "./run-log.mjs";
 
 const WORKFLOW = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../.github/workflows/d3-factory.yml"), "utf8");
 const GIT_ENV = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
@@ -149,6 +150,25 @@ test("publish: a run record that is not exactly what run-log.mjs writes is refus
       assert.ok(!existsSync(join(w.root, "gh.args")), `${name}: opened a PR anyway`);
     } finally { cleanup(w); }
   }
+});
+
+test("publish: the record run-log.mjs actually writes (every current key) passes the content check", () => {
+  // Built by the real writeRunLog so the publish job's key list can never drift from it again.
+  const dir = mkdtempSync(join(tmpdir(), "rec-"));
+  const prev = process.cwd();
+  let line;
+  try {
+    process.chdir(dir);
+    writeRunLog({ brief: "add a one-line comment", reviewSummary: "VERDICT: APPROVE", usage: { turns: 12, cost: 0.4321, denials: 1 } });
+    line = readFileSync(join(dir, ".factory/runs/run-local.json"), "utf8").trim();
+  } finally { process.chdir(prev); rmSync(dir, { recursive: true, force: true }); }
+  const rec = JSON.parse(line);
+  assert.deepEqual([rec.num_turns, rec.total_cost_usd, rec.guard_denials], [12, 0.4321, 1]);
+  const w = world({ log: line });
+  try {
+    publish(w);
+    assert.ok(remoteHas(w, "refs/heads/factory/run-1"), "a valid record was refused");
+  } finally { cleanup(w); }
 });
 
 test("publish: a title cut mid-character stays valid UTF-8", () => {
