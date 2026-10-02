@@ -141,8 +141,14 @@ jobs:
           # protected file) and delete it in a later commit: the net diff passes every check
           # here and the secret still lands in the branch history on GitHub.
           TREE="$(git rev-parse "refs/heads/$BRANCH^{tree}")"
+          # Everything that goes into the commit is fixed by the tree and the base commit (dates
+          # come from the base commit), so re-running this job after a push that succeeded but a
+          # later step failed rebuilds the SAME commit: the push is then a no-op instead of a
+          # rejected non-fast-forward, and `gh pr create` can be retried.
+          BASE_DATE="$(git show -s --format=%cI "$GITHUB_SHA")"
           SQUASHED="$(GIT_AUTHOR_NAME=d3-factory GIT_AUTHOR_EMAIL=d3-factory@users.noreply.github.com \
             GIT_COMMITTER_NAME=d3-factory GIT_COMMITTER_EMAIL=d3-factory@users.noreply.github.com \
+            GIT_AUTHOR_DATE="$BASE_DATE" GIT_COMMITTER_DATE="$BASE_DATE" \
             git -c core.hooksPath=/dev/null commit-tree "$TREE" -p "$GITHUB_SHA" -m "Factory run ${{ github.run_id }}")"
           git update-ref "refs/heads/$BRANCH" "$SQUASHED"
           # The factory's commits must not touch the factory itself, the Slack endpoint, CI,

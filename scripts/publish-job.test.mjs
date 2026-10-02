@@ -389,6 +389,21 @@ test("publish: modified or deleted existing tests are flagged; new tests and app
   } finally { cleanup(w); }
 });
 
+test("publish: re-running publish after a successful push rebuilds the same commit (push is a no-op, PR is retried)", () => {
+  const w = world({ edit: ({ put }) => put("clyintel/lib/ok.ts", "ok") });
+  try {
+    publish(w);
+    const first = sh(w.remote, "git", ["rev-parse", "refs/heads/factory/run-1"]).trim();
+    rmSync(join(w.root, "gh.args"));
+    // a fresh runner checkout of the base commit, at a different wall-clock time
+    sh(w.root, "git", ["clone", "-q", "--no-local", `file://${w.remote}`, "job3"]);
+    sh(join(w.root, "job3"), "git", ["checkout", "-q", sh(w.j2, "git", ["rev-parse", "HEAD"]).trim()]);
+    publish({ ...w, j2: join(w.root, "job3") }, { GIT_AUTHOR_DATE: "2031-01-01T00:00:00Z", GIT_COMMITTER_DATE: "2031-01-01T00:00:00Z" });
+    assert.equal(sh(w.remote, "git", ["rev-parse", "refs/heads/factory/run-1"]).trim(), first, "re-run produced a different commit");
+    assert.ok(existsSync(join(w.root, "gh.args")), "PR creation was not retried");
+  } finally { cleanup(w); }
+});
+
 test("publish: no sensitive files means no warning section", () => {
   const w = world({ edit: ({ put }) => put("clyintel/app/page.tsx", "page") });
   try {
