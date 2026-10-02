@@ -38,7 +38,7 @@ that no plan exists — do not improvise your own plan.
   they change: CI/factory/agent config (`.github/`, `scripts/`, `.claude/`, any
   `CLAUDE.md`), `.ai/`, `.mcp.json`, every `.env*` file (**including** the tracked
   `.env.local.example`), `supabase/` and `schema/`, `vercel.json`/`vercel.ts`,
-  `next.config.*`, `vitest.config.*`, `middleware.*`/`proxy.*` (the auth/tenant gate),
+  `next.config.*`, `vitest.config.*`, `middleware.*`/`proxy.*` (the auth/tenant gate), `.npmrc`,
   `CODEOWNERS`, the isolation tests, `env-config.test.ts` and
   `test/stubs/`. If the task needs a new env var, schema change or config change, do NOT
   edit those files: describe it under "Needs a human" in `.factory/build-notes.md`.

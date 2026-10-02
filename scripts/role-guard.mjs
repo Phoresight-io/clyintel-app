@@ -94,6 +94,7 @@ const CODER_PROTECTED = new RegExp(
     "(^|/)\\.ai/", // product constitution, schema detail, Stripe IDs, specs
     "(^|/)\\.gitmodules$",
     "(^|/)(middleware|proxy)\\.[cm]?[jt]s$", // the auth/tenant request gate: weakening it leaks one customer's data to another
+    "(^|/)\\.npmrc$", // registry/script-shell settings run code during `npm install` (Vercel preview builds, reviewers' machines)
     "(^|/)CODEOWNERS$", // sets who must approve changes once merged
     "(^|/)(\\.husky|\\.vscode|\\.devcontainer)/", // run code on a human machine / Codespace (hooks, folderOpen tasks, postCreateCommand)
     "(^|/)supabase/", // Supabase CLI/branching reads migrations from supabase/migrations
@@ -220,7 +221,7 @@ export function decide(input, repoRoot) {
       return deny(
         `coder may not ${tool} factory/CI/git files (.claude/, .github/, scripts/, .git/, .gitignore, .factory/runs/, any CLAUDE.md), ` +
           `.env* files (including .env.local.example), supabase/, schema/, .ai/, .mcp.json, vercel.json/vercel.ts, next.config.*, ` +
-          `vitest.config.*, middleware.*/proxy.* (auth gate), CODEOWNERS, the isolation tests, env-config.test.ts, test/stubs/, .husky/, .vscode/, .devcontainer/ ` +
+          `vitest.config.*, middleware.*/proxy.* (auth gate), .npmrc, CODEOWNERS, the isolation tests, env-config.test.ts, test/stubs/, .husky/, .vscode/, .devcontainer/ ` +
           `(describe such needs under "Needs a human" in .factory/build-notes.md instead) `+
           `or paths outside the repo. Refusing "${args.file_path}".`
       );

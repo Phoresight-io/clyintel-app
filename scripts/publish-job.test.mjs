@@ -266,6 +266,7 @@ test("publish: commits that touch protected paths are refused, and nothing is pu
     "vscode task": ({ put }) => put(".vscode/tasks.json", "{}"),
     "devcontainer": ({ put }) => put(".devcontainer/devcontainer.json", "{}"),
     "auth middleware": ({ put }) => put("clyintel/middleware.ts", "export {}"),
+    "npm config": ({ put }) => put("clyintel/.npmrc", "registry=https://example.com"),
     "next 16 proxy": ({ put }) => put("clyintel/proxy.ts", "export {}"),
     "root CODEOWNERS": ({ put }) => put("CODEOWNERS", "* @someone"),
     "docs/CODEOWNERS": ({ put }) => put("docs/CODEOWNERS", "* @someone"),
@@ -379,7 +380,6 @@ test("publish: dependency and config changes are allowed but flagged in the PR b
       put("clyintel/lib/providers/paypal.ts", "x");
       put("clyintel/app/api/connect/onboard/route.ts", "x");
       put("clyintel/app/api/stripe-webhook/route.ts", "x");
-      put("clyintel/.npmrc", "x");
       put("clyintel/lib/.gitignore", "x");
       put("clyintel/app/api/contacts/route.ts", "x");
       put("clyintel/lib/capture/ingest.ts", "x");
@@ -394,7 +394,7 @@ test("publish: dependency and config changes are allowed but flagged in the PR b
     assert.ok(remoteHas(w, "refs/heads/factory/run-1"));
     const body = ghArgs(w)[ghArgs(w).indexOf("--body") + 1];
     assert.match(body, /Touches sensitive files/);
-    for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/tsconfig.json", "clyintel/lib/stray.sql", "clyintel/lib/settlement/charge.ts", "clyintel/lib/stripe.ts", "clyintel/app/api/sms-reply/route.ts", "clyintel/lib/demo-mode.ts", "clyintel/instrumentation.ts", "lib/supabase.ts", "clyintel/lib/providers/paypal.ts", "clyintel/app/api/connect/onboard/route.ts", "clyintel/app/api/stripe-webhook/route.ts", "clyintel/.npmrc", "clyintel/lib/.gitignore", "clyintel/app/api/contacts/route.ts", "clyintel/lib/capture/ingest.ts", "clyintel/lib/voice-calls.ts", "clyintel/lib/validatePaymentLink.ts"]) assert.ok(body.includes(f), f);
+    for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/tsconfig.json", "clyintel/lib/stray.sql", "clyintel/lib/settlement/charge.ts", "clyintel/lib/stripe.ts", "clyintel/app/api/sms-reply/route.ts", "clyintel/lib/demo-mode.ts", "clyintel/instrumentation.ts", "lib/supabase.ts", "clyintel/lib/providers/paypal.ts", "clyintel/app/api/connect/onboard/route.ts", "clyintel/app/api/stripe-webhook/route.ts", "clyintel/lib/.gitignore", "clyintel/app/api/contacts/route.ts", "clyintel/lib/capture/ingest.ts", "clyintel/lib/voice-calls.ts", "clyintel/lib/validatePaymentLink.ts"]) assert.ok(body.includes(f), f);
     assert.ok(!body.includes("app/page.tsx"), "ordinary files must not be listed as sensitive");
   } finally { cleanup(w); }
 });
