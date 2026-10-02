@@ -5,7 +5,7 @@ name: Claude PR Review
 # the branch before the PR exists; THIS guards the merge, on the PR itself.
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
