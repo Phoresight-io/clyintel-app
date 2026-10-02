@@ -86,21 +86,6 @@ export function writeRunLog({ brief, reviewSummary, usage = {} }) {
   return record;
 }
 
-// Optional: append a row to a Google Sheet via its API, only if configured.
-// Uses a webhook-style endpoint (e.g. an Apps Script or Make webhook URL in
-// RUN_LOG_SHEET_WEBHOOK) to avoid pulling in Google auth libraries. No-ops if
-// the env var is absent, so it never blocks a run.
-export async function pushRunLogToSheet(record) {
-  const url = process.env.RUN_LOG_SHEET_WEBHOOK;
-  if (!url) return;
-  try {
-    await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(record),
-      signal: AbortSignal.timeout(10_000), // a hung webhook must not hold a finished run until the job timeout
-    });
-  } catch (err) {
-    console.error("run log sheet push failed:", err);
-  }
-}
+// The run record is sent to the run-log Sheet by the publish job, after it has validated the
+// record's content, never from here: this code runs in the agent container, which holds no Sheet
+// webhook (or any secret but the Anthropic key). A failed run's row comes from notify-failure.

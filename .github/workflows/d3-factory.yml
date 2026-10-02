@@ -18,12 +18,24 @@ on:
 # workflows run from the default branch, and the kill switch below requires it); only the
 # code the agents work on comes from develop.
 #
-# Two jobs on purpose. Every step in a job shares $GITHUB_ENV and $GITHUB_PATH, so
+# Separate jobs on purpose. Every step in a job shares $GITHUB_ENV and $GITHUB_PATH, so
 # an agent with Bash (e.g. after a prompt injection) could poison PATH or BASH_ENV
 # for every later step in ITS job. So the job that runs agents has NO write token,
 # and the job that has one (publish) never executes anything the agents wrote: it
 # only receives their commits as a git bundle, which carries objects, not hooks,
 # config or scripts.
+#
+# SECRETS. The job that holds secrets never runs agents; the job that runs agents holds exactly
+# one secret. A process on a runner can read every secret its job was given (the coder's Bash ran
+# as the runner user and could read them all via /proc), so:
+#   - pipeline (runs agents) references ONE secret, D3_FACTORY_ANTHROPIC_API_KEY, and the agents
+#     run in a container that sees only the repo checkout and that key. The commit/bundle step,
+#     which runs git on the tree the agents controlled, runs in a second container with no secret
+#     and no network.
+#   - notify-start, publish and notify-failure hold the Slack token and the run-log Sheet webhook
+#     (and publish the write token). None of them executes anything the agents wrote.
+# The key the agents get is spend-capped and dedicated; there is no fallback to the shared
+# ANTHROPIC_API_KEY that PR review uses.
 jobs:
   # Resolves the base branch (develop) to ONE commit, in a job that runs no agent code, so the
   # agent job and the publish job build on and compare against the exact same commit even if
@@ -53,6 +65,33 @@ jobs:
           echo "Factory base: develop at $SHA"
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
 
+  # Tells Slack the run started. This used to be posted by the orchestrator, which put the Slack
+  # token into the job that runs agents. Runs no agent code; holds the Slack token and nothing else.
+  notify-start:
+    needs: prepare
+    if: ${{ vars.D3_FACTORY_ENABLED == 'true' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Tell Slack the run started
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
+          BRIEF: ${{ github.event.client_payload.brief || inputs.brief }}
+        run: |
+          if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_CHANNEL" ]; then
+            echo "No Slack token/channel configured; nothing to notify."
+            exit 0
+          fi
+          # The brief is user text: escape Slack's control characters so it cannot render
+          # <!channel> pings or <url|label> links.
+          curl -s -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "$(jq -n --arg c "$SLACK_CHANNEL" --arg b "$BRIEF" \
+                   '{channel:$c, text:("▶️ Design → build → test → review: " + ($b | gsub("&";"&amp;") | gsub("<";"&lt;") | gsub(">";"&gt;")))}')" || true
+
   pipeline:
     needs: prepare
     # KILL SWITCH: merging this workflow does not arm it. It runs only when the repository
@@ -73,6 +112,11 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read # no write token in the job that runs agents
+    env:
+      # The agent sandbox image, pinned by digest (node 22 on Debian bookworm, which ships git).
+      # To update: take the new index digest for node:22-bookworm from
+      # https://github.com/docker-library/repo-info/blob/master/repos/node/remote/22-bookworm.md
+      AGENT_IMAGE: node:22-bookworm@sha256:363e1587494626837fa7f9a23bdb453d13b0ff3c67c705c2805cfc69c2d2fad7
     steps:
       - uses: actions/checkout@v4
         with:
@@ -86,52 +130,133 @@ jobs:
           # No npm cache on purpose: this job runs agents with shell access on the default
           # branch, and a cache saved after they ran could be restored by other workflows.
 
+      # The agents never touch the checkout: they get a COPY, outside $GITHUB_WORKSPACE, and only that
+      # copy is mounted into their container. actions/checkout's post-job step runs git in the
+      # workspace on the runner, and git runs programs named in .git/config (core.fsmonitor), so a
+      # workspace the agents had written to would let them run code on the host after they finished.
+      # The copy is made here, before any agent runs, so it starts identical to the checkout.
+      - name: Copy the repo for the agents
+        run: |
+          AGENT_REPO="$RUNNER_TEMP/d3-agent-repo"
+          rm -rf "$AGENT_REPO" && mkdir -p "$AGENT_REPO"
+          cp -a "$GITHUB_WORKSPACE/." "$AGENT_REPO/"
+
       # Factory infra is self-contained in scripts/ with its own package.json and
       # lockfile, so the app's dependencies are never touched.
       - name: Install factory dependencies (clean, from lockfile)
-        working-directory: scripts
-        run: npm ci
+        run: cd "$RUNNER_TEMP/d3-agent-repo/scripts" && npm ci
 
       # The tester has to run the app's own suite (vitest, tsc), so install the app's dependencies
       # before any agent runs. This is the trusted base commit's lockfile, installed by us, not by an
       # agent. --ignore-scripts: dependency lifecycle scripts would run here with the runner's
       # environment, and vitest/tsc do not need them. The orchestrator refuses to start without it.
       - name: Install the app's dependencies (clean, from lockfile, no install scripts)
-        working-directory: clyintel
-        run: npm ci --ignore-scripts --no-audit --no-fund
+        run: cd "$RUNNER_TEMP/d3-agent-repo/clyintel" && npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Create working branch
+        working-directory: ${{ runner.temp }}/d3-agent-repo
         run: |
           BR="factory/run-${{ github.run_id }}"
           git checkout -b "$BR"
           git config user.name "d3-factory"
           git config user.email "factory@phoresight.io"
-          echo "BRANCH=$BR" >> "$GITHUB_ENV"
 
-      - name: Run pipeline (Planner → Coder → Tester → Reviewer)
-        working-directory: scripts
+      # The containers run as the runner's uid (so the copy stays the runner's files), which the image's
+      # /etc/passwd does not know; tools that look up the current user (os.userInfo(), git, npm) fail
+      # without an entry. Give it one: the image's own passwd/group plus that uid, mounted read-only.
+      # Also pulls the pinned image before any agent runs.
+      - name: Prepare the agent container's user entry
+        run: |
+          ETC="$RUNNER_TEMP/d3-etc"
+          rm -rf "$ETC" && mkdir -p "$ETC"
+          docker run --rm --network none "$AGENT_IMAGE" cat /etc/passwd > "$ETC/passwd"
+          docker run --rm --network none "$AGENT_IMAGE" cat /etc/group > "$ETC/group"
+          U="$(id -u)"; G="$(id -g)"
+          grep -q "^[^:]*:[^:]*:$U:" "$ETC/passwd" || echo "d3agent:x:$U:$G:d3 factory agents:/tmp:/bin/bash" >> "$ETC/passwd"
+          grep -q "^[^:]*:[^:]*:$G:" "$ETC/group" || echo "d3agent:x:$G:" >> "$ETC/group"
+          chmod 0444 "$ETC/passwd" "$ETC/group"
+
+      # THE AGENT CONTAINER. The orchestrator and every agent session it starts run here, never on
+      # the runner itself. What the agents can reach:
+      #   - files: only the agents' copy of the repo (read-write at /work/repo; the coder commits there),
+      #     a private tmpfs at /tmp, the passwd/group files above (read-only), and the image's own
+      #     read-only filesystem. Not the checkout in $GITHUB_WORKSPACE, the runner's home, the rest of
+      #     $RUNNER_TEMP (where $GITHUB_ENV/$GITHUB_PATH live), or the Docker socket.
+      #   - processes: only their own (separate PID namespace), so /proc shows no runner process.
+      #   - environment: exactly the variables listed below. The only secret is
+      #     D3_FACTORY_ANTHROPIC_API_KEY, passed by NAME (-e VAR), so its value is never on a command
+      #     line. No GITHUB_TOKEN, no ACTIONS_* runtime tokens, no Slack token, no Sheet webhook.
+      #   - privileges: the runner's own non-root uid (so the files it writes stay the runner's),
+      #     no capabilities, no setuid escalation, read-only root filesystem.
+      #   - network: open (the sessions call the Anthropic API). An injected agent can therefore send
+      #     out what it can read: the repo and the spend-capped key. Rotate the key if in doubt.
+      # The orchestrator refuses to start without D3_FACTORY_SANDBOX=container, or if any other
+      # credential-like variable is set (agent-env.mjs), so moving this step back onto the runner fails.
+      # The container is named so the cleanup step can kill it: cancelling a run or hitting the job
+      # timeout only kills the `docker run` client, and the container would keep running (and spending).
+      - name: Run pipeline in the agent container (Planner → Coder → Tester → Reviewer)
         env:
-          # A dedicated, spend-capped key can be set as D3_FACTORY_ANTHROPIC_API_KEY (so it can be
-          # capped and rotated apart from PR review); until then the shared ANTHROPIC_API_KEY is used.
-          ANTHROPIC_API_KEY: ${{ secrets.D3_FACTORY_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          D3_FACTORY_ANTHROPIC_API_KEY: ${{ secrets.D3_FACTORY_ANTHROPIC_API_KEY }}
           BRIEF: ${{ github.event.client_payload.brief || inputs.brief }}
-          SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
-          SLACK_USER: ${{ github.event.client_payload.user }}
-          RUN_LOG_SHEET_WEBHOOK: ${{ secrets.RUN_LOG_SHEET_WEBHOOK }}
-        run: node d3-orchestrator.mjs
-
-      - name: Commit run log + any factory artifacts meant to persist
+          SLACK_USER: ${{ github.event.client_payload.user }} # a Slack user id for the run record, not a secret
+          BRANCH: factory/run-${{ github.run_id }}
         run: |
-          git add -A
-          git -c core.hooksPath=/dev/null commit -m "factory run ${{ github.run_id }}" || echo "nothing to commit"
+          # The dedicated key is mandatory: no fallback to ANTHROPIC_API_KEY. Fail before pulling anything.
+          if [ -z "$(printf %s "$D3_FACTORY_ANTHROPIC_API_KEY" | tr -d '[:space:]')" ]; then
+            echo "D3_FACTORY_ANTHROPIC_API_KEY is not set. The factory only runs on its dedicated, spend-capped key (there is no fallback to ANTHROPIC_API_KEY)." >&2
+            exit 1
+          fi
+          docker run --rm --init --name "d3-agents-$GITHUB_RUN_ID" \
+            --user "$(id -u):$(id -g)" \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --read-only --tmpfs /tmp:rw,exec,nosuid,nodev,size=2g \
+            --pids-limit 4096 \
+            --network bridge \
+            -v "$RUNNER_TEMP/d3-agent-repo:/work/repo" \
+            -v "$RUNNER_TEMP/d3-etc/passwd:/etc/passwd:ro" -v "$RUNNER_TEMP/d3-etc/group:/etc/group:ro" \
+            --workdir /work/repo/scripts \
+            -e D3_FACTORY_SANDBOX=container \
+            -e HOME=/tmp -e TMPDIR=/tmp -e CI=true -e LANG=C.UTF-8 \
+            -e D3_FACTORY_ANTHROPIC_API_KEY \
+            -e BRIEF -e SLACK_USER -e BRANCH \
+            -e GITHUB_RUN_ID -e GITHUB_REPOSITORY -e GITHUB_ACTOR \
+            "$AGENT_IMAGE" node d3-orchestrator.mjs
 
-      # Hand the commits to the publish job. The branch name comes from the
-      # workflow expression, NOT from $BRANCH, which an agent could have rewritten
-      # via $GITHUB_ENV. The publish job re-validates the bundle regardless.
-      - name: Export commits as a git bundle
+      # git runs on the tree the agents controlled, and git config/attributes there can make git run
+      # programs (fsmonitor, clean filters). So this runs in a container too, with NO secret and NO
+      # network: whatever an agent planted runs where there is nothing to steal and nowhere to send
+      # it, and can only produce a bad bundle, which the publish job validates anyway. The script is
+      # passed by name (COMMIT_AND_BUNDLE) so it is never interpolated into a shell. The branch name
+      # and base commit come from the workflow, never from anything an agent wrote.
+      - name: Commit and bundle the agents' work (container, no secrets, no network)
+        env:
+          RUN_ID: ${{ github.run_id }}
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }} # develop, as resolved by the prepare job
+          BUNDLE_OUT: /out
+          COMMIT_AND_BUNDLE: |
+            git add -A
+            git -c core.hooksPath=/dev/null commit -m "factory run $RUN_ID" || echo "nothing to commit"
+            git bundle create "$BUNDLE_OUT/factory.bundle" "factory/run-$RUN_ID" "^$BASE_SHA"
         run: |
-          git bundle create "$RUNNER_TEMP/factory.bundle" "factory/run-${{ github.run_id }}" "^${{ needs.prepare.outputs.base_sha }}"
+          OUT="$RUNNER_TEMP/bundle-out"
+          rm -rf "$OUT" && mkdir -p "$OUT"
+          docker run --rm --init --name "d3-commit-$GITHUB_RUN_ID" \
+            --user "$(id -u):$(id -g)" \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --read-only --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+            --network none \
+            -v "$RUNNER_TEMP/d3-agent-repo:/work/repo" -v "$OUT:/out" \
+            -v "$RUNNER_TEMP/d3-etc/passwd:/etc/passwd:ro" -v "$RUNNER_TEMP/d3-etc/group:/etc/group:ro" \
+            --workdir /work/repo \
+            -e HOME=/tmp -e RUN_ID -e BASE_SHA -e BUNDLE_OUT -e COMMIT_AND_BUNDLE \
+            "$AGENT_IMAGE" bash -euo pipefail -c "$COMMIT_AND_BUNDLE"
+          # Take the bundle only as a regular file (never through a link the container left) into a
+          # path the container never saw.
+          if [ ! -f "$OUT/factory.bundle" ] || [ -L "$OUT/factory.bundle" ]; then
+            echo "The bundle step did not produce a regular file; refusing." >&2
+            exit 1
+          fi
+          cp -- "$OUT/factory.bundle" "$RUNNER_TEMP/factory.bundle"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -139,6 +264,24 @@ jobs:
           path: ${{ runner.temp }}/factory.bundle
           if-no-files-found: error
           retention-days: 3
+
+      # Always, including after a cancel or timeout: kill the containers first (a cancelled `docker run`
+      # client leaves its container running), then delete the agents' copy. The coder can chmod
+      # directories to make them undeletable, so restore owner permissions first (chmod -R does not
+      # follow links), and fail loudly if anything is left. Nothing here runs git.
+      - name: Remove the agents' containers and working tree
+        if: always()
+        run: |
+          docker rm -f "d3-agents-$GITHUB_RUN_ID" "d3-commit-$GITHUB_RUN_ID" >/dev/null 2>&1 || true
+          AGENT_REPO="$RUNNER_TEMP/d3-agent-repo"
+          if [ -e "$AGENT_REPO" ]; then
+            chmod -R u+rwX "$AGENT_REPO" 2>/dev/null || true
+            rm -rf -- "$AGENT_REPO"
+          fi
+          if [ -e "$AGENT_REPO" ]; then
+            echo "Could not remove the agents' working copy." >&2
+            exit 1
+          fi
 
   # KNOWN FOLLOW-UP: PRs opened with the default GITHUB_TOKEN do not trigger other
   # workflows, so ci.yml will NOT run on a factory PR (claude-review.yml does run once
@@ -153,6 +296,10 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    outputs:
+      # "true" once this run's validated record was sent to the Sheet, so notify-failure does not
+      # add a second row if a later step fails.
+      sheet_logged: ${{ steps.push.outputs.sheet_logged }}
     steps:
       # Trusted checkout of the base commit (develop, as resolved by the prepare job) only.
       # Nothing the agents wrote is checked out or executed in this job.
@@ -167,10 +314,12 @@ jobs:
           path: ${{ runner.temp }}/bundle
 
       - name: Push branch and open PR
+        id: push
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
+          RUN_LOG_SHEET_WEBHOOK: ${{ secrets.RUN_LOG_SHEET_WEBHOOK }}
           BRIEF: ${{ github.event.client_payload.brief || inputs.brief }}
           BRANCH: factory/run-${{ github.run_id }}
           BASE_SHA: ${{ needs.prepare.outputs.base_sha }} # develop; set by the prepare job, never by an agent
@@ -247,6 +396,16 @@ jobs:
                     and all(.[]; (type == "number") or (type == "string" and length <= 200))' >/dev/null 2>&1; then
               echo "Run record has unexpected content; refusing to push." >&2
               exit 1
+            fi
+            # The record is now known to be exactly what run-log.mjs writes: send it to the run-log
+            # Sheet (best effort, never fails the run). This used to happen in the agent job, which
+            # meant the webhook URL sat where the agents could read it.
+            if [ -n "$RUN_LOG_SHEET_WEBHOOK" ]; then
+              if curl -s -f -m 10 -X POST -H "Content-Type: application/json" --data-binary "$REC" "$RUN_LOG_SHEET_WEBHOOK" >/dev/null; then
+                echo "sheet_logged=true" >> "$GITHUB_OUTPUT"
+              else
+                echo "Run-log Sheet webhook did not accept the record (continuing)."
+              fi
             fi
           fi
           # Symlinks (120000) and submodules/gitlinks (160000) are refused outright: a feature
@@ -361,7 +520,29 @@ jobs:
           PREPARE_RESULT: ${{ needs.prepare.result }}
           PIPELINE_RESULT: ${{ needs.pipeline.result }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
+          RUN_LOG_SHEET_WEBHOOK: ${{ secrets.RUN_LOG_SHEET_WEBHOOK }}
+          SHEET_LOGGED: ${{ needs.publish.outputs.sheet_logged }}
+          BRIEF: ${{ github.event.client_payload.brief || inputs.brief }}
+          ACTOR: ${{ github.event.client_payload.user || github.actor }}
         run: |
+          # A run that started but did not get a record to the Sheet (the agent job failed or was
+          # cancelled, or publish refused it before sending one) still gets a row. Built ONLY from
+          # workflow values, never from anything the agents wrote: the outcome fields are fixed, and
+          # the cost is not known here (it is in the agent job's log). Same keys run-log.mjs writes.
+          if [ -n "$RUN_LOG_SHEET_WEBHOOK" ] && [ "$SHEET_LOGGED" != "true" ] \
+             && [ "$PREPARE_RESULT" != "failure" ] && [ "$PIPELINE_RESULT" != "skipped" ]; then
+            if [ "$PIPELINE_RESULT" = "success" ]; then STAGE="publish $PUBLISH_RESULT"; else STAGE="agent job $PIPELINE_RESULT"; fi
+            TRIMMED="$(jq -rn --arg b "$BRIEF" '$b | sub("^\\s+"; "") | sub("\\s+$"; "")')"
+            REC="$(jq -cn --arg run "$GITHUB_RUN_ID" --arg actor "$ACTOR" --arg repo "$GITHUB_REPOSITORY" \
+                     --arg sha "$(printf %s "$TRIMMED" | sha256sum | cut -c1-12)" --arg brief "$TRIMMED" \
+                     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" --arg stage "$STAGE" \
+                     '{ts:$ts, run_id:$run, branch:("factory/run-" + $run), actor:$actor, brief_sha256:$sha,
+                       brief_chars:($brief | length), plan_title:("(run failed: " + $stage + ")"),
+                       test_result:"none", review_verdict:"unknown", repo:$repo,
+                       num_turns:0, total_cost_usd:0, guard_denials:0}')"
+            curl -s -f -m 10 -X POST -H "Content-Type: application/json" --data-binary "$REC" "$RUN_LOG_SHEET_WEBHOOK" >/dev/null \
+              || echo "Run-log Sheet webhook did not accept the record (continuing)."
+          fi
           if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_CHANNEL" ]; then
             echo "No Slack token/channel configured; nothing to notify."
             exit 0

@@ -1,9 +1,9 @@
 // Run with: node --test scripts/publish-job.test.mjs
 //
 // Regression test for the factory workflow's two shell steps, run for real (bash +
-// git) against local repos with stubbed `gh` and `curl`: the "Export commits as a git
-// bundle" step in the agent job, and the "Push branch and open PR" step in the
-// publish job. It extracts the scripts from d3-factory.yml itself, so an edit to the
+// git) against local repos with stubbed `gh` and `curl`: the commit-and-bundle script the agent
+// job runs in its no-secrets container (COMMIT_AND_BUNDLE, run here directly with bash), and the
+// "Push branch and open PR" step in the publish job. It extracts the scripts from d3-factory.yml itself, so an edit to the
 // workflow that breaks them (e.g. drops the push) fails here.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeRunLog } from "./run-log.mjs";
+import { createHash } from "node:crypto";
 
 const WORKFLOW = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../.github/workflows/d3-factory.yml"), "utf8");
 const GIT_ENV = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
@@ -34,6 +35,24 @@ function stepScript(name, subs) {
   for (const [k, v] of Object.entries(subs)) script = script.split(k).join(v);
   return script;
 }
+
+// The value of the block scalar `key: |` in the `env:` of the step named `name`.
+function stepEnvBlock(name, key) {
+  const lines = WORKFLOW.split("\n");
+  const i = lines.findIndex((l) => l.trim() === `- name: ${name}`);
+  assert.ok(i >= 0, `step not found: ${name}`);
+  const r = lines.findIndex((l, k) => k > i && l.trim() === `${key}: |`);
+  assert.ok(r > i, `env block ${key} not found in ${name}`);
+  const indent = lines[r].match(/^\s*/)[0].length;
+  const body = [];
+  for (let k = r + 1; k < lines.length; k++) {
+    if (lines[k].trim() === "") { body.push(""); continue; }
+    if (lines[k].match(/^\s*/)[0].length <= indent) break;
+    body.push(lines[k].slice(indent + 2));
+  }
+  return body.join("\n").replace(/\n+$/, "\n");
+}
+const COMMIT_STEP = "Commit and bundle the agents' work (container, no secrets, no network)";
 
 const sh = (cwd, cmd, args, env = {}) =>
   execFileSync(cmd, args, { cwd, env: { ...process.env, ...GIT_ENV, ...env }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -83,7 +102,7 @@ function world({ log, mutateBundle, fromBranch, baseFiles = {}, baseLink, edit }
   git(j1, "commit", "-qm", "factory change");
   const rt1 = join(root, "rt1");
   mkdirSync(rt1);
-  sh(j1, "bash", ["-e", "-c", stepScript("Export commits as a git bundle", { "${{ github.run_id }}": "1", "${{ needs.prepare.outputs.base_sha }}": sha })], { RUNNER_TEMP: rt1 });
+  sh(j1, "bash", ["-euo", "pipefail", "-c", stepEnvBlock(COMMIT_STEP, "COMMIT_AND_BUNDLE")], { RUN_ID: "1", BASE_SHA: sha, BUNDLE_OUT: rt1 });
   if (mutateBundle) mutateBundle({ root, j1, rt1, git });
 
   // publish job: fresh checkout of the base commit, bundle downloaded as an artifact
@@ -99,13 +118,15 @@ function world({ log, mutateBundle, fromBranch, baseFiles = {}, baseLink, edit }
   mkdirSync(bin);
   const stub = (name, body) => { writeFileSync(join(bin, name), `#!/bin/bash\n${body}\n`); chmodSync(join(bin, name), 0o755); };
   stub("gh", `printf '%s\\0' "$@" > "${root}/gh.args"; echo https://github.com/x/y/pull/9`);
-  stub("curl", `for a in "$@"; do case "$a" in \\{*) printf '%s' "$a" > "${root}/slack.payload";; esac; done`);
+  // Slack calls (the payload goes in -d) are kept in slack.payload; every call's arguments are also
+  // appended to curl.calls (one call per line, arguments NUL-separated) so Sheet posts can be checked.
+  stub("curl", `printf '%s\\0' "$@" >> "${root}/curl.calls"; echo >> "${root}/curl.calls"; case "$*" in *slack.com*) for a in "$@"; do case "$a" in \\{*) printf '%s' "$a" > "${root}/slack.payload";; esac; done;; esac`);
   return { root, j2: join(root, "job2"), rt2, bin, remote: join(root, "remote.git") };
 }
 
 function publish(w, env = {}) {
   return sh(w.j2, "bash", ["-e", "-c", stepScript("Push branch and open PR", { "${{ github.run_id }}": "1" })], {
-    PATH: `${w.bin}:${process.env.PATH}`, RUNNER_TEMP: w.rt2, GH_TOKEN: "tok", GITHUB_REPOSITORY: "x/y",
+    PATH: `${w.bin}:${process.env.PATH}`, RUNNER_TEMP: w.rt2, GH_TOKEN: "tok", GITHUB_REPOSITORY: "x/y", GITHUB_OUTPUT: join(w.root, "gh_output"),
     BASE_SHA: sh(w.j2, "git", ["rev-parse", "HEAD"]).trim(), // the publish job checks out the same base commit (from the prepare job)
     BRANCH: "factory/run-1", BRIEF: "add invoice reminder\nsecond line", SLACK_BOT_TOKEN: "", SLACK_CHANNEL: "", ...env,
   });
@@ -562,7 +583,8 @@ test("workflow: the factory builds on develop, resolved once by a job that runs 
   // nothing may still use the run's own commit (main) as the base
   assert.doesNotMatch(WORKFLOW, /github\.sha|\$GITHUB_SHA/);
   // prepare: checks out develop, read-only, outputs one 40-hex commit
-  const prepare = WORKFLOW.slice(WORKFLOW.indexOf("\n  prepare:"), WORKFLOW.indexOf("\n  pipeline:"));
+  const prepare = WORKFLOW.slice(WORKFLOW.indexOf("\n  prepare:"), WORKFLOW.indexOf("\n  notify-start:"));
+  assert.ok(prepare.length > 100 && !prepare.includes("\n  pipeline:"), "prepare slice");
   assert.match(prepare, /ref: develop/);
   assert.match(prepare, /permissions:\n\s+contents: read/);
   assert.match(prepare, /base_sha: \$\{\{ steps\.base\.outputs\.sha \}\}/);
@@ -572,7 +594,9 @@ test("workflow: the factory builds on develop, resolved once by a job that runs 
   assert.match(WORKFLOW, /\n  publish:\n\s+needs: \[prepare, pipeline\]/);
   assert.equal(WORKFLOW.split("ref: ${{ needs.prepare.outputs.base_sha }}").length - 1, 2, "pipeline and publish must both check out the prepare job's commit");
   assert.match(WORKFLOW, /BASE_SHA: \$\{\{ needs\.prepare\.outputs\.base_sha \}\}/);
-  assert.match(WORKFLOW, /"\^\$\{\{ needs\.prepare\.outputs\.base_sha \}\}"/); // bundle excludes the base
+  // the bundle excludes the base, and the base it excludes is the prepare job's commit
+  assert.match(stepEnvBlock(COMMIT_STEP, "COMMIT_AND_BUNDLE"), /git bundle create "\$BUNDLE_OUT\/factory\.bundle" "factory\/run-\$RUN_ID" "\^\$BASE_SHA"/);
+  assert.match(WORKFLOW, /RUN_ID: \$\{\{ github\.run_id \}\}\n\s+BASE_SHA: \$\{\{ needs\.prepare\.outputs\.base_sha \}\}/);
   // PRs and Slack describe the real flow: develop -> dev deploy -> promote to main
   assert.match(WORKFLOW, /--base develop --draft/);
   assert.doesNotMatch(WORKFLOW, /--base main|merge (it )?to main|auto-deploys main/);
@@ -607,4 +631,144 @@ test("workflow: notify-failure runs on either job failing and holds no permissio
   // kill switch: the agent job only runs when the repo variable is exactly 'true'
   assert.match(WORKFLOW, /\n  pipeline:\n\s+needs: prepare\n\s+(#.*\n\s+)*if: \$\{\{ vars\.D3_FACTORY_ENABLED == 'true' && github\.ref == 'refs\/heads\/main' \}\}/);
   assert.match(WORKFLOW, /\n  prepare:\n\s+if: \$\{\{ vars\.D3_FACTORY_ENABLED == 'true' && github\.ref == 'refs\/heads\/main' \}\}/);
+});
+
+// ---- Run-log Sheet and Slack: moved out of the agent job (which now holds only the Anthropic key).
+
+// Every curl call the stub saw, as argument arrays.
+const curlCalls = (root) =>
+  existsSync(join(root, "curl.calls"))
+    ? readFileSync(join(root, "curl.calls"), "utf8").split("\0\n").filter(Boolean).map((l) => l.split("\0"))
+    : [];
+const sheetCalls = (root) => curlCalls(root).filter((a) => a.includes("https://sheet.example/hook"));
+const dataOf = (args) => args[args.indexOf("--data-binary") + 1];
+const HOOK = "https://sheet.example/hook";
+
+test("publish: sends the VALIDATED run record to the Sheet and records that it did", () => {
+  const rec = writeRunLogRecord();
+  const w = world({ log: rec });
+  try {
+    publish(w, { RUN_LOG_SHEET_WEBHOOK: HOOK });
+    const calls = sheetCalls(w.root);
+    assert.equal(calls.length, 1);
+    assert.equal(dataOf(calls[0]), rec); // byte-for-byte the record that passed the content check
+    assert.ok(calls[0].includes("-f") && calls[0].includes("-m"), "fails on HTTP errors and has a timeout");
+    assert.match(readFileSync(join(w.root, "gh_output"), "utf8"), /^sheet_logged=true$/m);
+  } finally { cleanup(w); }
+});
+
+test("publish: no webhook configured, no Sheet call and no sheet_logged output", () => {
+  const w = world({ log: writeRunLogRecord() });
+  try {
+    publish(w);
+    assert.equal(sheetCalls(w.root).length, 0);
+    assert.ok(!existsSync(join(w.root, "gh_output")) || !/sheet_logged/.test(readFileSync(join(w.root, "gh_output"), "utf8")));
+  } finally { cleanup(w); }
+});
+
+test("publish: a refused record, or a refused push, never reaches the Sheet", () => {
+  for (const opts of [
+    { log: '{"test_result":"PASS","review_verdict":"APPROVE","leak":"ANTHROPIC_API_KEY=sk"}' },
+    { log: writeRunLogRecord(), edit: ({ put }) => put(".github/workflows/x.yml", "evil") },
+  ]) {
+    const w = world(opts);
+    try {
+      assert.throws(() => publish(w, { RUN_LOG_SHEET_WEBHOOK: HOOK }));
+      assert.equal(sheetCalls(w.root).length, 0, JSON.stringify(Object.keys(opts)));
+    } finally { cleanup(w); }
+  }
+});
+
+test("publish: a Sheet that rejects the record does not fail the run, and is not marked as logged", () => {
+  const w = world({ log: writeRunLogRecord() });
+  try {
+    // curl -f exits 22 on an HTTP error
+    writeFileSync(join(w.bin, "curl"), `#!/bin/bash\nprintf '%s\\0' "$@" >> "${w.root}/curl.calls"; echo >> "${w.root}/curl.calls"; case "$*" in *sheet.example*) exit 22;; esac\n`);
+    publish(w, { RUN_LOG_SHEET_WEBHOOK: HOOK });
+    assert.equal(sheetCalls(w.root).length, 1);
+    assert.ok(!existsSync(join(w.root, "gh_output")) || !/sheet_logged/.test(readFileSync(join(w.root, "gh_output"), "utf8")));
+    assert.equal(ghArgs(w)[0], "pr"); // the PR was still opened
+  } finally { cleanup(w); }
+});
+
+// What run-log.mjs actually writes, as one line.
+function writeRunLogRecord() {
+  const dir = mkdtempSync(join(tmpdir(), "rec-"));
+  const cwd = process.cwd();
+  const saved = { GITHUB_RUN_ID: process.env.GITHUB_RUN_ID, BRANCH: process.env.BRANCH };
+  try {
+    process.chdir(dir);
+    process.env.GITHUB_RUN_ID = "1";
+    process.env.BRANCH = "factory/run-1";
+    writeRunLog({ brief: "b", reviewSummary: "VERDICT: APPROVE", usage: { turns: 3, cost: 0.5, denials: 0 } });
+    return readFileSync(join(dir, ".factory/runs/run-1.json"), "utf8").trimEnd();
+  } finally {
+    process.chdir(cwd);
+    for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function runNotifyFailure(env) {
+  const root = mkdtempSync(join(tmpdir(), "nfs-"));
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "curl"), `#!/bin/bash\nprintf '%s\\0' "$@" >> "${root}/curl.calls"; echo >> "${root}/curl.calls"\n`);
+  chmodSync(join(bin, "curl"), 0o755);
+  try {
+    execFileSync("bash", ["-e", "-c", stepScript("Tell Slack the run failed", {})], {
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, RUN_URL: "https://github.com/x/y/actions/runs/7",
+        GITHUB_RUN_ID: "7", GITHUB_REPOSITORY: "x/y", ACTOR: "U123", SLACK_BOT_TOKEN: "", SLACK_CHANNEL: "", ...env },
+      stdio: "pipe",
+    });
+    return sheetCalls(root).map((a) => JSON.parse(dataOf(a)));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+}
+
+test("notify-failure: a failed run gets a Sheet row built only from workflow values (same keys as run-log.mjs)", () => {
+  const brief = "  chase invoice INV-42 for Acme \n";
+  const [row, ...more] = runNotifyFailure({ RUN_LOG_SHEET_WEBHOOK: HOOK, PIPELINE_RESULT: "failure", BRIEF: brief });
+  assert.equal(more.length, 0);
+  assert.deepEqual(Object.keys(row).sort(), Object.keys(JSON.parse(writeRunLogRecord())).sort());
+  assert.equal(row.run_id, "7");
+  assert.equal(row.branch, "factory/run-7");
+  assert.equal(row.actor, "U123");
+  assert.equal(row.repo, "x/y");
+  assert.equal(row.test_result, "none");
+  assert.equal(row.review_verdict, "unknown");
+  assert.equal(row.plan_title, "(run failed: agent job failure)");
+  assert.equal(row.num_turns, 0);
+  // same brief identity run-log.mjs would compute (sha256 of the trimmed brief, 12 hex), never the text
+  assert.equal(row.brief_sha256, createHash("sha256").update(brief.trim()).digest("hex").slice(0, 12));
+  assert.equal(row.brief_chars, brief.trim().length);
+  assert.doesNotMatch(JSON.stringify(row), /Acme|INV-42/);
+  assert.match(row.ts, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.000Z$/);
+  assert.equal(runNotifyFailure({ RUN_LOG_SHEET_WEBHOOK: HOOK, PIPELINE_RESULT: "success", PUBLISH_RESULT: "failure", BRIEF: "b" })[0].plan_title, "(run failed: publish failure)");
+  assert.equal(runNotifyFailure({ RUN_LOG_SHEET_WEBHOOK: HOOK, PIPELINE_RESULT: "cancelled", BRIEF: "b" })[0].plan_title, "(run failed: agent job cancelled)");
+});
+
+test("notify-failure: no Sheet row when publish already sent one, when nothing ran, or with no webhook", () => {
+  assert.equal(runNotifyFailure({ RUN_LOG_SHEET_WEBHOOK: HOOK, PIPELINE_RESULT: "success", PUBLISH_RESULT: "failure", SHEET_LOGGED: "true" }).length, 0);
+  assert.equal(runNotifyFailure({ RUN_LOG_SHEET_WEBHOOK: HOOK, PIPELINE_RESULT: "skipped" }).length, 0);
+  assert.equal(runNotifyFailure({ RUN_LOG_SHEET_WEBHOOK: HOOK, PREPARE_RESULT: "failure", PIPELINE_RESULT: "skipped" }).length, 0);
+  assert.equal(runNotifyFailure({ PIPELINE_RESULT: "failure" }).length, 0);
+});
+
+test("notify-start: posts the start message with the brief escaped for Slack, only with a token and channel", () => {
+  const run = (env) => {
+    const root = mkdtempSync(join(tmpdir(), "ns-"));
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "curl"), `#!/bin/bash\nfor a in "$@"; do case "$a" in \\{*) printf '%s' "$a" > "${root}/payload";; esac; done\n`);
+    chmodSync(join(bin, "curl"), 0o755);
+    try {
+      execFileSync("bash", ["-e", "-c", stepScript("Tell Slack the run started", {})], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env }, stdio: "pipe" });
+      return existsSync(join(root, "payload")) ? JSON.parse(readFileSync(join(root, "payload"), "utf8")) : null;
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  };
+  assert.equal(run({ SLACK_BOT_TOKEN: "", SLACK_CHANNEL: "C1", BRIEF: "x" }), null);
+  assert.equal(run({ SLACK_BOT_TOKEN: "xoxb", SLACK_CHANNEL: "", BRIEF: "x" }), null);
+  const p = run({ SLACK_BOT_TOKEN: "xoxb", SLACK_CHANNEL: "C1", BRIEF: "fix <!channel> & <https://evil|here>" });
+  assert.equal(p.channel, "C1");
+  assert.equal(p.text, "▶️ Design → build → test → review: fix &lt;!channel&gt; &amp; &lt;https://evil|here&gt;");
 });
