@@ -229,6 +229,7 @@ test("publish: commits that touch protected paths are refused, and nothing is pu
     "test stubs": ({ put }) => put("clyintel/test/stubs/server-only.ts", "x"),
     "force-added .env": ({ put }) => put(".env", "ANTHROPIC_API_KEY=x"),
     "nested .env.local": ({ put }) => put("clyintel/.env.local", "x"),
+    "supabase migrations": ({ put }) => put("clyintel/supabase/migrations/001_x.sql", "alter table x;"),
     "vitest config": ({ put }) => put("clyintel/vitest.config.ts", "export default {}"),
     ".gitmodules": ({ put }) => put(".gitmodules", "[submodule \"x\"]"),
     "product context .ai/": ({ put }) => put(".ai/specs/new.md", "steer"),
@@ -305,6 +306,7 @@ test("publish: dependency and middleware changes are allowed but flagged in the 
       put("clyintel/package-lock.json", "{}");
       put("clyintel/middleware.ts", "export {}");
       put("clyintel/tsconfig.json", "{}");
+      put("clyintel/lib/stray.sql", "select 1;");
       put("clyintel/lib/settlement/charge.ts", "x");
       put("clyintel/lib/stripe.ts", "x");
       put("lib/supabase.ts", "x");
@@ -324,7 +326,7 @@ test("publish: dependency and middleware changes are allowed but flagged in the 
     assert.ok(remoteHas(w, "refs/heads/factory/run-1"));
     const body = ghArgs(w)[ghArgs(w).indexOf("--body") + 1];
     assert.match(body, /Touches sensitive files/);
-    for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/middleware.ts", "clyintel/tsconfig.json", "clyintel/lib/settlement/charge.ts", "clyintel/lib/stripe.ts", "lib/supabase.ts", "clyintel/lib/providers/paypal.ts", "clyintel/app/api/connect/onboard/route.ts", "clyintel/app/api/stripe-webhook/route.ts", "clyintel/.npmrc", "clyintel/.husky/pre-commit", "clyintel/.vscode/tasks.json", "clyintel/lib/.gitignore"]) assert.ok(body.includes(f), f);
+    for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/middleware.ts", "clyintel/tsconfig.json", "clyintel/lib/stray.sql", "clyintel/lib/settlement/charge.ts", "clyintel/lib/stripe.ts", "lib/supabase.ts", "clyintel/lib/providers/paypal.ts", "clyintel/app/api/connect/onboard/route.ts", "clyintel/app/api/stripe-webhook/route.ts", "clyintel/.npmrc", "clyintel/.husky/pre-commit", "clyintel/.vscode/tasks.json", "clyintel/lib/.gitignore"]) assert.ok(body.includes(f), f);
     assert.ok(!body.includes("app/page.tsx"), "ordinary files must not be listed as sensitive");
   } finally { cleanup(w); }
 });

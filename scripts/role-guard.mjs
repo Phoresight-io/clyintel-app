@@ -92,6 +92,7 @@ const CODER_PROTECTED = new RegExp(
     "^(clyintel/)?schema/",
     "(^|/)\\.ai/", // product constitution, schema detail, Stripe IDs, specs
     "(^|/)\\.gitmodules$",
+    "(^|/)supabase/", // Supabase CLI/branching reads migrations from supabase/migrations
     "(^|/)vitest\\.config\\.[cm]?[jt]s$", // decides whether tenant-isolation runs at all
     "(^|/)\\.env($|\\.)", // credentials must never be committed
     "(^|/)\\.mcp\\.json$", // registers MCP servers for Claude sessions
