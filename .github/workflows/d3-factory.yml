@@ -68,23 +68,42 @@ jobs:
       # other workflows, so claude-review.yml and ci.yml will NOT run on factory PRs.
       # Fixing that needs a PAT or GitHub App token here, plus the repo setting
       # "Allow GitHub Actions to create and approve pull requests". Not wired yet.
+      # This step holds a write token, and the agents could have planted anything in
+      # the workspace (scripts, .git/hooks, .git/config). So it runs NO repo code and
+      # never lets the workspace repo's hooks/config execute with the token present:
+      # the branch is pushed from a fresh, empty repo that only receives the commits
+      # (objects) from the workspace, and Slack is posted with plain curl + jq.
       - name: Open PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
+          BRIEF: ${{ github.event.client_payload.brief || inputs.brief }}
         run: |
+          CLEAN="$(mktemp -d)"
+          git init -q "$CLEAN"
+          git -C "$CLEAN" fetch -q --no-tags "$GITHUB_WORKSPACE" "refs/heads/$BRANCH:refs/heads/$BRANCH"
+          git -C "$CLEAN" remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
           AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
+          git -C "$CLEAN" -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
             push -u origin "$BRANCH"
-          # No `|| true`: if PR creation fails, the run fails.
-          PR_URL="$(gh pr create --fill --head "$BRANCH" --base main)"
+          # No `|| true`: if PR creation fails, the run fails. Explicit title/body
+          # (not --fill) so gh never reads the workspace repo; run from the clean dir.
+          PR_URL="$(cd "$CLEAN" && gh pr create --repo "$GITHUB_REPOSITORY" \
+            --head "$BRANCH" --base main \
+            --title "Factory: $(printf %s "$BRIEF" | tr '\n' ' ' | cut -c1-70)" \
+            --body "Opened by D3 Factory run ${{ github.run_id }}.
+
+          Brief: ${BRIEF}
+
+          Review the diff, then merge to main to deploy (Vercel auto-deploys main).")"
           echo "Opened $PR_URL"
           # Best-effort Slack notice with the real PR link (never fails the run).
           if [ -n "$SLACK_BOT_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
-            PR_URL="$PR_URL" node --input-type=module -e '
-              import { postSlack } from "./scripts/slack.mjs";
-              await postSlack(process.env.SLACK_CHANNEL,
-                `🔀 PR opened for review: ${process.env.PR_URL}\nMerge it to main to deploy (Vercel auto-deploys main).`);
-            '
+            curl -s -X POST https://slack.com/api/chat.postMessage \
+              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+              -H "Content-Type: application/json; charset=utf-8" \
+              -d "$(jq -n --arg c "$SLACK_CHANNEL" \
+                     --arg t "🔀 PR opened for review: $PR_URL — merge it to main to deploy (Vercel auto-deploys main)." \
+                     '{channel:$c, text:$t}')" || true
           fi
