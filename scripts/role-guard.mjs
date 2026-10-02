@@ -32,6 +32,9 @@ const PLANNER_FILE = /^\.factory\/plan\.md$/;
 const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/;
 const TEST_DIR = /^(clyintel\/)?tests?\//;
 const TESTER_REPORT = /^\.factory\/test-report\.md$/;
+// The multi-tenant isolation test guards against one customer seeing another's
+// financial data. The tester may add tests but must not weaken this one.
+const TESTER_PROTECTED = /(^|\/)tenant-isolation[^/]*$/;
 
 // Reviewer's Bash is limited to read-only git in ONE canonical form. The prefix
 // disables things a coder could have planted in .git/config to run code when the
@@ -39,7 +42,11 @@ const TESTER_REPORT = /^\.factory\/test-report\.md$/;
 // diff/log/show must also pass --no-ext-diff --no-textconv, which disable external
 // diff drivers and textconv filters set via .gitattributes + config.
 const GIT_PREFIX = "git --no-pager -c core.fsmonitor=false -c log.showSignature=false ";
-const GIT_SUBS = new Set(["diff", "log", "show", "status", "rev-parse", "merge-base", "ls-files", "rev-list"]);
+// `status` is deliberately absent, and `diff` must compare commits or the index (see
+// below): anything that compares WORKTREE files with the index can run clean filters
+// (filter.<x>.clean in .git/config + .gitattributes) that a coder planted. -c flags
+// and --no-ext-diff/--no-textconv do not disable those.
+const GIT_SUBS = new Set(["diff", "log", "show", "rev-parse", "merge-base", "ls-files", "rev-list"]);
 const GIT_DRIVER_SUBS = new Set(["diff", "log", "show"]);
 // Exact-match flags only. git accepts unambiguous prefixes of long options (so
 // --outp= is --output), which makes a denylist unsafe; anything not listed here
@@ -48,7 +55,7 @@ const SAFE_FLAGS = new Set([
   "--no-ext-diff", "--no-textconv", "--stat", "--numstat", "--shortstat",
   "--name-only", "--name-status", "--oneline", "--no-color", "--cached",
   "--staged", "--no-merges", "--first-parent", "--count", "--abbrev-commit",
-  "--short", "-s", "--porcelain", "-p", "--patch", "-n",
+  "-p", "--patch", "-n",
 ]);
 const SAFE_FLAG_PATTERNS = [
   /^-n\d+$/, /^-U\d+$/, /^--max-count=\d+$/,
@@ -94,7 +101,11 @@ export function repoRelative(filePath, root) {
 }
 
 export function isTestPath(relPath) {
-  return relPath != null && (TEST_FILE.test(relPath) || TEST_DIR.test(relPath) || TESTER_REPORT.test(relPath));
+  return (
+    relPath != null &&
+    !TESTER_PROTECTED.test(relPath) &&
+    (TEST_FILE.test(relPath) || TEST_DIR.test(relPath) || TESTER_REPORT.test(relPath))
+  );
 }
 
 export function isReadOnlyGit(command) {
@@ -122,13 +133,21 @@ export function isReadOnlyGit(command) {
     }
   }
   if (GIT_DRIVER_SUBS.has(sub) && !(noExtDiff && noTextconv)) return false;
+  // diff only against objects: a revision range (a..b / a...b) or the index (--cached).
+  if (sub === "diff") {
+    const cached = args.includes("--cached") || args.includes("--staged");
+    const beforePaths = args.slice(0, args.includes("--") ? args.indexOf("--") : undefined);
+    const hasRange = beforePaths.some((a) => !a.startsWith("-") && a.includes(".."));
+    if (!cached && !hasRange) return false;
+  }
   return true;
 }
 
 const GIT_HINT =
   `reviewer Bash is limited to read-only git, written exactly as: ` +
-  `${GIT_PREFIX}<diff|log|show|status|rev-parse|merge-base|ls-files|rev-list> [safe flags] [refs] [-- paths], ` +
-  `and diff/log/show must also pass --no-ext-diff --no-textconv.`;
+  `${GIT_PREFIX}<diff|log|show|rev-parse|merge-base|ls-files|rev-list> [safe flags] [refs] [-- paths], ` +
+  `diff/log/show must also pass --no-ext-diff --no-textconv, and diff must use a revision range ` +
+  `(main...HEAD) or --cached (no working-tree diffs, no status).`;
 
 // Decide one tool call. `input` is a PreToolUse hook input. Returns a hook output
 // object ({} = no objection) — deny wins over any allow rule.

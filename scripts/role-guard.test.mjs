@@ -65,7 +65,7 @@ test("coder cannot Write/Edit factory, CI or git files", () => {
 
 test("tester can write test files and its report only", () => {
   const ok = [
-    "clyintel/tests/tenant-isolation.test.ts",
+    "clyintel/tests/new-feature.test.ts",
     "clyintel/test/stubs/server-only.ts", // top-level test dir
     "tests/helper.ts",
     "clyintel/lib/settlement/charge.spec.tsx", // test filename anywhere
@@ -85,6 +85,8 @@ test("tester can write test files and its report only", () => {
     ".github/workflows/ci.yml",
     ".factory/plan.md", // tester must not rewrite the plan
     ".factory/runs/log.jsonl", // ...or forge the run log
+    "clyintel/tests/tenant-isolation.test.ts", // the multi-tenant isolation test must not be weakened
+    "clyintel/tests/tenant-isolation.helpers.ts",
     "clyintel/latest/foo.ts", // "latest/" must not match "test"
     "clyintel/contest/foo.ts",
     "",
@@ -108,7 +110,9 @@ test("reviewer Bash: canonical read-only git is allowed", () => {
     `${G} log ${SAFE} --oneline -n5`,
     `${G} log ${SAFE} --oneline -n 5 main..HEAD`,
     `${G} show ${SAFE} HEAD -- clyintel/lib/charge.ts`,
-    `${G} status --short`,
+    `${G} diff ${SAFE} --cached`,
+    `${G} diff ${SAFE} --staged --stat`,
+    `${G} diff ${SAFE} a..b`,
     `${G} rev-parse HEAD`,
     `${G} merge-base main HEAD`,
     `${G} ls-files`,
@@ -128,6 +132,14 @@ test("reviewer Bash: everything else is denied", () => {
     // no canonical prefix
     "git diff main...HEAD",
     "git status",
+    // anything comparing the WORKTREE can run planted clean filters
+    `${G} status --short`,
+    `${G} status`,
+    `${G} diff ${SAFE}`,
+    `${G} diff ${SAFE} --stat`,
+    `${G} diff ${SAFE} HEAD`,
+    `${G} diff ${SAFE} main`,
+    `${G} diff ${SAFE} -- a..b`, // ".." only counts before --
     `git -c core.fsmonitor=false diff ${SAFE} main`, // missing --no-pager / showSignature
     // diff/log/show without the driver-disabling flags
     `${G} diff main...HEAD`,
