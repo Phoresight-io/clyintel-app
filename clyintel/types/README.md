@@ -1,3 +1,4 @@
+<!-- Shared TypeScript types for ClyIntel; supabase.ts is generated, do not edit by hand. -->
 # Types
 
 This folder contains shared TypeScript types for the ClyIntel product.
