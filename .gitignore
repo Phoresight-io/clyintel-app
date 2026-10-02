@@ -17,6 +17,13 @@ tsconfig.tsbuildinfo
 !.env.example
 !.env.*.example
 *.key
+# Test/tool output the tester can leave behind (coverage HTML can embed source and fixtures;
+# `vercel pull` writes .vercel/.env.*.local).
+coverage/
+.vercel/
+*.log
+playwright-report/
+test-results/
 
 # misc
 .DS_Store
