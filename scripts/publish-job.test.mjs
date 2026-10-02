@@ -240,6 +240,10 @@ test("publish: commits that touch protected paths are refused, and nothing is pu
     "husky hook": ({ put }) => put("clyintel/.husky/pre-commit", "x"),
     "vscode task": ({ put }) => put(".vscode/tasks.json", "{}"),
     "devcontainer": ({ put }) => put(".devcontainer/devcontainer.json", "{}"),
+    "auth middleware": ({ put }) => put("clyintel/middleware.ts", "export {}"),
+    "next 16 proxy": ({ put }) => put("clyintel/proxy.ts", "export {}"),
+    "root CODEOWNERS": ({ put }) => put("CODEOWNERS", "* @someone"),
+    "docs/CODEOWNERS": ({ put }) => put("docs/CODEOWNERS", "* @someone"),
     "root vercel.json": ({ put }) => put("vercel.json", "{}"),
     "next.config": ({ put }) => put("clyintel/next.config.ts", "export default {}"),
     "schema migration": ({ put }) => put("clyintel/schema/099_new.sql", "alter table x;"),
@@ -317,14 +321,12 @@ test("publish: symlinks and submodules are refused, deleting one is not", () => 
   } finally { cleanup(w); }
 });
 
-test("publish: dependency and middleware changes are allowed but flagged in the PR body", () => {
+test("publish: dependency and config changes are allowed but flagged in the PR body", () => {
   const w = world({
     log: '{"test_result":"PASS","review_verdict":"APPROVE"}',
     edit: ({ put }) => {
       put("clyintel/package.json", "{}");
       put("clyintel/package-lock.json", "{}");
-      put("clyintel/middleware.ts", "export {}");
-      put("clyintel/proxy.ts", "export {}");
       put("clyintel/tsconfig.json", "{}");
       put("clyintel/lib/stray.sql", "select 1;");
       put("clyintel/lib/settlement/charge.ts", "x");
@@ -347,7 +349,7 @@ test("publish: dependency and middleware changes are allowed but flagged in the 
     assert.ok(remoteHas(w, "refs/heads/factory/run-1"));
     const body = ghArgs(w)[ghArgs(w).indexOf("--body") + 1];
     assert.match(body, /Touches sensitive files/);
-    for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/middleware.ts", "clyintel/proxy.ts", "clyintel/tsconfig.json", "clyintel/lib/stray.sql", "clyintel/lib/settlement/charge.ts", "clyintel/lib/stripe.ts", "clyintel/app/api/sms-reply/route.ts", "clyintel/lib/demo-mode.ts", "clyintel/instrumentation.ts", "lib/supabase.ts", "clyintel/lib/providers/paypal.ts", "clyintel/app/api/connect/onboard/route.ts", "clyintel/app/api/stripe-webhook/route.ts", "clyintel/.npmrc", "clyintel/lib/.gitignore"]) assert.ok(body.includes(f), f);
+    for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/tsconfig.json", "clyintel/lib/stray.sql", "clyintel/lib/settlement/charge.ts", "clyintel/lib/stripe.ts", "clyintel/app/api/sms-reply/route.ts", "clyintel/lib/demo-mode.ts", "clyintel/instrumentation.ts", "lib/supabase.ts", "clyintel/lib/providers/paypal.ts", "clyintel/app/api/connect/onboard/route.ts", "clyintel/app/api/stripe-webhook/route.ts", "clyintel/.npmrc", "clyintel/lib/.gitignore"]) assert.ok(body.includes(f), f);
     assert.ok(!body.includes("app/page.tsx"), "ordinary files must not be listed as sensitive");
   } finally { cleanup(w); }
 });
@@ -355,7 +357,7 @@ test("publish: dependency and middleware changes are allowed but flagged in the 
 test("publish: sensitive file names from the agent cannot inject markup or break the code fence", () => {
   const w = world({
     edit: ({ put }) => {
-      put("clyintel/middleware.ts", "x");
+      put("clyintel/tsconfig.json", "x");
       put("clyintel/a`b/package.json", "x"); // backtick in the directory name
       put("clyintel/<img src=x>/package.json", "x");
     },

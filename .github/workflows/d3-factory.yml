@@ -175,7 +175,7 @@ jobs:
           # for Claude sessions): changing either rewrites the rules agents work under.
           # Matched case-INSENSITIVELY (grep -i): the tree is checked on Linux, but a reviewer on a
           # case-insensitive checkout (macOS) would get `.Claude/settings.json` written into `.claude/`.
-          PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)(tenant|agent)-isolation[^/]*$|(^|/)[^/]*isolation[^/]*\.(test|spec)\.[cm]?[jt]sx?$|(^|/)env-config\.test\.[cm]?[jt]s$|^(clyintel/)?test/stubs/|(^|/)vercel\.(json|[cm]?[jt]s)$|(^|/)\.vercelignore$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/|(^|/)\.ai/|(^|/)\.mcp\.json$|(^|/)\.env($|\.)|(^|/)\.gitmodules$|(^|/)(\.husky|\.vscode|\.devcontainer)/|(^|/)vitest\.config\.[cm]?[jt]s$|(^|/)supabase/'
+          PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)(tenant|agent)-isolation[^/]*$|(^|/)[^/]*isolation[^/]*\.(test|spec)\.[cm]?[jt]sx?$|(^|/)env-config\.test\.[cm]?[jt]s$|^(clyintel/)?test/stubs/|(^|/)vercel\.(json|[cm]?[jt]s)$|(^|/)\.vercelignore$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/|(^|/)\.ai/|(^|/)\.mcp\.json$|(^|/)\.env($|\.)|(^|/)\.gitmodules$|(^|/)(\.husky|\.vscode|\.devcontainer)/|(^|/)(middleware|proxy)\.[cm]?[jt]s$|(^|/)CODEOWNERS$|(^|/)vitest\.config\.[cm]?[jt]s$|(^|/)supabase/'
           CHANGED_FILES() { git diff --name-only -z --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH"; }
           BAD="$(CHANGED_FILES | { grep -izE "$PROTECTED" || true; } | tr '\0' '\n')"
           if [ -n "$BAD" ]; then
@@ -201,11 +201,11 @@ jobs:
           # because a missed detail here costs the most: dependencies and the auth/tenant
           # middleware. Names come from the agent, so reduce them to a safe character set
           # (no backticks, so they cannot break out of the code fence) and cap the list.
-          SENSITIVE='\.sql$|(^|/)(package(-lock)?\.json|tsconfig[^/]*\.json|(middleware|proxy)\.[cm]?[jt]s|\.npmrc|\.gitignore)$|^(clyintel/)?lib/(settlement|revshare|ledgerSync|balanceEvents|recovery|qbo|providers|subscriber|outreach|config)/|^(clyintel/)?lib/(stripe[^/]*|supabase[^/]*|crypto|data|demo-mode)\.ts$|^clyintel/app/api/(stripe|stripe-webhook|settlement|webhooks|qbo|connect|clients|invoices|email-reply|sms-reply|voice|import-invoices|sources|outreach|settings|diagnostics)/|(^|/)instrumentation\.[cm]?[jt]s$'
+          SENSITIVE='\.sql$|(^|/)(package(-lock)?\.json|tsconfig[^/]*\.json|\.npmrc|\.gitignore)$|^(clyintel/)?lib/(settlement|revshare|ledgerSync|balanceEvents|recovery|qbo|providers|subscriber|outreach|config)/|^(clyintel/)?lib/(stripe[^/]*|supabase[^/]*|crypto|data|demo-mode)\.ts$|^clyintel/app/api/(stripe|stripe-webhook|settlement|webhooks|qbo|connect|clients|invoices|email-reply|sms-reply|voice|import-invoices|sources|outreach|settings|diagnostics)/|(^|/)instrumentation\.[cm]?[jt]s$'
           WARN_FILES="$(CHANGED_FILES | { grep -izE "$SENSITIVE" || true; } | tr '\0' '\n' | tr -c 'A-Za-z0-9_./+@\n-' '?' | head -n 25)"
           WARN_NOTE=""
           if [ -n "$WARN_FILES" ]; then
-            WARN_NOTE="$(printf '⚠️ Touches sensitive files (dependencies, tsconfig paths, auth middleware, billing/settlement/Stripe/QBO code, inbound webhooks, tenant-data routes, Supabase clients, crypto, demo-mode switch, instrumentation, install config, nested .gitignore). CLAUDE.md rule 7: billing or payment logic needs a human to confirm it. Review these carefully:\n\n```\n%s\n```' "$WARN_FILES")"
+            WARN_NOTE="$(printf '⚠️ Touches sensitive files (dependencies, tsconfig paths, billing/settlement/Stripe/QBO code, inbound webhooks, tenant-data routes, Supabase clients, crypto, demo-mode switch, instrumentation, install config, nested .gitignore). CLAUDE.md rule 7: billing or payment logic needs a human to confirm it. Review these carefully:\n\n```\n%s\n```' "$WARN_FILES")"
           fi
           # Weakened tests are easy to miss in a big diff: list EXISTING test files that were
           # modified or deleted (new ones are not flagged). Same sanitising as above.
