@@ -78,7 +78,7 @@ All agents must follow these rules unless the product CLAUDE.md explicitly overr
 - Delete the feature branch immediately after merge
 - `develop` deploys to develop.clyintel (dev) on every push
 - Production: promote `develop` to `main` with a "Promote develop to main" PR, reviewed and merged by a human; Vercel deploys `main` to production on every push
-- Never promote a non-main branch to Vercel production
+- Never deploy or promote any branch other than `main` to Vercel production (no manual Vercel promotions of `develop` or preview builds)
 
 ---
 
