@@ -23,8 +23,10 @@ on:
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    # A stuck run must not burn API spend for GitHub's 6h default, and repeated
-    # /d3 calls queue instead of running in parallel.
+    # A stuck run must not burn API spend for GitHub's 6h default, and /d3 calls
+    # don't run in parallel. Note this is not a FIFO queue: GitHub keeps at most ONE
+    # pending run per group and cancels an older pending run when a newer one
+    # arrives, so rapid /d3 calls can be dropped.
     timeout-minutes: 60
     concurrency:
       group: d3-factory
@@ -127,16 +129,29 @@ jobs:
             exit 1
           fi
           git fetch -q --no-tags "$BUNDLE" "refs/heads/$BRANCH:refs/heads/$BRANCH"
+          # Show the run's outcome on the PR itself, since the human merge is the
+          # only gate. This is read from the branch's run log (data only) and
+          # reduced to known values; anything unexpected becomes "unknown".
+          LOGLINE="$(git show "refs/heads/$BRANCH:.factory/runs/log.jsonl" 2>/dev/null | tail -n 1 || true)"
+          TEST_RESULT="$(printf %s "$LOGLINE" | jq -r '.test_result // "unknown"' 2>/dev/null || echo unknown)"
+          VERDICT="$(printf %s "$LOGLINE" | jq -r '.review_verdict // "unknown"' 2>/dev/null || echo unknown)"
+          case "$TEST_RESULT" in PASS|FAIL|none) ;; *) TEST_RESULT=unknown ;; esac
+          case "$VERDICT" in APPROVE|"REQUEST CHANGES"|BLOCK) ;; *) VERDICT=unknown ;; esac
+          DRAFT=""
+          if [ "$TEST_RESULT" != "PASS" ] || [ "$VERDICT" != "APPROVE" ]; then DRAFT=1; fi
           AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
             push -u origin "$BRANCH"
           # No `|| true`: if PR creation fails, the run fails.
           PR_URL="$(gh pr create --repo "$GITHUB_REPOSITORY" \
-            --head "$BRANCH" --base main \
+            --head "$BRANCH" --base main ${DRAFT:+--draft} \
             --title "Factory: $(printf %s "$BRIEF" | tr '\n' ' ' | cut -c1-70)" \
             --body "Opened by D3 Factory run ${{ github.run_id }}.
 
           Brief: ${BRIEF}
+
+          Tests: ${TEST_RESULT} | Factory reviewer verdict: ${VERDICT}${DRAFT:+
+          Opened as a DRAFT because tests did not pass or the reviewer did not approve.}
 
           Review the diff, then merge to main to deploy (Vercel auto-deploys main).")"
           echo "Opened $PR_URL"
@@ -146,6 +161,6 @@ jobs:
               -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
               -H "Content-Type: application/json; charset=utf-8" \
               -d "$(jq -n --arg c "$SLACK_CHANNEL" \
-                     --arg t "🔀 PR opened for review: $PR_URL — merge it to main to deploy (Vercel auto-deploys main)." \
+                     --arg t "🔀 PR opened for review: $PR_URL (tests: $TEST_RESULT, reviewer: $VERDICT${DRAFT:+, opened as draft}) — merge it to main to deploy (Vercel auto-deploys main)." \
                      '{channel:$c, text:$t}')" || true
           fi
