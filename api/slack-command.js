@@ -11,9 +11,16 @@ const MAX_BODY_BYTES = 100_000;
 const readRaw = (req) =>
   new Promise((resolve, reject) => {
     let data = "";
+    let tooBig = false;
     req.on("data", (c) => {
+      if (tooBig) return; // stop accumulating once rejected
       data += c;
-      if (data.length > MAX_BODY_BYTES) reject(new Error("body too large"));
+      if (data.length > MAX_BODY_BYTES) {
+        tooBig = true;
+        data = "";
+        reject(new Error("body too large"));
+        req.destroy?.();
+      }
     });
     req.on("end", () => resolve(data));
     req.on("error", reject);
