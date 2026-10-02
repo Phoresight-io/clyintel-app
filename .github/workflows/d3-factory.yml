@@ -227,8 +227,8 @@ jobs:
             fi
             exit 0
           fi
-          echo "What this run will push (names indented, see note above):"
-          git diff --stat=120 --no-ext-diff --no-textconv --no-renames "$GITHUB_SHA" "refs/heads/$BRANCH" | sed 's/^/    /'
+          echo "What this run will push (each line prefixed with \"| \" so none can read as a workflow command):"
+          git diff --stat=120 --no-ext-diff --no-textconv --no-renames "$GITHUB_SHA" "refs/heads/$BRANCH" | sed 's/^/    | /'
           echo "Review that list for anything that looks like data or a credential."
           # Not blocked (features legitimately change them) but flagged loudly in the PR body (including
           # billing/tenant-data code: CLAUDE.md rule 7 wants a human to confirm billing logic),

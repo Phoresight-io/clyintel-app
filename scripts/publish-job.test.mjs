@@ -495,12 +495,13 @@ test("publish: a refusal logs only indented names (no line can look like a workf
   } finally { cleanup(w); }
 });
 
-test("publish: logs what is about to be pushed, indented", () => {
-  const w = world({ edit: ({ put }) => put("clyintel/lib/charge.ts", "x") });
+test("publish: logs what is about to be pushed, with a non-whitespace prefix (no line can read as a workflow command)", () => {
+  const w = world({ edit: ({ put }) => { put("clyintel/lib/charge.ts", "x"); put("clyintel/::add-mask::secret.ts", "x"); } });
   try {
     const out = publish(w);
     assert.match(out, /What this run will push/);
-    assert.match(out, /^    .*clyintel\/lib\/charge\.ts/m);
+    assert.match(out, /^    \| .*clyintel\/lib\/charge\.ts/m);
+    assert.ok(out.split("\n").every((l) => !l.trimStart().startsWith("::")), "a log line starts with :: after trimming");
   } finally { cleanup(w); }
 });
 
