@@ -1,4 +1,6 @@
 -- Migration: drop_balance_events_fee_eligible
+-- ⛔ DO NOT RE-RUN: fully applied on Test + Prod (2026-10-02). The column is gone, so
+--    STEP 1 now errors ("column fee_eligible does not exist"). Kept for history only.
 -- Test (clyintel-dev): STEP 1 + STEP 2 APPLIED 2026-10-01 (STEP 2 via the SQL editor;
 --   not in the supabase_migrations ledger — see schema/MIGRATIONS.md 2026-10-02).
 -- Prod (clyintel-prod): STEP 1 + STEP 2 APPLIED 2026-10-02, in order: (1) add_invoices_outreach_started_at,
