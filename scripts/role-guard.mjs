@@ -36,7 +36,7 @@ const TESTER_REPORT = /^\.factory\/test-report\.md$/;
 // financial data. The tester may add tests but must not weaken this one.
 // Likewise env-config.test.ts (no server secrets in client bundles; gates live Stripe
 // charges) and the vitest stubs aliased into every suite.
-const TESTER_PROTECTED = /(^|\/)tenant-isolation[^/]*$|(^|\/)env-config\.test\.[cm]?[jt]s$|^(clyintel\/)?test\/stubs\//;
+const TESTER_PROTECTED = /(^|\/)(tenant|agent)-isolation[^/]*$|(^|\/)[^/]*isolation[^/]*\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)env-config\.test\.[cm]?[jt]s$|^(clyintel\/)?test\/stubs\//;
 
 // Reviewer's Bash is limited to read-only git in ONE canonical form. The prefix
 // disables things a coder could have planted in .git/config to run code when the
@@ -85,7 +85,8 @@ const CODER_PROTECTED = new RegExp(
     "(^|/)env-config\\.test\\.[cm]?[jt]s$",
     "^(clyintel/)?test/stubs/",
     "^\\.factory/runs/",
-    "(^|/)tenant-isolation[^/]*$",
+    "(^|/)(tenant|agent)-isolation[^/]*$",
+    "(^|/)[^/]*isolation[^/]*\\.(test|spec)\\.[cm]?[jt]sx?$",
     "(^|/)vercel\\.json$",
     "(^|/)next\\.config\\.[cm]?[jt]s$",
     "^(clyintel/)?schema/",

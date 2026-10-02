@@ -103,6 +103,7 @@ test("tester can write test files and its report only", () => {
     ".github/workflows/ci.yml",
     ".factory/plan.md", // tester must not rewrite the plan
     ".factory/runs/log.jsonl", // ...or forge the run log
+    "clyintel/lib/outreach/agent-isolation.test.ts", // second cross-tenant isolation test
     "clyintel/lib/config/env-config.test.ts", // guards server secrets / live-charge gating
     "clyintel/test/stubs/server-only.ts", // aliased into every suite
     "clyintel/tests/tenant-isolation.test.ts", // the multi-tenant isolation test must not be weakened
@@ -218,7 +219,7 @@ test("coder protections cover everything the publish job refuses (kept in sync)"
   const samples = [
     ".claude/agents/x.md", ".github/workflows/x.yml", "scripts/x.mjs", "api/x.js", ".gitignore", ".gitattributes",
     "clyintel/.gitattributes", "CLAUDE.md", "clyintel/lib/CLAUDE.md", "CLAUDE.local.md", "clyintel/.claude/settings.json",
-    "clyintel/tests/tenant-isolation.test.ts", "clyintel/lib/config/env-config.test.ts", "clyintel/test/stubs/server-only.ts",
+    "clyintel/tests/tenant-isolation.test.ts", "clyintel/lib/outreach/agent-isolation.test.ts", "clyintel/lib/x/org-isolation.spec.ts", "clyintel/lib/config/env-config.test.ts", "clyintel/test/stubs/server-only.ts",
     "vercel.json", "clyintel/vercel.json", "clyintel/next.config.ts", "schema/1.sql", "clyintel/schema/1.sql",
     ".ai/x.md", "clyintel/.ai/x.md", ".mcp.json", "clyintel/.mcp.json", ".gitmodules", "clyintel/vitest.config.ts", ".env", ".env.local", "clyintel/.env.production",
   ];

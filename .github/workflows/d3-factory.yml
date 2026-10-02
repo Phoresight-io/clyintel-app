@@ -154,7 +154,7 @@ jobs:
           # start with " and slip past the ^ anchors); --no-renames so moving a file out of a
           # protected directory still lists the old path.
           #
-          # Also protected: the tenant-isolation test (weakening it would ship with a
+          # Also protected: the cross-tenant isolation tests (tenant-isolation*, agent-isolation*, any *isolation*.test.*) (weakening it would ship with a
           # "Tests: PASS" claim), and the build/deploy/data surface that a human must own:
           # vercel.json (it defines the every-minute QBO worker and settlement crons),
           # next.config.*, and schema/ (SQL migrations, which can include RLS policies). And
@@ -163,7 +163,7 @@ jobs:
           # .ai/ (the product constitution, schema detail, Stripe IDs and specs that
           # clyintel/CLAUDE.md tells every agent to read) and .mcp.json (registers MCP servers
           # for Claude sessions): changing either rewrites the rules agents work under.
-          PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)tenant-isolation[^/]*$|(^|/)env-config\.test\.[cm]?[jt]s$|^(clyintel/)?test/stubs/|(^|/)vercel\.json$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/|(^|/)\.ai/|(^|/)\.mcp\.json$|(^|/)\.env($|\.)|(^|/)\.gitmodules$|(^|/)vitest\.config\.[cm]?[jt]s$'
+          PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)(tenant|agent)-isolation[^/]*$|(^|/)[^/]*isolation[^/]*\.(test|spec)\.[cm]?[jt]sx?$|(^|/)env-config\.test\.[cm]?[jt]s$|^(clyintel/)?test/stubs/|(^|/)vercel\.json$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/|(^|/)\.ai/|(^|/)\.mcp\.json$|(^|/)\.env($|\.)|(^|/)\.gitmodules$|(^|/)vitest\.config\.[cm]?[jt]s$'
           CHANGED_FILES() { git diff --name-only -z --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH"; }
           BAD="$(CHANGED_FILES | { grep -zE "$PROTECTED" || true; } | tr '\0' '\n')"
           if [ -n "$BAD" ]; then

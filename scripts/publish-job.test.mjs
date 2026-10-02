@@ -218,6 +218,7 @@ test("publish: commits that touch protected paths are refused, and nothing is pu
     ".gitattributes (nested)": ({ put }) => put("clyintel/.gitattributes", "* filter=x"),
     "unicode path git would quote": ({ put }) => put("scripts/\u00e9.js", "x"),
     "weaken the tenant-isolation test": ({ put }) => put("clyintel/tests/tenant-isolation.test.ts", "// emptied"),
+    "weaken the agent-isolation test": ({ put }) => put("clyintel/lib/outreach/agent-isolation.test.ts", "// emptied"),
     "tenant-isolation helper": ({ put }) => put("clyintel/tests/tenant-isolation.helpers.ts", "x"),
     "vercel.json (crons)": ({ put }) => put("clyintel/vercel.json", "{}"),
     "root vercel.json": ({ put }) => put("vercel.json", "{}"),
