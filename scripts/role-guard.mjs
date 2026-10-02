@@ -93,6 +93,7 @@ const CODER_PROTECTED = new RegExp(
     "^(clyintel/)?schema/",
     "(^|/)\\.ai/", // product constitution, schema detail, Stripe IDs, specs
     "(^|/)\\.gitmodules$",
+    "(^|/)(\\.husky|\\.vscode|\\.devcontainer)/", // run code on a human machine / Codespace (hooks, folderOpen tasks, postCreateCommand)
     "(^|/)supabase/", // Supabase CLI/branching reads migrations from supabase/migrations
     "(^|/)vitest\\.config\\.[cm]?[jt]s$", // decides whether tenant-isolation runs at all
     "(^|/)\\.env($|\\.)", // credentials must never be committed
