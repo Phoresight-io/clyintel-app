@@ -271,6 +271,8 @@ test("publish: commits that touch protected paths are refused, and nothing is pu
     "root CODEOWNERS": ({ put }) => put("CODEOWNERS", "* @someone"),
     "docs/CODEOWNERS": ({ put }) => put("docs/CODEOWNERS", "* @someone"),
     "extra file under .factory/runs/": ({ put }) => put(".factory/runs/other.json", "{}"),
+    "case-variant run record": ({ put, git }) => { put(".factory/runs/RUN-1.JSON", "{}"); git("add", "-f", ".factory/runs/RUN-1.JSON"); },
+    "case-variant runs dir": ({ put, git }) => { put(".factory/RUNS/run-1.json", "{}"); git("add", "-f", ".factory/RUNS/run-1.json"); },
     "other .factory file (force-added)": ({ put, git }) => { put(".factory/plan.md", "x"); git("add", "-f", ".factory/plan.md"); },
     "another run's record": ({ put }) => put(".factory/runs/run-2.json", "{}"),
     "root vercel.json": ({ put }) => put("vercel.json", "{}"),
