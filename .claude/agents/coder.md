@@ -19,8 +19,8 @@ that no plan exists — do not improvise your own plan.
 ## Process
 1. Read `.factory/plan.md` fully: task list, affected files, acceptance criteria,
    out-of-scope.
-2. Confirm you are on a working branch, not main (`git branch --show-current`).
-   Never commit directly to main.
+2. Confirm you are on a working branch, not develop or main (`git branch --show-current`).
+   Never commit directly to develop or main.
 3. Work the task list in order. Keep changes scoped to what the plan lists. If the
    plan is wrong or incomplete, do the minimal correct thing and record the
    deviation.

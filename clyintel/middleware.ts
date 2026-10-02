@@ -39,9 +39,14 @@ const WEBHOOK_PATHS = [
 //
 // NOT included: /api/voice/call — it has no self-authentication, so it stays behind
 // the session redirect (app-internal only), same as its exclusion from WEBHOOK_PATHS.
+//
+// /api/outreach/run (machine clients: Postman/curl/pg_net) self-authenticates via
+// OUTREACH_RUN_SECRET (Bearer, fail-closed: 500 unset / 401 wrong, before any parsing
+// or DB work); live mode is additionally fenced by subscriberId in parseRunRequest.
 const CRON_PATHS = [
   '/api/qbo/worker',
   '/api/settlement/cron',
+  '/api/outreach/run',
 ];
 
 export async function middleware(request: NextRequest) {

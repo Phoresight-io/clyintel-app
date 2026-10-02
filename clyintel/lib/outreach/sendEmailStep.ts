@@ -8,6 +8,7 @@ import {
   type ContactRow,
 } from "@/lib/outreach/selectRecipients";
 import { isChannelAllowed } from "@/lib/outreach/isChannelAllowed";
+import { markOutreachStarted } from "@/lib/outreach/markOutreachStarted";
 import type { Database } from "@/types/supabase";
 
 // Recorded, gated, DRY-RUN-FIRST email send step (Brick 1a).
@@ -71,6 +72,10 @@ export interface SendEmailStepContext {
   /** clients.opt_out_email, loaded by the caller. Only read with `recipient`;
    *  undefined there = opted out (fail closed). */
   clientOptOutEmail?: boolean;
+  /** true = send exactly as usual but do NOT stamp invoices.outreach_started_at.
+   *  Set by the in-call email path when the parent voice call is a test call
+   *  (test calls never count as outreach, nor do emails sent from inside them). */
+  suppressOutreachStamp?: boolean;
 }
 
 export type SendEmailOutcome =
@@ -247,6 +252,9 @@ export interface SendEmailPort {
     text: string;
     html: string;
   }): Promise<{ messageId: string | null }>;
+  // Write-once invoices.outreach_started_at stamp (lib/outreach/markOutreachStarted).
+  // Called ONLY on a live send MailerSend accepted. Must never throw.
+  markOutreachStarted(invoiceId: string, startedAt: string): Promise<void>;
   now(): string; // ISO timestamp (injectable for deterministic tests)
 }
 
@@ -348,6 +356,20 @@ export async function sendEmailStep(
     // dry-run: record only, no MailerSend call.
     commStatus = COMM_STATUS.wouldSend;
     outcome = "would_send";
+  }
+
+  // Outreach-started stamp: a live send MailerSend accepted (with a message id —
+  // LOCKED RULE 2026-09-30) is first real contact on the email channel. Never on
+  // dry-run / would_send / send_failed / a missing message id, nor when the
+  // caller suppresses it (an email sent from inside a test call). Stamped
+  // before the record writes below so a later record failure can't lose it, and
+  // guarded so a stamp failure never fails the send (it already left the building).
+  if (outcome === "sent" && messageId && sentAt && !ctx.suppressOutreachStamp) {
+    try {
+      await port.markOutreachStarted(ctx.invoiceId, sentAt);
+    } catch (err) {
+      console.error(`sendEmailStep: outreach-started stamp threw for invoice ${ctx.invoiceId}`, err);
+    }
   }
 
   await port.finalizeCommunication(communicationId, {
@@ -526,6 +548,9 @@ function createDefaultPort(): SendEmailPort {
     },
     async dispatchEmail(params) {
       return sendEmail({ to: params.to, subject: params.subject, text: params.text, html: params.html });
+    },
+    async markOutreachStarted(invoiceId, startedAt) {
+      await markOutreachStarted(service, invoiceId, startedAt, "email");
     },
     now() {
       return new Date().toISOString();

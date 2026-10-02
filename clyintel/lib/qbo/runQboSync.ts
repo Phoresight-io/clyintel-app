@@ -3,7 +3,6 @@ import { getValidAccessToken, refreshAccessToken } from "@/lib/qbo/tokens";
 import { listCustomers, listInvoices } from "@/lib/qbo/client";
 import { mergeClientContact } from "@/lib/qbo/mergeClientContact";
 import { planPocReconcile } from "@/lib/qbo/planPocReconcile";
-import { evaluateOutreachEligibility } from "@/lib/outreach/eligibility";
 import { computeBalanceEvent, type BalanceEventRow } from "@/lib/balanceEvents/computeBalanceEvent";
 import { deriveInvoiceStatus } from "@/lib/qbo/invoiceStatus";
 import type { QboSyncResult } from "@/lib/qbo/syncQbo";
@@ -268,26 +267,26 @@ export async function runQboSync(subscriberId: string): Promise<QboSyncResult> {
   //   1. balance_events last new_outstanding_cents (durable monotonic ledger),
   //   2. else existing invoices.amount_outstanding_cents (never-evented invoice),
   //   3. else null (brand-new invoice → no anchor, no emission).
-  // reminder_count is read here too (the emission-time value). This whole block
+  // outreach_started_at is read here too (the emission-time value). This whole block
   // is additive and must NEVER abort invoice sync. The two reads are split so a
   // failure of the best-effort ledger override can never wipe the invoice-seeded
   // base anchors: only an invoices pre-read failure (no reliable base) skips
   // emission; a ledger-read failure just skips the override.
   const anchorByExternalId = new Map<
     string,
-    { prevOutstandingCents: number | null; reminderCount: number }
+    { prevOutstandingCents: number | null; outreachStartedAt: string | null }
   >();
   const uuidByExternalId = new Map<string, string>();
   const externalIds = invoiceRows.map((r) => r.external_id);
   if (externalIds.length > 0) {
     // Base anchors: one batched read of existing invoices in this batch
-    // (fallback anchor + reminder_count + the uuid needed to look up their
+    // (fallback anchor + outreach_started_at + the uuid needed to look up their
     // ledger events). If THIS fails there is no reliable base, so clear and
     // let emission no-op this run.
     try {
       const { data: preInvoices, error: preError } = await service
         .from("invoices")
-        .select("id, external_id, amount_outstanding_cents, reminder_count")
+        .select("id, external_id, amount_outstanding_cents, outreach_started_at")
         .eq("subscriber_id", subscriberId)
         .eq("source", "qbo")
         .in("external_id", externalIds);
@@ -298,7 +297,7 @@ export async function runQboSync(subscriberId: string): Promise<QboSyncResult> {
         uuidByExternalId.set(row.external_id, row.id);
         anchorByExternalId.set(row.external_id, {
           prevOutstandingCents: row.amount_outstanding_cents,
-          reminderCount: row.reminder_count ?? 0,
+          outreachStartedAt: row.outreach_started_at ?? null,
         });
       }
     } catch (err) {
@@ -337,7 +336,7 @@ export async function runQboSync(subscriberId: string): Promise<QboSyncResult> {
           if (last != null) {
             anchorByExternalId.set(ext, {
               prevOutstandingCents: last,
-              reminderCount: anchorByExternalId.get(ext)?.reminderCount ?? 0,
+              outreachStartedAt: anchorByExternalId.get(ext)?.outreachStartedAt ?? null,
             });
           }
         }
@@ -391,7 +390,7 @@ export async function runQboSync(subscriberId: string): Promise<QboSyncResult> {
         source: "qbo",
         prevOutstandingCents: anchor?.prevOutstandingCents ?? null,
         newOutstandingCents,
-        reminderCount: anchor?.reminderCount ?? 0,
+        outreachStartedAt: anchor?.outreachStartedAt ?? null,
         syncedAt,
       });
       if (row) balanceEventRows.push(row);
@@ -411,68 +410,10 @@ export async function runQboSync(subscriberId: string): Promise<QboSyncResult> {
     }
   }
 
-  // --- Outreach eligibility (Brick A) ----------------------------------
-  // Post-invoice seam. For each eligible past-due, contactable invoice with no
-  // prior attempt, record ONE simulated recovery_attempts row (sent_at set) so
-  // the capture gate's outreach attribution is satisfied. Option B stub — no
-  // real send; rows are marked SIMULATION and carry communication_id = null.
-  // Does not alter the invoice/client sync above; failure throws → 500 like the
-  // rest of the sync. Read subscriber-scoped source='qbo'; evaluate in the pure
-  // engine; bulk-insert new rows via the existing service client.
-  let outreachAttemptsCreated = 0;
-  {
-    const [invoicesRes, clientsRes, attemptsRes] = await Promise.all([
-      service
-        .from("invoices")
-        .select("id, subscriber_id, client_id, due_date")
-        .eq("subscriber_id", subscriberId)
-        .eq("source", "qbo"),
-      service
-        .from("clients")
-        .select("id, email, phone")
-        .eq("subscriber_id", subscriberId)
-        .eq("source", "qbo"),
-      // Idempotency skip-set: any invoice with an existing attempt (any source).
-      service
-        .from("recovery_attempts")
-        .select("invoice_id")
-        .eq("subscriber_id", subscriberId),
-    ]);
-
-    if (invoicesRes.error) {
-      throw new Error(`QBO sync: eligibility invoices read failed: ${invoicesRes.error.message}`);
-    }
-    if (clientsRes.error) {
-      throw new Error(`QBO sync: eligibility clients read failed: ${clientsRes.error.message}`);
-    }
-    if (attemptsRes.error) {
-      throw new Error(`QBO sync: eligibility attempts read failed: ${attemptsRes.error.message}`);
-    }
-
-    const existingAttemptInvoiceIds = new Set(
-      (attemptsRes.data ?? []).map((r) => r.invoice_id),
-    );
-    const rows = evaluateOutreachEligibility(
-      invoicesRes.data ?? [],
-      clientsRes.data ?? [],
-      existingAttemptInvoiceIds,
-      new Date(),
-    );
-
-    if (rows.length > 0) {
-      const { error: insertError } = await service.from("recovery_attempts").insert(rows);
-      if (insertError) {
-        throw new Error(`QBO sync: recovery_attempts insert failed: ${insertError.message}`);
-      }
-      outreachAttemptsCreated = rows.length;
-    }
-  }
-
   return {
     customersUpserted,
     invoicesUpserted,
     invoicesSkipped,
-    outreachAttemptsCreated,
     balanceEventsEmitted,
   };
 }

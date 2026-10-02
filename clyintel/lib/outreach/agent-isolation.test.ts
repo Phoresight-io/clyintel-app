@@ -99,6 +99,7 @@ describe("agent isolation — unfenced cadence run stamps each write with the in
         return `ra-${row.invoice_id}`;
       },
       dispatchEmail,
+      markOutreachStarted: async () => {},
       now: () => "2026-07-04T00:00:00.000Z",
     };
 

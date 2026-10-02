@@ -83,7 +83,7 @@ function world({ log, mutateBundle, fromBranch, baseFiles = {}, baseLink, edit }
   git(j1, "commit", "-qm", "factory change");
   const rt1 = join(root, "rt1");
   mkdirSync(rt1);
-  sh(j1, "bash", ["-e", "-c", stepScript("Export commits as a git bundle", { "${{ github.run_id }}": "1", "${{ github.sha }}": sha })], { RUNNER_TEMP: rt1 });
+  sh(j1, "bash", ["-e", "-c", stepScript("Export commits as a git bundle", { "${{ github.run_id }}": "1", "${{ needs.prepare.outputs.base_sha }}": sha })], { RUNNER_TEMP: rt1 });
   if (mutateBundle) mutateBundle({ root, j1, rt1, git });
 
   // publish job: fresh checkout of the base commit, bundle downloaded as an artifact
@@ -106,7 +106,7 @@ function world({ log, mutateBundle, fromBranch, baseFiles = {}, baseLink, edit }
 function publish(w, env = {}) {
   return sh(w.j2, "bash", ["-e", "-c", stepScript("Push branch and open PR", { "${{ github.run_id }}": "1" })], {
     PATH: `${w.bin}:${process.env.PATH}`, RUNNER_TEMP: w.rt2, GH_TOKEN: "tok", GITHUB_REPOSITORY: "x/y",
-    GITHUB_SHA: sh(w.j2, "git", ["rev-parse", "HEAD"]).trim(), // the publish job checks out the same base commit
+    BASE_SHA: sh(w.j2, "git", ["rev-parse", "HEAD"]).trim(), // the publish job checks out the same base commit (from the prepare job)
     BRANCH: "factory/run-1", BRIEF: "add invoice reminder\nsecond line", SLACK_BOT_TOKEN: "", SLACK_CHANNEL: "", ...env,
   });
 }
@@ -123,7 +123,9 @@ test("publish: pushes the branch, then opens a DRAFT PR with the right arguments
     assert.deepEqual(a.slice(0, 2), ["pr", "create"]);
     assert.ok(a.includes("--draft"), "factory PRs must always be drafts");
     assert.equal(a[a.indexOf("--head") + 1], "factory/run-1");
-    assert.equal(a[a.indexOf("--base") + 1], "main");
+    assert.equal(a[a.indexOf("--base") + 1], "develop");
+    assert.match(a[a.indexOf("--body") + 1], /merge to develop \(Vercel deploys develop to develop\.clyintel\)\. Promote develop to main for production\./);
+    assert.doesNotMatch(a[a.indexOf("--body") + 1], /merge to main|auto-deploys main/);
     assert.equal(a[a.indexOf("--repo") + 1], "x/y");
     assert.equal(a[a.indexOf("--title") + 1], "Factory: add invoice reminder second line"); // newline stripped
     const body = a[a.indexOf("--body") + 1];
@@ -550,11 +552,59 @@ test("notify-failure: fixed message, only with a token and channel, never the br
   assert.match(run({ SLACK_BOT_TOKEN: "x", SLACK_CHANNEL: "C1", PIPELINE_RESULT: "success", PUBLISH_RESULT: "cancelled" }).text, /cancelled or timed out/);
   assert.match(run({ SLACK_BOT_TOKEN: "x", SLACK_CHANNEL: "C1", PIPELINE_RESULT: "cancelled" }).text, /cancelled or timed out/);
   assert.match(run({ SLACK_BOT_TOKEN: "x", SLACK_CHANNEL: "C1", PIPELINE_RESULT: "skipped" }).text, /switched off.*D3_FACTORY_ENABLED/);
+  // the base branch could not be resolved: say that, not "switched off" (the pipeline is skipped too)
+  const prep = run({ SLACK_BOT_TOKEN: "x", SLACK_CHANNEL: "C1", PREPARE_RESULT: "failure", PIPELINE_RESULT: "skipped" }).text;
+  assert.match(prep, /could not resolve the develop branch/);
+  assert.doesNotMatch(prep, /switched off/);
+});
+
+test("workflow: the factory builds on develop, resolved once by a job that runs no agent code", () => {
+  // nothing may still use the run's own commit (main) as the base
+  assert.doesNotMatch(WORKFLOW, /github\.sha|\$GITHUB_SHA/);
+  // prepare: checks out develop, read-only, outputs one 40-hex commit
+  const prepare = WORKFLOW.slice(WORKFLOW.indexOf("\n  prepare:"), WORKFLOW.indexOf("\n  pipeline:"));
+  assert.match(prepare, /ref: develop/);
+  assert.match(prepare, /permissions:\n\s+contents: read/);
+  assert.match(prepare, /base_sha: \$\{\{ steps\.base\.outputs\.sha \}\}/);
+  assert.doesNotMatch(prepare, /d3-orchestrator|npm |secrets\./);
+  // the agent job and the publish job both use that commit, and publish only trusts the job output
+  assert.match(WORKFLOW, /\n  pipeline:\n\s+needs: prepare/);
+  assert.match(WORKFLOW, /\n  publish:\n\s+needs: \[prepare, pipeline\]/);
+  assert.equal(WORKFLOW.split("ref: ${{ needs.prepare.outputs.base_sha }}").length - 1, 2, "pipeline and publish must both check out the prepare job's commit");
+  assert.match(WORKFLOW, /BASE_SHA: \$\{\{ needs\.prepare\.outputs\.base_sha \}\}/);
+  assert.match(WORKFLOW, /"\^\$\{\{ needs\.prepare\.outputs\.base_sha \}\}"/); // bundle excludes the base
+  // PRs and Slack describe the real flow: develop -> dev deploy -> promote to main
+  assert.match(WORKFLOW, /--base develop --draft/);
+  assert.doesNotMatch(WORKFLOW, /--base main|merge (it )?to main|auto-deploys main/);
+});
+
+test("prepare: resolves develop's head to a 40-hex commit and refuses anything else", () => {
+  const root = mkdtempSync(join(tmpdir(), "prep-"));
+  try {
+    const repo = join(root, "r");
+    sh(root, "git", ["init", "-q", "-b", "develop", "r"]);
+    writeFileSync(join(repo, "f"), "x");
+    sh(repo, "git", ["add", "-A"]);
+    sh(repo, "git", ["commit", "-qm", "c"]);
+    const sha = sh(repo, "git", ["rev-parse", "HEAD"]).trim();
+    const out = join(root, "gh_output");
+    writeFileSync(out, "");
+    sh(repo, "bash", ["-e", "-c", stepScript("Resolve the base commit", {})], { GITHUB_OUTPUT: out });
+    assert.equal(readFileSync(out, "utf8"), `sha=${sha}\n`);
+    // not a git checkout: fails and writes nothing
+    const empty = join(root, "e");
+    mkdirSync(empty);
+    const out2 = join(root, "gh_output2");
+    writeFileSync(out2, "");
+    assert.throws(() => sh(empty, "bash", ["-e", "-c", stepScript("Resolve the base commit", {})], { GITHUB_OUTPUT: out2, GIT_CEILING_DIRECTORIES: root }));
+    assert.equal(readFileSync(out2, "utf8"), "");
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("workflow: notify-failure runs on either job failing and holds no permissions", () => {
-  assert.match(WORKFLOW, /notify-failure:\n\s+needs: \[pipeline, publish\]\n\s+if: \$\{\{ always\(\) && \(needs\.pipeline\.result == 'failure' \|\| needs\.publish\.result == 'failure' \|\| needs\.pipeline\.result == 'skipped' \|\| needs\.pipeline\.result == 'cancelled' \|\| needs\.publish\.result == 'cancelled'\) \}\}/);
+  assert.match(WORKFLOW, /notify-failure:\n\s+needs: \[prepare, pipeline, publish\]\n\s+if: \$\{\{ always\(\) && \(needs\.prepare\.result == 'failure' \|\| needs\.pipeline\.result == 'failure' \|\| needs\.publish\.result == 'failure' \|\| needs\.pipeline\.result == 'skipped' \|\| needs\.pipeline\.result == 'cancelled' \|\| needs\.publish\.result == 'cancelled'\) \}\}/);
   assert.match(WORKFLOW, /notify-failure:[\s\S]*?permissions: \{\}/);
   // kill switch: the agent job only runs when the repo variable is exactly 'true'
-  assert.match(WORKFLOW, /\n  pipeline:\n\s+(#.*\n\s+)*if: \$\{\{ vars\.D3_FACTORY_ENABLED == 'true' && github\.ref == 'refs\/heads\/main' \}\}/);
+  assert.match(WORKFLOW, /\n  pipeline:\n\s+needs: prepare\n\s+(#.*\n\s+)*if: \$\{\{ vars\.D3_FACTORY_ENABLED == 'true' && github\.ref == 'refs\/heads\/main' \}\}/);
+  assert.match(WORKFLOW, /\n  prepare:\n\s+if: \$\{\{ vars\.D3_FACTORY_ENABLED == 'true' && github\.ref == 'refs\/heads\/main' \}\}/);
 });

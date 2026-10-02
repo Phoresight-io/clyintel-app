@@ -16,6 +16,7 @@
 // NO second invoice), and stripe_invoice_id is captured only AFTER finalize.
 
 import { describe, it, expect, beforeAll } from "vitest";
+import { resolveStripeSecretKey } from "@/lib/config/env.server";
 
 const SMOKE = process.env.STRIPE_TEST_SMOKE === "1";
 
@@ -23,7 +24,7 @@ const SMOKE = process.env.STRIPE_TEST_SMOKE === "1";
 // lib/stripe.ts, used only for TEST-MODE setup (customer + attach test card). Kept
 // in the test so no new production surface is added.
 async function stripeTestPost<T>(path: string, params: Record<string, string>): Promise<T> {
-  const key = process.env.STRIPE_SECRET_KEY ?? "";
+  const key = resolveStripeSecretKey() ?? "";
   const res = await fetch(`https://api.stripe.com/v1${path}`, {
     method: "POST",
     headers: {
@@ -42,7 +43,7 @@ describe.runIf(SMOKE)("Layer 2 — real Stripe test-mode smoke", () => {
   let customerId: string;
 
   beforeAll(async () => {
-    const key = process.env.STRIPE_SECRET_KEY ?? "";
+    const key = resolveStripeSecretKey() ?? "";
     // Hard refusal: never touch a live account, whatever the flag says.
     if (!key.startsWith("sk_test")) {
       throw new Error(

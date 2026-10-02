@@ -8,6 +8,8 @@ import {
   escalateAttention,
 } from "./mailersendEvents";
 import { ATTENTION_REASON } from "./deriveAttentionReason";
+// Verbatim real MailerSend activity.delivered webhook body (captured 2026-09-26).
+import realDelivered from "./__fixtures__/mailersend-activity-delivered-2026-09-26.json";
 
 const SECRET = "whsec_test_secret";
 
@@ -42,13 +44,31 @@ describe("verifyMailersendSignature", () => {
 });
 
 describe("extractMessageId", () => {
-  it("reads data.email.message.id (the X-Message-Id that matches communications)", () => {
+  it("REAL payload: reads flat data.message_id (== communications.mailersend_message_id)", () => {
+    expect(extractMessageId(realDelivered)).toBe("6ab7f77678162e9d5720667a");
+  });
+
+  it("never matches on data.email_id (a different id space) — email_id alone → null", () => {
+    expect(extractMessageId({ data: { email_id: "6ab7f776db3f535d9aa7d147" } })).toBeNull();
+  });
+
+  it("does not fall back to data.email.id (removed: wrong id space)", () => {
+    expect(extractMessageId({ data: { email: { id: "ms-email-id" } } })).toBeNull();
+  });
+
+  it("prefers data.message_id over the nested fallback", () => {
+    const p = { data: { message_id: "ms-flat", email: { message: { id: "ms-nested" } } } };
+    expect(extractMessageId(p)).toBe("ms-flat");
+  });
+
+  it("secondary fallback: data.email.message.id (nested shape)", () => {
     const p = { data: { email: { message: { id: "ms-abc" } } } };
     expect(extractMessageId(p)).toBe("ms-abc");
   });
 
-  it("falls back to data.email.id when message.id is absent", () => {
-    expect(extractMessageId({ data: { email: { id: "ms-fallback" } } })).toBe("ms-fallback");
+  it("empty / non-string data.message_id is not accepted", () => {
+    expect(extractMessageId({ data: { message_id: "" } })).toBeNull();
+    expect(extractMessageId({ data: { message_id: 123 } })).toBeNull();
   });
 
   it("returns null when no message id is present", () => {

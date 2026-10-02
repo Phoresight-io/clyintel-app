@@ -5,9 +5,12 @@ import { C } from "@/lib/theme";
 import type { Invoice, Client, NegotiationRec, ClientInvoiceSet, Exchange } from "@/lib/mock-data";
 import type { VoiceCallDisplay } from "@/lib/voice-calls";
 import type { CommunicationDisplay, TransactionDisplay, BalanceEventDisplay } from "@/lib/data";
+import { RECOVERY_YTD_UNAVAILABLE, type RecoveryYTD } from "@/lib/recovery/recoveryYTD";
+import { formatCents } from "@/lib/score/computeClientScore";
 import ExchangeDrawer from "@/components/shared/ExchangeDrawer";
 import NegotiationActions from "./NegotiationActions";
 import { RecCard } from "./RecoveryRecModal";
+import { RECOVERY_RECOMMENDATIONS_ENABLED } from "@/lib/features";
 
 type SortCol = "clientName" | "id" | "amount" | "dueDate" | "daysOverdue" | "status" | "lastActivity";
 type SortDir = "asc" | "desc";
@@ -36,9 +39,11 @@ interface DashboardScreenProps {
   // When demo mode is active these are ignored in favour of mock data.
   initialClients?: Client[];
   initialClientInvoices?: Record<string | number, ClientInvoiceSet>;
+  // Absent or failed read → "—" (never a fake $0).
+  recoveryYTD?: RecoveryYTD;
 }
 
-export default function DashboardScreen({ initialClients, initialClientInvoices }: DashboardScreenProps = {}) {
+export default function DashboardScreen({ initialClients, initialClientInvoices, recoveryYTD = RECOVERY_YTD_UNAVAILABLE }: DashboardScreenProps = {}) {
   // Real subscriber data is the single source of truth. The demo/localStorage
   // custom-mode path (INTEGRATIONS_KEY / CLIENTS_KEY / isReset) was retired at
   // D2 close-out: it shadowed real synced invoices and is gone.
@@ -139,7 +144,7 @@ export default function DashboardScreen({ initialClients, initialClientInvoices 
   const totalFilterCount = Object.values(activeFilters).reduce((s, a) => s + a.length, 0);
 
   const kpis = [
-    { label: "Recovery YTD", value: "$0", color: C.green },
+    { label: "Recovery YTD", value: recoveryYTD.ok ? formatCents(recoveryYTD.totalCents) : "—", color: C.green },
     { label: "Total Outstanding", value: `$${totalOutstanding.toLocaleString()}`, color: C.text },
     { label: "Past Due", value: `$${totalPastDue.toLocaleString()}`, color: C.red },
     { label: "Active Invoices", value: String(activeInvoices), color: C.text },
@@ -182,7 +187,9 @@ export default function DashboardScreen({ initialClients, initialClientInvoices 
         ))}
       </div>
 
-      <NegotiationActions cards={recCards} onUpdate={updateRec} activeModal={activeRecModal} setActiveModal={setActiveRecModal} />
+      {RECOVERY_RECOMMENDATIONS_ENABLED && (
+        <NegotiationActions cards={recCards} onUpdate={updateRec} activeModal={activeRecModal} setActiveModal={setActiveRecModal} />
+      )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
         <div style={{ fontSize: 18, fontWeight: 600, color: C.navy }}>Outstanding</div>
@@ -279,7 +286,7 @@ export default function DashboardScreen({ initialClients, initialClientInvoices 
                 ) : "—"}
               </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {rec && (
+                {RECOVERY_RECOMMENDATIONS_ENABLED && rec && (
                   <button onClick={() => setActiveRecModal(rec.id)} title="Recovery recommendation pending" style={{ width: 26, height: 26, borderRadius: "50%", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, background: C.amberBg, color: C.amber }} onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.75")} onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}>
                     !
                   </button>

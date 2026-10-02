@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeBalanceEvent, type ComputeBalanceEventInput } from "./computeBalanceEvent";
+import { computeBalanceEvent, outreachStartedBy, type ComputeBalanceEventInput } from "./computeBalanceEvent";
 
 const base: ComputeBalanceEventInput = {
   subscriberId: "sub_1",
@@ -7,7 +7,7 @@ const base: ComputeBalanceEventInput = {
   source: "qbo",
   prevOutstandingCents: 10_000,
   newOutstandingCents: 4_000,
-  reminderCount: 0,
+  outreachStartedAt: null,
   syncedAt: "2026-08-24T00:00:00.000Z",
 };
 
@@ -44,7 +44,44 @@ describe("computeBalanceEvent", () => {
         prevOutstandingCents: 10_000,
         newOutstandingCents: 4_000,
         syncedAt: "2026-08-24T00:00:00.000Z",
+        outreachStartedAt: null,
+        paymentRecordedAt: null,
+        paymentTxnDate: null,
       },
+    });
+  });
+
+  describe("capture path (payment times given) — same rule as the billing gate", () => {
+    const pay = { recordedAt: "2026-08-23T04:41:37.000Z", txnDate: "2026-08-23T00:00:00.000Z" };
+
+    it("marker before CreateTime → outreach_had_fired true; payment times recorded in evidence", () => {
+      const row = computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-23T04:41:36.000Z", payment: pay });
+      expect(row?.outreach_had_fired).toBe(true);
+      expect(row?.evidence).toMatchObject({
+        paymentRecordedAt: "2026-08-23T04:41:37.000Z",
+        paymentTxnDate: "2026-08-23T00:00:00.000Z",
+      });
+    });
+
+    it("marker after CreateTime but BEFORE syncedAt → false (detection time is not the payment time)", () => {
+      // The full-sync rule (marker <= syncedAt) would say true here.
+      const row = computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-23T12:00:00.000Z", payment: pay });
+      expect(row?.outreach_had_fired).toBe(false);
+    });
+
+    it("no CreateTime + same UTC date as TxnDate → false; earlier date → true", () => {
+      const noCt = { recordedAt: null, txnDate: pay.txnDate };
+      expect(computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-23T00:00:01.000Z", payment: noCt })?.outreach_had_fired).toBe(false);
+      expect(computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-22T23:59:59.000Z", payment: noCt })?.outreach_had_fired).toBe(true);
+    });
+
+    it("payment with no usable times → false (fail closed)", () => {
+      const row = computeBalanceEvent({
+        ...base,
+        outreachStartedAt: "2020-01-01T00:00:00.000Z",
+        payment: { recordedAt: null, txnDate: null },
+      });
+      expect(row?.outreach_had_fired).toBe(false);
     });
   });
 
@@ -54,32 +91,47 @@ describe("computeBalanceEvent", () => {
     expect(row?.new_outstanding_cents).toBe(0);
   });
 
-  it("reminderCount 0 → outreach_had_fired / fee_eligible both false", () => {
-    const row = computeBalanceEvent({ ...base, reminderCount: 0 });
+  it("no outreach marker (null) → outreach_had_fired false", () => {
+    const row = computeBalanceEvent({ ...base, outreachStartedAt: null });
     expect(row?.outreach_had_fired).toBe(false);
-    expect(row?.fee_eligible).toBe(false);
+    expect(row?.evidence.outreachStartedAt).toBeNull();
   });
 
-  it("reminderCount > 0 → outreach_had_fired / fee_eligible both true (mirror for beta)", () => {
-    const row = computeBalanceEvent({ ...base, reminderCount: 2 });
+  it("marker BEFORE the detected drop → true, marker recorded in evidence", () => {
+    const row = computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-10T04:52:22.947Z" });
     expect(row?.outreach_had_fired).toBe(true);
-    expect(row?.fee_eligible).toBe(true);
-    // beta invariant: fee_eligible === outreach_had_fired
-    expect(row?.fee_eligible).toBe(row?.outreach_had_fired);
+    expect(row?.evidence.outreachStartedAt).toBe("2026-08-10T04:52:22.947Z");
+  });
+
+  it("marker AFTER the detected drop → false (outreach did not precede the payment)", () => {
+    const row = computeBalanceEvent({ ...base, outreachStartedAt: "2026-08-24T00:00:00.001Z" });
+    expect(row?.outreach_had_fired).toBe(false);
+    expect(row?.evidence.outreachStartedAt).toBe("2026-08-24T00:00:00.001Z");
+  });
+
+  it("marker EXACTLY at the detection instant → true (started 'by' the drop)", () => {
+    const row = computeBalanceEvent({ ...base, outreachStartedAt: base.syncedAt });
+    expect(row?.outreach_had_fired).toBe(true);
+  });
+
+  it("no drop → null regardless of the marker (the marker never manufactures an event)", () => {
+    expect(
+      computeBalanceEvent({ ...base, prevOutstandingCents: 5_000, newOutstandingCents: 5_000, outreachStartedAt: "2026-01-01T00:00:00.000Z" }),
+    ).toBeNull();
   });
 
   it("guard invariant: any returned row satisfies new<prev AND delta==prev-new", () => {
-    // Sweep a grid of prev/new/reminder combinations; every non-null result must
+    // Sweep a grid of prev/new/marker combinations; every non-null result must
     // satisfy the DB CHECK constraints by construction.
     for (let prev = 0; prev <= 5; prev++) {
       for (let next = 0; next <= 5; next++) {
-        for (const reminder of [0, 1, 3]) {
+        for (const marker of [null, "2026-08-01T00:00:00.000Z", "2026-09-01T00:00:00.000Z"]) {
           for (const prevVal of [prev, null]) {
             const row = computeBalanceEvent({
               ...base,
               prevOutstandingCents: prevVal,
               newOutstandingCents: next,
-              reminderCount: reminder,
+              outreachStartedAt: marker,
             });
             if (row === null) continue;
             // balance_events_is_drop
@@ -91,5 +143,23 @@ describe("computeBalanceEvent", () => {
         }
       }
     }
+  });
+});
+
+describe("outreachStartedBy", () => {
+  const cut = "2026-09-23T04:41:37.429Z";
+  it("null marker → false", () => expect(outreachStartedBy(null, cut)).toBe(false));
+  it("before / equal → true", () => {
+    expect(outreachStartedBy("2026-09-10T04:52:22.947Z", cut)).toBe(true);
+    expect(outreachStartedBy(cut, cut)).toBe(true);
+  });
+  it("after → false", () => expect(outreachStartedBy("2026-09-23T04:41:37.430Z", cut)).toBe(false));
+  it("compares instants, not strings (Postgres '+00' offset form vs ISO Z)", () => {
+    expect(outreachStartedBy("2026-09-10 04:52:22.947+00", cut)).toBe(true);
+    expect(outreachStartedBy("2026-09-23 06:00:00+02", cut)).toBe(true); // = 04:00Z
+  });
+  it("unparseable marker or cutoff → false (fail closed)", () => {
+    expect(outreachStartedBy("not-a-date", cut)).toBe(false);
+    expect(outreachStartedBy("2026-09-10T04:52:22.947Z", "garbage")).toBe(false);
   });
 });

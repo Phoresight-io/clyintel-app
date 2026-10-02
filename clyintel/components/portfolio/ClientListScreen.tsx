@@ -4,13 +4,17 @@ import { useRouter } from "next/navigation";
 import { C } from "@/lib/theme";
 import { bandFor, BAND_COLOR } from "@/lib/score/scoreBands";
 import type { Client, ClientInvoiceSet } from "@/lib/mock-data";
+import { RECOVERY_YTD_UNAVAILABLE, type RecoveryYTD } from "@/lib/recovery/recoveryYTD";
+import { formatCents } from "@/lib/score/computeClientScore";
 
 interface ClientListScreenProps {
   initialClients?: Client[];
   initialClientInvoices?: Record<string | number, ClientInvoiceSet>;
+  // Absent or failed read → every row shows "—".
+  recoveryYTD?: RecoveryYTD;
 }
 
-export default function ClientListScreen({ initialClients, initialClientInvoices }: ClientListScreenProps = {}) {
+export default function ClientListScreen({ initialClients, initialClientInvoices, recoveryYTD = RECOVERY_YTD_UNAVAILABLE }: ClientListScreenProps = {}) {
   // Real subscriber data is the single source of truth. The demo/localStorage
   // custom-mode path (INTEGRATIONS_KEY / CLIENTS_KEY / isReset) was retired at
   // D2 close-out: it shadowed real synced invoices and is gone.
@@ -26,8 +30,9 @@ export default function ClientListScreen({ initialClients, initialClientInvoices
     sessionStorage.removeItem('clyintel_nav_direct');
   }, []);
 
-  // Recovery YTD has no real source yet (D3); hardcoded mock amounts flushed (D2 closeout).
-  const getRecoveryYTD = (_id: string | number): number => 0;
+  // Cents recovered YTD for a client (rev_share_ledger, via lib/data getRecoveryYTD).
+  const getRecoveryYTDCents = (id: string | number): number =>
+    recoveryYTD.ok ? recoveryYTD.byClientCents[String(id)] ?? 0 : 0;
 
   return (
     <div style={{ padding: "28px 36px", minHeight: 520, fontFamily: C.sans }}>
@@ -50,7 +55,7 @@ export default function ClientListScreen({ initialClients, initialClientInvoices
         {clients.map((client, i) => {
           // Unscored (null) renders "—" in a neutral color with no delta.
           const scoreColor = client.score === null ? C.textDim : BAND_COLOR[bandFor(client.score)];
-          const recoveryYTD = getRecoveryYTD(client.id);
+          const recoveryYTDCents = getRecoveryYTDCents(client.id);
           const scoreDelta = client.score !== null && client.prevScore !== null ? client.score - client.prevScore : null;
           let statusColor = C.red, statusLabel = "Past Due";
           if (client.status === "current") { statusColor = C.green; statusLabel = "Current"; }
@@ -72,7 +77,7 @@ export default function ClientListScreen({ initialClients, initialClientInvoices
               <div style={{ fontSize: 14, fontWeight: 500, color: statusColor }}>{statusLabel}</div>
               <div style={{ fontSize: 15, fontFamily: C.mono }}>{currentInvoices}/{client.invoices}</div>
               <div style={{ fontSize: 16, fontWeight: 400, color: client.balance > 0 ? C.red : C.text, fontFamily: C.mono }}>${client.balance.toLocaleString()}</div>
-              <div style={{ fontSize: 16, fontWeight: 500, color: recoveryYTD > 0 ? C.green : C.textMid, fontFamily: C.mono }}>{recoveryYTD > 0 ? `$${recoveryYTD.toLocaleString()}` : "—"}</div>
+              <div style={{ fontSize: 16, fontWeight: 500, color: recoveryYTDCents > 0 ? C.green : C.textMid, fontFamily: C.mono }}>{recoveryYTDCents > 0 ? formatCents(recoveryYTDCents) : "—"}</div>
             </div>
           );
         })}

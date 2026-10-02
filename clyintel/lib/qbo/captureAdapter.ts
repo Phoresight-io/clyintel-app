@@ -34,10 +34,27 @@ export function resolveInvoicePastDue(
   return new Date(dueDate) < new Date(txnDate);
 }
 
+/**
+ * QBO Payment MetaData.CreateTime — when the payment was RECORDED in QuickBooks
+ * (the fee-gate payment time, LOCKED RULE 2026-09-30). Not modeled on QboPayment,
+ * so read from the unwrapped entity (`raw`). Returns the string only when it
+ * parses as a date; absent / non-string / unparseable → null, and the gate falls
+ * back to TxnDate.
+ */
+export function readPaymentCreateTime(payment: { raw?: unknown }): string | null {
+  const raw = payment.raw;
+  if (raw == null || typeof raw !== "object") return null;
+  const meta = (raw as Record<string, unknown>)["MetaData"];
+  if (meta == null || typeof meta !== "object") return null;
+  const createTime = (meta as Record<string, unknown>)["CreateTime"];
+  if (typeof createTime !== "string" || createTime.trim() === "") return null;
+  return Number.isNaN(new Date(createTime).getTime()) ? null : createTime;
+}
+
 export async function buildCaptureEventFromPayment(
   realmId: string,
   paymentId: string,
-): Promise<{ event: CaptureEvent; reconcileInput: ReconcileInput }> {
+): Promise<{ event: CaptureEvent; reconcileInput: ReconcileInput; paymentRecordedAt: string | null }> {
   // 1. realm → subscriber. The webhook gives us realmId; getValidAccessToken
   //    needs a subscriberId. There is NO uniqueness constraint on
   //    connected_accounts.external_id, so defend against >1 (no maybeSingle).
@@ -121,6 +138,10 @@ export async function buildCaptureEventFromPayment(
   }
   const capturedAt = new Date(capturedAtMs).toISOString();
 
+  // Fee-gate payment time: when the payment was recorded in QBO. null → the gate
+  // falls back to TxnDate (capturedAt).
+  const paymentRecordedAt = readPaymentCreateTime(payment);
+
   const event: CaptureEvent = {
     source: "qbo",
     sourcePaymentId: payment.Id,
@@ -147,7 +168,13 @@ export async function buildCaptureEventFromPayment(
     invoiceBalanceCents:
       invoice.Balance != null ? Math.round(invoice.Balance * 100) : Math.round(invoiceFaceValue * 100),
     dueDate: invoice.DueDate ?? null,
+    // Same payment times the billing gate uses, so the balance_events row's
+    // outreach_had_fired agrees with the ledger outcome for this payment.
+    paymentRecordedAt,
+    paymentTxnDate: capturedAt,
   };
 
-  return { event, reconcileInput };
+  // paymentRecordedAt rides BESIDE the frozen CaptureEvent (never added to it):
+  // the worker builds this payment's CaptureDeps from it.
+  return { event, reconcileInput, paymentRecordedAt };
 }

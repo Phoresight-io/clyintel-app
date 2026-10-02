@@ -33,14 +33,20 @@ export function verifyMailersendSignature(
 }
 
 // ── Payload extraction ───────────────────────────────────────────────────────
-// The message id that matches communications.mailersend_message_id (the send's
-// X-Message-Id) appears in the activity webhook at data.email.message.id.
+// The id that matches communications.mailersend_message_id (the send's
+// X-Message-Id) is data.message_id. Real MailerSend activity payloads are FLAT:
+//   { type: "activity.delivered", data: { message_id, email_id, recipient, ... } }
+// data.email_id is a DIFFERENT id (MailerSend's per-email id) and never matches
+// communications — it is deliberately NOT used. data.email.message.id is kept
+// only as a secondary fallback for the nested shape.
 export function extractMessageId(payload: unknown): string | null {
-  const p = payload as { data?: { email?: { message?: { id?: unknown }; id?: unknown } } };
-  const msg = p?.data?.email?.message?.id;
-  if (typeof msg === "string" && msg) return msg;
-  const emailId = p?.data?.email?.id;
-  if (typeof emailId === "string" && emailId) return emailId;
+  const p = payload as {
+    data?: { message_id?: unknown; email?: { message?: { id?: unknown } } };
+  };
+  const flat = p?.data?.message_id;
+  if (typeof flat === "string" && flat) return flat;
+  const nested = p?.data?.email?.message?.id;
+  if (typeof nested === "string" && nested) return nested;
   return null;
 }
 

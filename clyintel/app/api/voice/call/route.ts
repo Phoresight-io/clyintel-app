@@ -3,6 +3,7 @@ import { getSupabase } from "@/lib/supabase";
 import { serverEnv } from "@/lib/config/env.server";
 import type { Database } from "@/types/supabase";
 import { buildCallVariables } from "@/lib/voice/buildCallVariables";
+import { markOutreachStarted } from "@/lib/outreach/markOutreachStarted";
 
 // Outbound voice-call trigger. Creates a voice_calls row FIRST (status 'queued')
 // via the service-role client — writes bypass RLS, same pattern as the other
@@ -122,6 +123,9 @@ export async function POST(req: NextRequest) {
       assistant_id: assistantId,
       to_number: toNumber,
       status: "queued",
+      // Persisted so every downstream path (in-call email, backfills) can tell a
+      // test-mode call apart: test calls are never outreach.
+      is_test: test,
     })
     .select("id")
     .single();
@@ -184,18 +188,27 @@ export async function POST(req: NextRequest) {
 
   // 3. Success — record the provider id and flip to 'ringing'.
   const vapiCallId = typeof vapiBody?.id === "string" ? vapiBody.id : null;
+  const startedAt = new Date().toISOString();
   const { error: updateError } = await service
     .from("voice_calls")
     .update({
       vapi_call_id: vapiCallId,
       status: "ringing",
-      started_at: new Date().toISOString(),
+      started_at: startedAt,
     } satisfies VoiceCallUpdate)
     .eq("id", voiceCallId);
 
   if (updateError) {
     // The call is already placed — don't fail the request; log for follow-up.
     console.error("voice/call: post-dial row update failed", updateError);
+  }
+
+  // Outreach-started stamp: Vapi accepted the call = first real contact on the
+  // voice channel (same started_at as the row). Write-once and never throws, so
+  // a stamp failure is logged loudly and never fails the already-placed call.
+  // Test-mode calls (test assistant) are NOT outreach and never stamp.
+  if (!test) {
+    await markOutreachStarted(service, invoiceId, startedAt, "voice");
   }
 
   return NextResponse.json({ voiceCallId, vapiCallId, status: "ringing" });

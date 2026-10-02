@@ -1,4 +1,5 @@
 import { getSupabase } from "../supabase";
+import { isOutreachBeforePayment } from "./outreachBeforePayment";
 import type { CaptureDeps, LedgerInsert } from "./captureDeps";
 
 // Live, Supabase-backed CaptureDeps — the first real implementation of the
@@ -30,8 +31,52 @@ const INVOICE_SOURCE = "qbo"; // invoices.source
 // insert path keys off this (ledger.source + invoice_number enrichment).
 const STRIPE_RECOVERY_SOURCE = "stripe_recovery";
 
-export function createLiveCaptureDeps(): CaptureDeps {
+// Payment-source registry slug for QuickBooks captures. QBO payment time is the
+// Payment's MetaData.CreateTime, falling back to its date-only TxnDate (below).
+const QBO_SOURCE = "qbo";
+
+/** Per-payment context for the outreach gate. The frozen core calls
+ *  getInvoiceAttribution(subscriberId, sourceInvoiceId) WITHOUT the payment time,
+ *  so deps are built once per CaptureEvent and carry it here instead. */
+export interface LiveCaptureDepsOptions {
+  /** CaptureEvent.capturedAt of the payment being gated (qbo: TxnDate at 00:00Z). */
+  paymentAt: string;
+  /** CaptureEvent.source — decides how the payment time is read. */
+  source: string;
+  /** qbo only: QBO Payment MetaData.CreateTime (when the payment was recorded in
+   *  QuickBooks), or null/omitted when absent or unparseable. */
+  paymentRecordedAt?: string | null;
+}
+
+function parses(value: string | null): boolean {
+  return value != null && value.trim() !== "" && !Number.isNaN(Date.parse(value));
+}
+
+/**
+ * The payment times handed to isOutreachBeforePayment (LOCKED RULE, 2026-09-30:
+ * fee only if the outreach timestamp is BEFORE the payment timestamp).
+ *
+ *  - qbo: recordedAt = MetaData.CreateTime (strict instant compare). Absent or
+ *    unparseable → txnDate = capturedAt (the TxnDate): outreach's UTC date must be
+ *    strictly before it, so same-day outreach is NOT billable (it may have been
+ *    sent after the client paid). Neither → no fee.
+ *  - anything else (stripe_recovery): capturedAt is a real event timestamp →
+ *    strict instant compare against it. No date fallback.
+ */
+export function paymentTimesFor(opts: LiveCaptureDepsOptions): {
+  recordedAt: string | null;
+  txnDate: string | null;
+} {
+  if (opts.source === QBO_SOURCE) {
+    return { recordedAt: opts.paymentRecordedAt ?? null, txnDate: opts.paymentAt };
+  }
+  return { recordedAt: opts.paymentAt, txnDate: null };
+}
+
+export function createLiveCaptureDeps(opts: LiveCaptureDepsOptions): CaptureDeps {
   const service = getSupabase();
+  const payment = paymentTimesFor(opts);
+  const paymentTimeKnown = parses(payment.recordedAt) || parses(payment.txnDate);
 
   return {
     async resolveSubscriber(ref) {
@@ -72,11 +117,11 @@ export function createLiveCaptureDeps(): CaptureDeps {
 
     async getInvoiceAttribution(subscriberId, sourceInvoiceId) {
       // INVOICE-ID BRIDGE: sourceInvoiceId is the QBO Invoice Id (e.g. "130"),
-      // NOT a local uuid. The outreach tables key on the local invoice uuid, so
-      // translate QBO id → local uuid first.
+      // NOT a local uuid. Resolve the local invoice row (which carries the
+      // outreach marker) by external_id + source + subscriber.
       const { data: invoices, error: invErr } = await service
         .from("invoices")
-        .select("id")
+        .select("id, outreach_started_at")
         .eq("external_id", sourceInvoiceId)
         .eq("source", INVOICE_SOURCE)
         .eq("subscriber_id", subscriberId);
@@ -99,35 +144,28 @@ export function createLiveCaptureDeps(): CaptureDeps {
         );
         return { found: false, outreachSent: false };
       }
-      const invId = invoices[0].id;
-
-      // outreachSent = a sent recovery_attempt OR a sent outbound communication.
-      // Short-circuit: if either has a sent_at row, we're done.
-      const { data: ra, error: raErr } = await service
-        .from("recovery_attempts")
-        .select("id")
-        .eq("invoice_id", invId)
-        .not("sent_at", "is", null)
-        .limit(1);
-      if (raErr) {
-        throw new Error(`getInvoiceAttribution recovery_attempts check failed: ${raErr.message}`);
+      // outreachSent = the invoice's write-once outreach marker (first REAL contact
+      // on any channel: MailerSend-accepted email or Vapi-accepted call — see
+      // lib/outreach/markOutreachStarted) is set AND strictly before this payment
+      // (see paymentTimesFor). recovery_attempts / communications are deliberately
+      // NOT read: the Brick-A SIMULATION rows there (sent_at set, no real send)
+      // must never bill.
+      if (!paymentTimeKnown) {
+        console.warn(
+          `captureDepsLive.getInvoiceAttribution: no usable payment time ` +
+            `(paymentAt="${opts.paymentAt}", paymentRecordedAt="${opts.paymentRecordedAt ?? ""}", ` +
+            `source=${opts.source}); treating outreach as not sent`,
+        );
+        return { found: true, outreachSent: false };
       }
-      if (ra && ra.length > 0) {
-        return { found: true, outreachSent: true };
-      }
-
-      const { data: comm, error: commErr } = await service
-        .from("communications")
-        .select("id")
-        .eq("invoice_id", invId)
-        .eq("direction", "outbound")
-        .not("sent_at", "is", null)
-        .limit(1);
-      if (commErr) {
-        throw new Error(`getInvoiceAttribution communications check failed: ${commErr.message}`);
-      }
-
-      return { found: true, outreachSent: !!(comm && comm.length > 0) };
+      return {
+        found: true,
+        outreachSent: isOutreachBeforePayment(
+          invoices[0].outreach_started_at ?? null,
+          payment.recordedAt,
+          payment.txnDate,
+        ),
+      };
     },
 
     async isSubscriberActive(subscriberId) {

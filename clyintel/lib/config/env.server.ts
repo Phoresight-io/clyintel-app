@@ -34,16 +34,58 @@ export function optionalServerEnv(name: string): string | undefined {
   return value === undefined || value === "" ? undefined : value;
 }
 
+/** Env shape the Stripe key resolver reads (injectable for tests). */
+export type StripeKeyEnv = {
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_SECRET_KEY_TEST?: string;
+};
+
+/**
+ * The ONLY place STRIPE_SECRET_KEY / STRIPE_SECRET_KEY_TEST are read — every other
+ * call site (lib/stripe.ts, the charge gate, diagnostics, smoke tests) goes
+ * through this resolver, so Test and Prod are separated by variable NAME:
+ *   both set (non-empty)                          -> undefined (misconfiguration, fail closed)
+ *   only STRIPE_SECRET_KEY                        -> it (Prod and local-dev unchanged)
+ *   only STRIPE_SECRET_KEY_TEST, starts "sk_test_" -> it
+ *   anything else (unset, or _TEST holding sk_live / any other prefix) -> undefined
+ * Empty strings count as unset. Pure given `env`; the default reads process.env at
+ * CALL TIME like every other getter here.
+ */
+export function resolveStripeSecretKey(
+  env: StripeKeyEnv = {
+    STRIPE_SECRET_KEY: optionalServerEnv("STRIPE_SECRET_KEY"),
+    STRIPE_SECRET_KEY_TEST: optionalServerEnv("STRIPE_SECRET_KEY_TEST"),
+  },
+): string | undefined {
+  const prod = env.STRIPE_SECRET_KEY || undefined;
+  const test = env.STRIPE_SECRET_KEY_TEST || undefined;
+  if (prod && test) return undefined;
+  if (prod) return prod;
+  if (test && test.startsWith("sk_test_")) return test;
+  return undefined;
+}
+
 export const serverEnv = {
   // ── Supabase (service role — privileged writes) ──────────────────────────
   supabaseServiceRoleKey: (): string => requireServerEnv("SUPABASE_SERVICE_ROLE_KEY"),
 
   // ── Stripe ───────────────────────────────────────────────────────────────
-  /** Secret key for real Stripe calls (REQUIRED at the call site). */
-  stripeSecretKey: (): string => requireServerEnv("STRIPE_SECRET_KEY"),
+  /** Secret key for real Stripe calls (REQUIRED at the call site). Resolved via
+   *  resolveStripeSecretKey; throws (naming BOTH vars, never a value) when unresolved. */
+  stripeSecretKey: (): string => {
+    const key = resolveStripeSecretKey();
+    if (key === undefined) {
+      throw new Error(
+        "Stripe secret key unavailable: set exactly one of STRIPE_SECRET_KEY (Prod/local) " +
+          "or STRIPE_SECRET_KEY_TEST (Test; must start with sk_test_) - never both, and a " +
+          "non-sk_test_ value in STRIPE_SECRET_KEY_TEST is rejected.",
+      );
+    }
+    return key;
+  },
   /** Non-throwing read for the fail-closed money gate (liveChargesAllowed): a
-   *  missing key must yield a CLOSED gate, never an exception. */
-  stripeSecretKeyOptional: (): string | undefined => optionalServerEnv("STRIPE_SECRET_KEY"),
+   *  missing or unresolvable key must yield a CLOSED gate, never an exception. */
+  stripeSecretKeyOptional: (): string | undefined => resolveStripeSecretKey(),
   stripeWebhookSecret: (): string | undefined => optionalServerEnv("STRIPE_WEBHOOK_SECRET"),
 
   // ── QBO / Intuit ───────────────────────────────────────────────────────────
@@ -54,7 +96,6 @@ export const serverEnv = {
   qboBaseUrl: (): string => requireServerEnv("QBO_BASE_URL"),
   /** OPTIONAL at the OAuth routes, which keep their own "not configured" guard. */
   qboClientIdOptional: (): string | undefined => optionalServerEnv("QBO_CLIENT_ID"),
-  qboRedirectUri: (): string | undefined => optionalServerEnv("QBO_REDIRECT_URI"),
   qboWebhookVerifierToken: (): string | undefined => optionalServerEnv("QBO_WEBHOOK_VERIFIER_TOKEN"),
   qboEnvironment: (): string | undefined => optionalServerEnv("QBO_ENVIRONMENT"),
 
