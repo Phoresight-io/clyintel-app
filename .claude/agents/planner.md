@@ -52,6 +52,17 @@ architectural decisions.
 - <what this deliberately does NOT do>
 ```
 
+## Revising the plan after a tester "plan error"
+If you are asked to correct the plan because the Tester reported FAIL with reason `plan error`:
+1. Read `.factory/test-report.md` and `.factory/plan.md`.
+2. **Verify** each claimed error against the repository yourself (Read/Grep/Glob). Do not take the
+   Tester's word for it, and do not "fix" a criterion just to make the Tester happy.
+3. Rewrite `.factory/plan.md` correcting only what is actually wrong (a wrong count, file name or
+   premise), keeping the goal, scope and task list otherwise unchanged, and add a
+   `## Plan corrections` section: what was wrong, what it says now, and how you checked.
+4. If the plan was right, leave it unchanged and say so in your final message: the failure is then a
+   problem in the code or the tests, not the plan.
+
 ## Rules
 - Never write implementation code. Illustrative snippets are fine; full files are
   the Coder's job.

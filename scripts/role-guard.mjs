@@ -14,12 +14,18 @@ export const SUBAGENTS = ["planner", "coder", "tester", "reviewer"];
 // but it cannot code, run shell commands, or edit files itself.
 const MAIN_THREAD_TOOLS = new Set(["Agent", "Task", "Read"]);
 
-// Tools each subagent may use at all (mirrors the AgentDefinition `tools`).
+// The SDK's built-in channel a subagent uses to hand its result back to the session that
+// delegated to it. It reads and writes nothing, so every subagent needs it; without it the
+// delegating session never gets the subagent's report (run #2 and #3: "none of the agents sent
+// back a report"). The main thread never calls it, so it stays off MAIN_THREAD_TOOLS.
+const HANDBACK_TOOL = "SubagentHandback";
+
+// Tools each subagent may use at all (mirrors the AgentDefinition `tools`, plus the handback).
 const ROLE_TOOLS = {
-  planner: new Set(["Read", "Write", "Grep", "Glob", "WebSearch"]),
-  coder: new Set(["Read", "Write", "Edit", "Grep", "Glob", "Bash"]),
-  tester: new Set(["Read", "Write", "Edit", "Grep", "Glob", "Bash"]),
-  reviewer: new Set(["Read", "Grep", "Glob", "Bash"]),
+  planner: new Set(["Read", "Write", "Grep", "Glob", "WebSearch", HANDBACK_TOOL]),
+  coder: new Set(["Read", "Write", "Edit", "Grep", "Glob", "Bash", HANDBACK_TOOL]),
+  tester: new Set(["Read", "Write", "Edit", "Grep", "Glob", "Bash", HANDBACK_TOOL]),
+  reviewer: new Set(["Read", "Grep", "Glob", "Bash", HANDBACK_TOOL]),
 };
 
 // Planner may write exactly its own artifact.

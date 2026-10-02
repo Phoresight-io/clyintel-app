@@ -261,3 +261,16 @@ test("hook reports every decision to onDecision, and a throwing logger cannot ch
   assert.ok(denied(await thrower({ tool_name: "Edit", tool_input: { file_path: "schema/README.md" }, agent_id: "a", agent_type: "coder" })));
   assert.ok(!denied(await thrower({ tool_name: "Read", tool_input: { file_path: "x" }, agent_id: "a", agent_type: "coder" })));
 });
+
+test("every subagent may hand its result back (SubagentHandback); the main thread and other tools stay restricted", () => {
+  for (const role of ["planner", "coder", "tester", "reviewer"]) {
+    assert.ok(!denied(call("SubagentHandback", { result: "done" }, as(role))), `${role} cannot hand back its result`);
+  }
+  // not a loophole: the main thread still may only delegate/read, unknown subagent types are still refused,
+  // and an unlisted tool is still denied for every role
+  assert.ok(denied(call("SubagentHandback", {})));
+  assert.ok(denied(call("SubagentHandback", {}, as("general-purpose"))));
+  for (const role of ["planner", "coder", "tester", "reviewer"]) {
+    assert.ok(denied(call("WebFetch", { url: "https://example.com" }, as(role))), `${role} may use WebFetch`);
+  }
+});

@@ -1,7 +1,7 @@
 // Run with: node --test scripts/run-log.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseTestResult, reviewVerdict, writeRunLog } from "./run-log.mjs";
+import { parseTestResult, parseFailureReason, reviewVerdict, writeRunLog } from "./run-log.mjs";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -73,4 +73,19 @@ test("writeRunLog: turns, cost and guard denials from the SDK results are writte
     process.chdir(prev);
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("parseFailureReason: only the three exact reasons count; the unfilled template line and prose do not", () => {
+  assert.equal(parseFailureReason("## Result: FAIL\n## Failure reason: plan error\n## Coverage"), "plan error");
+  assert.equal(parseFailureReason("## Failure reason: **Plan Error**"), "plan error");
+  assert.equal(parseFailureReason("  ## Failure reason: test failure  "), "test failure");
+  assert.equal(parseFailureReason("## Failure reason: could not run the suite"), "could not run the suite");
+  // the last explicit line wins
+  assert.equal(parseFailureReason("## Failure reason: plan error\n...\n## Failure reason: test failure"), "test failure");
+  // not a reason: the template, a made-up reason, prose, an empty report
+  assert.equal(parseFailureReason("## Failure reason: plan error | test failure | could not run the suite   (only when FAIL)"), "unknown");
+  assert.equal(parseFailureReason("## Failure reason: the plan was wrong"), "unknown");
+  assert.equal(parseFailureReason("This is a plan error, I think."), "unknown");
+  assert.equal(parseFailureReason(""), "unknown");
+  assert.equal(parseFailureReason(undefined), "unknown");
 });

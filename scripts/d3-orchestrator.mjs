@@ -8,6 +8,7 @@ import { writeRunLog, pushRunLogToSheet, parseTestResult } from "./run-log.mjs";
 import { makeGuardHook } from "./role-guard.mjs";
 import { baseCommit, snapshot, tamperedPaths } from "./instruction-guard.mjs";
 import { logLine, createTracer, seconds, money } from "./factory-log.mjs";
+import { fixStep } from "./fix-loop.mjs";
 
 // This script lives in scripts/ but the factory operates on the repo root
 // (.factory/, git, the app code). Anchor the working directory at the repo root
@@ -199,14 +200,13 @@ In order:
 
 Report the tester's PASS/FAIL result. Do not review or deploy yet.`);
 
-  // Test gate: one fix loop if tests failed, so a red build doesn't reach review.
+  // Test gate: one fix loop if tests failed, so a red build doesn't reach review. A "plan error" FAIL
+  // goes to the planner first (fix-loop.mjs); anything else goes to the coder.
   if (!testPassed()) {
-    await postSlack(channel, "⚠️ Tests did not pass — sending back to the coder once.");
-    await run(`.factory/test-report.md is missing, unparseable, or reports FAIL. Use
-the coder agent to fix the implementation (not the tests) per the failures listed
-(or, if there is no report, to make sure the work is complete and committed), then
-use the tester agent to re-run the tests and rewrite .factory/test-report.md ending
-with a line "## Result: PASS" or "## Result: FAIL".`);
+    const step = fixStep(existsSync(".factory/test-report.md") ? readFileSync(".factory/test-report.md", "utf8") : "");
+    log(`test gate: not passed, fix route "${step.kind}"`);
+    await postSlack(channel, step.slack);
+    await run(step.prompt);
   }
 
   // Review last — reads the diff AND the test report.

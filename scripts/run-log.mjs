@@ -23,6 +23,17 @@ export function parseTestResult(text) {
   return all.length ? all[all.length - 1][1].toUpperCase() : "unknown";
 }
 
+// Why the tester reported FAIL, from its explicit "## Failure reason: <reason>" line (last one wins;
+// the unfilled template line with "|" in it does not count). Anything else is "unknown", which the
+// orchestrator treats like an ordinary test failure: only the exact words below route differently.
+export const FAILURE_REASONS = ["plan error", "test failure", "could not run the suite"];
+export function parseFailureReason(text) {
+  if (!text) return "unknown";
+  const all = [...text.matchAll(/^[ \t]*##[ \t]*Failure reason:[ \t]*\**[ \t]*([A-Za-z ]+?)[ \t]*\**[ \t]*$/gim)];
+  const last = all.length ? all[all.length - 1][1].toLowerCase() : "";
+  return FAILURE_REASONS.includes(last) ? last : "unknown";
+}
+
 function testResult() {
   return parseTestResult(read(".factory/test-report.md"));
 }
