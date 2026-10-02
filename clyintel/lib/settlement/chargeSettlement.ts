@@ -70,25 +70,41 @@ export async function claimForCharge(
 }
 
 /**
- * The ONLY context in which a live Stripe charge may be created.
- *
- * GATE LOGIC IS FROZEN: production AND an sk_live key. Only the SOURCE of the two
- * env reads changed — the default now pulls them through the config module's
- * non-throwing optional getters (a missing key must keep the gate CLOSED, never
- * throw). The injected `env` seam is unchanged, so callers/tests that pass an
- * explicit `{ VERCEL_ENV, STRIPE_SECRET_KEY }` object behave exactly as before.
+ * The ONLY context in which a Stripe charge may be created. Opens in exactly two
+ * cases; every other combination (missing/empty/unrecognised key, rk_live, ...) is
+ * CLOSED:
+ *   1. LIVE (frozen, unchanged): VERCEL_ENV === 'production' AND an sk_live key.
+ *   2. TEST MODE: an sk_test key AND a Vercel-injected (non-empty) VERCEL_ENV AND
+ *      QBO_ENVIRONMENT === 'sandbox'. An sk_test key moves no real money, but
+ *      VERCEL_ENV is "production" on BOTH the Test and Prod Vercel projects so it
+ *      cannot tell them apart; QBO_ENVIRONMENT=sandbox is the Test-project
+ *      discriminator, so a Prod project misconfigured with an sk_test key (QBO
+ *      unset or "production") stays closed. Local/CI (no VERCEL_ENV) stays closed.
+ * All reads go through the config module's non-throwing optional getters (a
+ * missing value must keep the gate CLOSED, never throw). The injected `env` seam
+ * is `{ VERCEL_ENV, STRIPE_SECRET_KEY, QBO_ENVIRONMENT }`; omitted keys read as unset.
  */
 export function liveChargesAllowed(
   env: Record<string, string | undefined> = {
     VERCEL_ENV: serverEnv.vercelEnv(),
     STRIPE_SECRET_KEY: serverEnv.stripeSecretKeyOptional(),
+    QBO_ENVIRONMENT: serverEnv.qboEnvironment(),
   },
 ): boolean {
-  return (
-    env.VERCEL_ENV === "production" &&
-    typeof env.STRIPE_SECRET_KEY === "string" &&
-    env.STRIPE_SECRET_KEY.startsWith("sk_live")
-  );
+  const key = env.STRIPE_SECRET_KEY;
+  if (typeof key !== "string") return false;
+  // 1. Live — unchanged.
+  if (env.VERCEL_ENV === "production" && key.startsWith("sk_live")) return true;
+  // 2. Test mode — sk_test on a Vercel deployment pinned to the QBO sandbox.
+  if (
+    key.startsWith("sk_test") &&
+    typeof env.VERCEL_ENV === "string" &&
+    env.VERCEL_ENV !== "" &&
+    env.QBO_ENVIRONMENT === "sandbox"
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export interface SettlementRow {

@@ -107,32 +107,72 @@ describe("env.public — public vars only", () => {
   });
 });
 
-// ── 4. Regression: the money gate stays FROZEN and fails closed ───────────────
-// liveChargesAllowed()'s env reads were re-sourced through env.server. Prove the
-// default (no-arg) path reads process.env via the module and still opens ONLY for
-// production + sk_live. The injected-env seam is covered in chargeSettlement.test.
-describe("liveChargesAllowed — re-sourced but frozen (fails closed)", () => {
+// ── 4. Regression: the money gate fails closed ────────────────────────────────
+// liveChargesAllowed()'s env reads are sourced through env.server. Prove the
+// default (no-arg) path reads process.env via the module and opens ONLY for
+//   (a) production + sk_live (frozen), or
+//   (b) sk_test + VERCEL_ENV set + QBO_ENVIRONMENT=sandbox (test mode).
+// The injected-env seam is covered in chargeSettlement.test.
+describe("liveChargesAllowed — re-sourced, fails closed", () => {
+  // ── live branch (unchanged) ──
   it("false when VERCEL_ENV is not 'production' (even with a live key)", () => {
     vi.stubEnv("VERCEL_ENV", "preview");
     vi.stubEnv("STRIPE_SECRET_KEY", "sk_live_x");
+    vi.stubEnv("QBO_ENVIRONMENT", "sandbox"); // sandbox must not open the live branch
     expect(liveChargesAllowed()).toBe(false);
   });
 
-  it("false when the key is not sk_live (even in production)", () => {
-    vi.stubEnv("VERCEL_ENV", "production");
-    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
-    expect(liveChargesAllowed()).toBe(false);
-  });
-
-  it("false when both are unset", () => {
-    vi.stubEnv("VERCEL_ENV", "");
-    vi.stubEnv("STRIPE_SECRET_KEY", "");
-    expect(liveChargesAllowed()).toBe(false);
-  });
-
-  it("true ONLY for production + sk_live (proves the re-sourced reads work)", () => {
+  it("true for production + sk_live (proves the re-sourced reads work)", () => {
     vi.stubEnv("VERCEL_ENV", "production");
     vi.stubEnv("STRIPE_SECRET_KEY", "sk_live_x");
+    vi.stubEnv("QBO_ENVIRONMENT", "");
     expect(liveChargesAllowed()).toBe(true);
+  });
+
+  // ── test-mode branch ──
+  it("true for sk_test + VERCEL_ENV set + QBO_ENVIRONMENT=sandbox", () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
+    vi.stubEnv("QBO_ENVIRONMENT", "sandbox");
+    expect(liveChargesAllowed()).toBe(true);
+  });
+
+  it("false for sk_test + QBO_ENVIRONMENT=production (Prod misconfigured with a test key)", () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
+    vi.stubEnv("QBO_ENVIRONMENT", "production");
+    expect(liveChargesAllowed()).toBe(false);
+  });
+
+  it("false for sk_test + QBO_ENVIRONMENT unset", () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
+    vi.stubEnv("QBO_ENVIRONMENT", "");
+    expect(liveChargesAllowed()).toBe(false);
+  });
+
+  it("false for sk_test + sandbox when VERCEL_ENV is unset (local/CI)", () => {
+    vi.stubEnv("VERCEL_ENV", "");
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
+    vi.stubEnv("QBO_ENVIRONMENT", "sandbox");
+    expect(liveChargesAllowed()).toBe(false);
+  });
+
+  // ── everything else is closed ──
+  it.each(["rk_live_x", "rk_test_x", "pk_live_x", "whsec_x", "garbage", ""])(
+    "false for unrecognised/empty key %j even in production + sandbox",
+    (key) => {
+      vi.stubEnv("VERCEL_ENV", "production");
+      vi.stubEnv("STRIPE_SECRET_KEY", key);
+      vi.stubEnv("QBO_ENVIRONMENT", "sandbox");
+      expect(liveChargesAllowed()).toBe(false);
+    },
+  );
+
+  it("false when everything is unset", () => {
+    vi.stubEnv("VERCEL_ENV", "");
+    vi.stubEnv("STRIPE_SECRET_KEY", "");
+    vi.stubEnv("QBO_ENVIRONMENT", "");
+    expect(liveChargesAllowed()).toBe(false);
   });
 });
