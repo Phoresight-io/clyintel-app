@@ -16,6 +16,12 @@ on:
 jobs:
   pipeline:
     runs-on: ubuntu-latest
+    # A stuck run must not burn API spend for GitHub's 6h default, and repeated
+    # /d3 calls queue instead of running in parallel.
+    timeout-minutes: 60
+    concurrency:
+      group: d3-factory
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write

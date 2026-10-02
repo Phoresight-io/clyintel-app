@@ -68,7 +68,9 @@ const allowedTools = ["Agent", "Task", "Read", "Grep", "Glob", "Bash", "Write", 
 // Cap on top-level (delegating) turns per run(); subagents have their own maxTurns.
 const MAX_TURNS = 60;
 
-// Counts hook invocations so we can refuse to continue if enforcement never ran.
+// Counts hook invocations (reset at the start of each run()) so we can refuse to
+// continue if enforcement never ran. This is a tripwire, not a gate: it can only
+// report after the fact, so the real protection is the hook failing closed.
 let guardCalls = 0;
 const hooks = { PreToolUse: [{ hooks: [makeGuardHook(repoRoot, () => guardCalls++)] }] };
 
@@ -78,7 +80,19 @@ class PipelineError extends Error {}
 // result message). Any non-success result (error_max_turns, error_during_execution,
 // ...) throws, so a failed run can never be mistaken for a successful one.
 async function run(prompt) {
-  const stream = query({ prompt, options: { agents, allowedTools, hooks, maxTurns: MAX_TURNS } });
+  guardCalls = 0;
+  const stream = query({
+    prompt,
+    options: {
+      agents,
+      allowedTools,
+      hooks,
+      maxTurns: MAX_TURNS,
+      // Explicit, so CLAUDE.md (schema + billing rules) is always loaded and never
+      // depends on the SDK default; excludes user/local settings on the runner.
+      settingSources: ["project"],
+    },
+  });
   let final = null;
   for await (const msg of stream) {
     if (msg.type === "result") final = msg;
