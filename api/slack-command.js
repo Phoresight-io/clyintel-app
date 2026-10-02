@@ -87,6 +87,11 @@ export default async function handler(req, res) {
   }
   if (!brief) return ephemeral(res, "Usage: `/d3 <what to build>`");
 
+  if (!process.env.GH_DISPATCH_PAT) {
+    console.error("d3: GH_DISPATCH_PAT is not set");
+    return ephemeral(res, "⚠️ D3 isn't fully configured (dispatch token missing). Ask an admin.");
+  }
+
   // Dispatch BEFORE responding: on Vercel the function can be frozen once the
   // response is sent, and a GitHub call normally fits well inside Slack's 3s window.
   try {
