@@ -137,13 +137,28 @@ jobs:
           # filters or drivers. -z so git does not quote unusual paths (a quoted name would
           # start with " and slip past the ^ anchors); --no-renames so moving a file out of a
           # protected directory still lists the old path.
-          PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/'
-          BAD="$(git diff --name-only -z --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH" \
-            | { grep -zE "$PROTECTED" || true; } | tr '\0' '\n')"
+          #
+          # Also protected: the tenant-isolation test (weakening it would ship with a
+          # "Tests: PASS" claim), and the build/deploy/data surface that a human must own:
+          # vercel.json (it defines the every-minute QBO worker and settlement crons),
+          # next.config.*, and schema/ (SQL migrations, which can include RLS policies).
+          PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)tenant-isolation[^/]*$|(^|/)vercel\.json$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/'
+          CHANGED_FILES() { git diff --name-only -z --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH"; }
+          BAD="$(CHANGED_FILES | { grep -zE "$PROTECTED" || true; } | tr '\0' '\n')"
           if [ -n "$BAD" ]; then
             echo "Factory commits touch protected paths; refusing to push:" >&2
             echo "$BAD" >&2
             exit 1
+          fi
+          # Not blocked (features legitimately change them) but flagged loudly in the PR body,
+          # because a missed detail here costs the most: dependencies and the auth/tenant
+          # middleware. Names come from the agent, so reduce them to a safe character set
+          # (no backticks, so they cannot break out of the code fence) and cap the list.
+          SENSITIVE='(^|/)(package(-lock)?\.json|middleware\.[cm]?[jt]s)$'
+          WARN_FILES="$(CHANGED_FILES | { grep -zE "$SENSITIVE" || true; } | tr '\0' '\n' | tr -c 'A-Za-z0-9_./+@\n-' '?' | head -n 10)"
+          WARN_NOTE=""
+          if [ -n "$WARN_FILES" ]; then
+            WARN_NOTE="$(printf '⚠️ Touches sensitive files (dependencies / auth middleware). Review these carefully:\n\n```\n%s\n```' "$WARN_FILES")"
           fi
           # Show the run's self-reported outcome on the PR, but NEVER trust it: the log
           # is written inside the agent job, so a prompt-injected agent could claim
@@ -171,6 +186,8 @@ jobs:
           Tests: ${TEST_RESULT} | Factory reviewer verdict: ${VERDICT}
 
           Opened as a DRAFT. Review the diff yourself and run the app's CI before marking it ready.
+
+          ${WARN_NOTE}
 
           Review the diff, then merge to main to deploy (Vercel auto-deploys main).")"
           echo "Opened $PR_URL"

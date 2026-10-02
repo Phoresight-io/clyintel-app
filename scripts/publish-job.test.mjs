@@ -215,6 +215,13 @@ test("publish: commits that touch protected paths are refused, and nothing is pu
     ".gitattributes (root)": ({ put }) => put(".gitattributes", "* filter=x"),
     ".gitattributes (nested)": ({ put }) => put("clyintel/.gitattributes", "* filter=x"),
     "unicode path git would quote": ({ put }) => put("scripts/\u00e9.js", "x"),
+    "weaken the tenant-isolation test": ({ put }) => put("clyintel/tests/tenant-isolation.test.ts", "// emptied"),
+    "tenant-isolation helper": ({ put }) => put("clyintel/tests/tenant-isolation.helpers.ts", "x"),
+    "vercel.json (crons)": ({ put }) => put("clyintel/vercel.json", "{}"),
+    "root vercel.json": ({ put }) => put("vercel.json", "{}"),
+    "next.config": ({ put }) => put("clyintel/next.config.ts", "export default {}"),
+    "schema migration": ({ put }) => put("clyintel/schema/099_new.sql", "alter table x;"),
+    "root schema dir": ({ put }) => put("schema/099_new.sql", "alter table x;"),
     "delete a protected file": ({ git }) => git("rm", "-q", ".claude/agents/reviewer.md"),
     "rename out of a protected dir": ({ git, put }) => { put("clyintel/moved.md", "reviewer"); git("rm", "-q", ".claude/agents/reviewer.md"); },
   };
@@ -246,5 +253,52 @@ test("publish: ordinary app, test and run-log changes are allowed", () => {
     publish(w);
     assert.ok(remoteHas(w, "refs/heads/factory/run-1"));
     assert.ok(ghArgs(w).includes("--draft"));
+  } finally { cleanup(w); }
+});
+
+test("publish: dependency and middleware changes are allowed but flagged in the PR body", () => {
+  const w = world({
+    log: '{"test_result":"PASS","review_verdict":"APPROVE"}',
+    edit: ({ put }) => {
+      put("clyintel/package.json", "{}");
+      put("clyintel/package-lock.json", "{}");
+      put("clyintel/middleware.ts", "export {}");
+      put("clyintel/app/page.tsx", "page");
+      put("clyintel/lib/we`ird ```name.ts", "x"); // not sensitive; just proves odd names don't break anything
+    },
+  });
+  try {
+    publish(w);
+    assert.ok(remoteHas(w, "refs/heads/factory/run-1"));
+    const body = ghArgs(w)[ghArgs(w).indexOf("--body") + 1];
+    assert.match(body, /Touches sensitive files/);
+    for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/middleware.ts"]) assert.ok(body.includes(f), f);
+    assert.ok(!body.includes("app/page.tsx"), "ordinary files must not be listed as sensitive");
+  } finally { cleanup(w); }
+});
+
+test("publish: sensitive file names from the agent cannot inject markup or break the code fence", () => {
+  const w = world({
+    edit: ({ put }) => {
+      put("clyintel/middleware.ts", "x");
+      put("clyintel/a`b/package.json", "x"); // backtick in the directory name
+      put("clyintel/<img src=x>/package.json", "x");
+    },
+  });
+  try {
+    publish(w);
+    const body = ghArgs(w)[ghArgs(w).indexOf("--body") + 1];
+    const fence = body.slice(body.indexOf("Touches sensitive files"));
+    assert.equal((fence.match(/```/g) || []).length, 2, "exactly one opening and one closing fence");
+    assert.doesNotMatch(fence, /<img|a`b/);
+    assert.match(fence, /a\?b\/package\.json/);
+  } finally { cleanup(w); }
+});
+
+test("publish: no sensitive files means no warning section", () => {
+  const w = world({ edit: ({ put }) => put("clyintel/app/page.tsx", "page") });
+  try {
+    publish(w);
+    assert.doesNotMatch(ghArgs(w)[ghArgs(w).indexOf("--body") + 1], /Touches sensitive files/);
   } finally { cleanup(w); }
 });
