@@ -163,7 +163,7 @@ jobs:
           # .ai/ (the product constitution, schema detail, Stripe IDs and specs that
           # clyintel/CLAUDE.md tells every agent to read) and .mcp.json (registers MCP servers
           # for Claude sessions): changing either rewrites the rules agents work under.
-          PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)tenant-isolation[^/]*$|(^|/)env-config\.test\.[cm]?[jt]s$|^(clyintel/)?test/stubs/|(^|/)vercel\.json$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/|(^|/)\.ai/|(^|/)\.mcp\.json$|(^|/)\.env($|\.)'
+          PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)tenant-isolation[^/]*$|(^|/)env-config\.test\.[cm]?[jt]s$|^(clyintel/)?test/stubs/|(^|/)vercel\.json$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/|(^|/)\.ai/|(^|/)\.mcp\.json$|(^|/)\.env($|\.)|(^|/)\.gitmodules$'
           CHANGED_FILES() { git diff --name-only -z --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH"; }
           BAD="$(CHANGED_FILES | { grep -zE "$PROTECTED" || true; } | tr '\0' '\n')"
           if [ -n "$BAD" ]; then
@@ -171,6 +171,14 @@ jobs:
             # Names come from the agent: indent them so none can start a line that the
             # runner would read as a workflow command (::add-mask::, ::stop-commands::, ...).
             printf '%s\n' "$BAD" | sed 's/^/    - /' >&2
+            exit 1
+          fi
+          # Symlinks (120000) and submodules/gitlinks (160000) are refused outright: a feature
+          # never needs one, and a symlink under e.g. clyintel/public/ pointing outside the repo
+          # would be resolved by the Vercel preview build. Only the NEW mode is checked, so
+          # deleting one is fine. (A path containing a newline can only cause a refusal here.)
+          if git diff --raw --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH" | awk '{print $2}' | grep -qE '^(120000|160000)$'; then
+            echo "Factory commits add symlinks or submodules; refusing to push." >&2
             exit 1
           fi
           echo "What this run will push (names indented, see note above):"

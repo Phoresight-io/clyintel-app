@@ -90,6 +90,7 @@ const CODER_PROTECTED = new RegExp(
     "(^|/)next\\.config\\.[cm]?[jt]s$",
     "^(clyintel/)?schema/",
     "(^|/)\\.ai/", // product constitution, schema detail, Stripe IDs, specs
+    "(^|/)\\.gitmodules$",
     "(^|/)\\.env($|\\.)", // credentials must never be committed
     "(^|/)\\.mcp\\.json$", // registers MCP servers for Claude sessions
   ].join("|")

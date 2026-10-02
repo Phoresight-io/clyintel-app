@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, existsSync, copyFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, existsSync, copyFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,7 +39,7 @@ const sh = (cwd, cmd, args, env = {}) =>
 
 // Build a world: a "GitHub" bare repo, an agent job that makes a factory commit and
 // exports the bundle with the REAL export step, and a fresh publish-job checkout.
-function world({ log, mutateBundle, fromBranch, baseFiles = {}, edit } = {}) {
+function world({ log, mutateBundle, fromBranch, baseFiles = {}, baseLink, edit } = {}) {
   const root = mkdtempSync(join(tmpdir(), "pub-"));
   const git = (cwd, ...a) => sh(cwd, "git", a);
   git(root, "init", "-q", "-b", "main", "base");
@@ -48,6 +48,7 @@ function world({ log, mutateBundle, fromBranch, baseFiles = {}, edit } = {}) {
     mkdirSync(dirname(join(root, "base", rel)), { recursive: true });
     writeFileSync(join(root, "base", rel), body);
   }
+  if (baseLink) symlinkSync("f", join(root, "base", baseLink));
   git(join(root, "base"), "add", "-A");
   git(join(root, "base"), "commit", "-qm", "base");
   if (fromBranch) {
@@ -226,6 +227,7 @@ test("publish: commits that touch protected paths are refused, and nothing is pu
     "test stubs": ({ put }) => put("clyintel/test/stubs/server-only.ts", "x"),
     "force-added .env": ({ put }) => put(".env", "ANTHROPIC_API_KEY=x"),
     "nested .env.local": ({ put }) => put("clyintel/.env.local", "x"),
+    ".gitmodules": ({ put }) => put(".gitmodules", "[submodule \"x\"]"),
     "product context .ai/": ({ put }) => put(".ai/specs/new.md", "steer"),
     "nested .ai/": ({ put }) => put("clyintel/.ai/context.md", "steer"),
     "root .mcp.json": ({ put }) => put(".mcp.json", "{}"),
@@ -261,6 +263,34 @@ test("publish: ordinary app, test and run-log changes are allowed", () => {
     publish(w);
     assert.ok(remoteHas(w, "refs/heads/factory/run-1"));
     assert.ok(ghArgs(w).includes("--draft"));
+  } finally { cleanup(w); }
+});
+
+test("publish: symlinks and submodules are refused, deleting one is not", () => {
+  const cases = {
+    "symlink out of the repo": ({ j1, put }) => { put("clyintel/public/.keep"); symlinkSync("/proc/self/environ", join(j1, "clyintel/public/env.txt")); },
+    "gitlink (nested repo)": ({ j1 }) => {
+      const sub = join(j1, "vendor/sub");
+      mkdirSync(sub, { recursive: true });
+      sh(sub, "git", ["init", "-q"]);
+      writeFileSync(join(sub, "f"), "x");
+      sh(sub, "git", ["add", "f"]);
+      sh(sub, "git", ["commit", "-qm", "sub"]);
+    },
+  };
+  for (const [name, edit] of Object.entries(cases)) {
+    const w = world({ edit });
+    try {
+      assert.throws(() => publish(w), /symlinks or submodules/, name);
+      assert.ok(!remoteHas(w, "refs/heads/factory/run-1"), `${name}: pushed anyway`);
+      assert.ok(!existsSync(join(w.root, "gh.args")), `${name}: opened a PR anyway`);
+    } finally { cleanup(w); }
+  }
+  // a base with a symlink that the factory deletes is fine
+  const w = world({ baseLink: "link", edit: ({ git }) => git("rm", "-q", "link") });
+  try {
+    publish(w);
+    assert.ok(remoteHas(w, "refs/heads/factory/run-1"));
   } finally { cleanup(w); }
 });
 
