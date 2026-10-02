@@ -61,6 +61,9 @@ test("coder cannot Write/Edit factory, CI or git files", () => {
   // lookalikes are fine
   for (const f of ["clyintel/scripts/seed.ts", "clyintel/.github-notes.md", "clyintel/lib/scripts.ts"])
     assert.ok(!denied(call("Write", { file_path: f }, as("coder"))), f);
+  // the tenant-isolation test guards against one customer seeing another's data
+  for (const f of ["clyintel/tests/tenant-isolation.test.ts", "tests/tenant-isolation.helpers.ts", "clyintel/lib/tenant-isolation.ts"])
+    for (const t of ["Write", "Edit"]) assert.ok(denied(call(t, { file_path: f }, as("coder"))), `${t} ${f}`);
 });
 
 test("tester can write test files and its report only", () => {
@@ -105,14 +108,14 @@ test("reviewer: no Write/Edit", () => {
 
 test("reviewer Bash: canonical read-only git is allowed", () => {
   for (const c of [
-    `${G} diff ${SAFE} main...HEAD`,
+    `${G} diff ${SAFE} main...HEAD --`,
     `${G} diff ${SAFE} --stat main...HEAD -- clyintel/app/page.tsx`,
     `${G} log ${SAFE} --oneline -n5`,
     `${G} log ${SAFE} --oneline -n 5 main..HEAD`,
     `${G} show ${SAFE} HEAD -- clyintel/lib/charge.ts`,
     `${G} diff ${SAFE} --cached`,
     `${G} diff ${SAFE} --staged --stat`,
-    `${G} diff ${SAFE} a..b`,
+    `${G} diff ${SAFE} a..b --`,
     `${G} rev-parse HEAD`,
     `${G} merge-base main HEAD`,
     `${G} ls-files`,
@@ -140,6 +143,12 @@ test("reviewer Bash: everything else is denied", () => {
     `${G} diff ${SAFE} HEAD`,
     `${G} diff ${SAFE} main`,
     `${G} diff ${SAFE} -- a..b`, // ".." only counts before --
+    // a range with no explicit "--": git may read it as a FILE named like that (a committed
+    // file called "a..b" + a clean filter makes this a working-tree diff)
+    `${G} diff ${SAFE} HEAD a..b`,
+    `${G} diff ${SAFE} main...HEAD`,
+    `${G} diff ${SAFE} a..b`,
+    `${G} diff ${SAFE} --stat main...HEAD`,
     `git -c core.fsmonitor=false diff ${SAFE} main`, // missing --no-pager / showSignature
     // diff/log/show without the driver-disabling flags
     `${G} diff main...HEAD`,

@@ -68,7 +68,10 @@ const SAFE_ARG = /^[A-Za-z0-9_.\/:@~^,%+][A-Za-z0-9_.\/:@~^=,%+-]*$/;
 // Files the coder must not touch with Write/Edit: the factory itself and CI config
 // (a feature never needs them), git internals, and the run log. NOTE: this does not
 // stop the same edits via Bash; it blocks honest mistakes and the easy path.
-const CODER_PROTECTED = /^(\.claude|\.github|scripts|\.git)\/|^\.factory\/runs\/|^\.gitignore$/;
+// Also the tenant-isolation test: a coder that breaks tenant scoping must not be able to
+// make the one test that catches it pass (the tester is already blocked from it).
+const CODER_PROTECTED =
+  /^(\.claude|\.github|scripts|\.git)\/|^\.factory\/runs\/|^\.gitignore$|(^|\/)tenant-isolation[^/]*$/;
 
 const deny = (reason) => ({
   hookSpecificOutput: {
@@ -133,11 +136,17 @@ export function isReadOnlyGit(command) {
     }
   }
   if (GIT_DRIVER_SUBS.has(sub) && !(noExtDiff && noTextconv)) return false;
-  // diff only against objects: a revision range (a..b / a...b) or the index (--cached).
+  // diff only against objects: the index (--cached), or a revision range (a..b / a...b)
+  // that is followed by an explicit "--". The "--" matters: without it git reads an
+  // argument that is not a valid revision but matches a file as a PATH, so a coder who
+  // commits a file literally named "a..b" (plus a clean filter for it) turns
+  // "diff HEAD a..b" into a working-tree diff. With "--", git insists the arguments
+  // before it are revisions and errors out instead.
   if (sub === "diff") {
     const cached = args.includes("--cached") || args.includes("--staged");
-    const beforePaths = args.slice(0, args.includes("--") ? args.indexOf("--") : undefined);
-    const hasRange = beforePaths.some((a) => !a.startsWith("-") && a.includes(".."));
+    const dd = args.indexOf("--");
+    const revs = dd === -1 ? [] : args.slice(0, dd);
+    const hasRange = revs.some((a) => !a.startsWith("-") && a.includes(".."));
     if (!cached && !hasRange) return false;
   }
   return true;
@@ -146,8 +155,8 @@ export function isReadOnlyGit(command) {
 const GIT_HINT =
   `reviewer Bash is limited to read-only git, written exactly as: ` +
   `${GIT_PREFIX}<diff|log|show|rev-parse|merge-base|ls-files|rev-list> [safe flags] [refs] [-- paths], ` +
-  `diff/log/show must also pass --no-ext-diff --no-textconv, and diff must use a revision range ` +
-  `(main...HEAD) or --cached (no working-tree diffs, no status).`;
+  `diff/log/show must also pass --no-ext-diff --no-textconv, and diff must use --cached or a ` +
+  `revision range followed by an explicit "--" (e.g. "diff <flags> main...HEAD --"); no working-tree diffs, no status.`;
 
 // Decide one tool call. `input` is a PreToolUse hook input. Returns a hook output
 // object ({} = no objection) — deny wins over any allow rule.
@@ -178,7 +187,8 @@ export function decide(input, repoRoot) {
     const rel = repoRelative(args.file_path, repoRoot);
     if (rel == null || CODER_PROTECTED.test(rel)) {
       return deny(
-        `coder may not ${tool} factory/CI/git files (.claude/, .github/, scripts/, .git/, .gitignore, .factory/runs/) ` +
+        `coder may not ${tool} factory/CI/git files (.claude/, .github/, scripts/, .git/, .gitignore, .factory/runs/), ` +
+          `the tenant-isolation test, ` +
           `or paths outside the repo. Refusing "${args.file_path}".`
       );
     }

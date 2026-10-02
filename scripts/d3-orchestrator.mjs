@@ -166,8 +166,9 @@ the review, and end your reply with exactly one final line of the form
 
 The reviewer's only shell access is read-only git, and it is enforced to be written
 exactly like this (diff/log/show also need the two --no- flags):
-  git --no-pager -c core.fsmonitor=false -c log.showSignature=false diff --no-ext-diff --no-textconv ${startCommit}...HEAD
-(${startCommit} is the commit this run started from.) Tell the reviewer to use that form.`);
+  git --no-pager -c core.fsmonitor=false -c log.showSignature=false diff --no-ext-diff --no-textconv ${startCommit}...HEAD --
+(${startCommit} is the commit this run started from; the trailing "--" is required, optionally
+followed by paths.) Tell the reviewer to use that form.`);
 
   const stillFailing = !testPassed();
 
