@@ -75,7 +75,7 @@ function world({ log, mutateBundle, fromBranch, baseFiles = {}, baseLink, edit }
   writeFileSync(join(j1, "feat.txt"), "feature");
   if (log !== undefined) {
     mkdirSync(join(j1, ".factory/runs"), { recursive: true });
-    writeFileSync(join(j1, ".factory/runs/log.jsonl"), log + "\n");
+    writeFileSync(join(j1, ".factory/runs/run-1.json"), log + "\n");
   }
   if (edit) edit({ j1, git: (...a) => git(j1, ...a), put: (rel, body = "x") => { mkdirSync(dirname(join(j1, rel)), { recursive: true }); writeFileSync(join(j1, rel), body); } });
   git(j1, "add", "-A");

@@ -226,7 +226,7 @@ jobs:
           # "unknown") only to keep injection out of the PR text. Factory PRs are
           # therefore ALWAYS drafts; a human marks one ready after reviewing the diff
           # (and, until CI runs on factory PRs, after checking the app's CI by hand).
-          LOGLINE="$(git show "refs/heads/$BRANCH:.factory/runs/log.jsonl" 2>/dev/null | tail -n 1 || true)"
+          LOGLINE="$(git show "refs/heads/$BRANCH:.factory/runs/run-${{ github.run_id }}.json" 2>/dev/null | tail -n 1 || true)"
           TEST_RESULT="$(printf %s "$LOGLINE" | jq -r '.test_result // "unknown"' 2>/dev/null || echo unknown)"
           VERDICT="$(printf %s "$LOGLINE" | jq -r '.review_verdict // "unknown"' 2>/dev/null || echo unknown)"
           case "$TEST_RESULT" in PASS|FAIL|none) ;; *) TEST_RESULT=unknown ;; esac

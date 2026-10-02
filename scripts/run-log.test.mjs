@@ -44,7 +44,7 @@ test("writeRunLog: the committed record holds a hash of the brief, never the bri
     process.chdir(dir);
     const brief = "remind Acme Corp about overdue invoice #1234 ($9,800)";
     const rec = writeRunLog({ brief, reviewSummary: "VERDICT: APPROVE" });
-    const line = readFileSync(join(dir, ".factory/runs/log.jsonl"), "utf8");
+    const line = readFileSync(join(dir, ".factory/runs/run-local.json"), "utf8");
     assert.doesNotMatch(line, /Acme|1234|9,800/);
     assert.equal(rec.brief, undefined);
     assert.match(rec.brief_sha256, /^[0-9a-f]{12}$/);

@@ -1,8 +1,8 @@
-import { appendFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 
 // Run log: one durable record per factory run. Writes a JSONL line to
-// .factory/runs/log.jsonl (committed with the branch, so it travels in the PR and
+// .factory/runs/run-<run_id>.json (one file per run, committed with the branch, so it travels in the PR and
 // can feed a dashboard later). Reads the .factory artifacts to capture outcomes.
 // Pure stdlib — no dependencies, never throws into the pipeline.
 
@@ -59,7 +59,9 @@ export function writeRunLog({ brief, reviewSummary }) {
 
   try {
     mkdirSync(".factory/runs", { recursive: true });
-    appendFileSync(".factory/runs/log.jsonl", JSON.stringify(record) + "\n");
+    // One file per run (not a shared append-only log): two open factory PRs never touch the same
+    // path, so they cannot conflict with each other once one of them merges.
+    writeFileSync(`.factory/runs/run-${record.run_id}.json`, JSON.stringify(record) + "\n");
   } catch (err) {
     console.error("run log write failed:", err);
   }
