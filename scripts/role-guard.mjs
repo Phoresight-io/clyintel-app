@@ -58,6 +58,11 @@ const SAFE_FLAG_PATTERNS = [
 // metacharacters or redirects) and never a leading dash.
 const SAFE_ARG = /^[A-Za-z0-9_.\/:@~^,%+][A-Za-z0-9_.\/:@~^=,%+-]*$/;
 
+// Files the coder must not touch with Write/Edit: the factory itself and CI config
+// (a feature never needs them), git internals, and the run log. NOTE: this does not
+// stop the same edits via Bash; it blocks honest mistakes and the easy path.
+const CODER_PROTECTED = /^(\.claude|\.github|scripts|\.git)\/|^\.factory\/runs\/|^\.gitignore$/;
+
 const deny = (reason) => ({
   hookSpecificOutput: {
     hookEventName: "PreToolUse",
@@ -148,6 +153,16 @@ export function decide(input, repoRoot) {
   }
   if (!ROLE_TOOLS[agentType].has(tool)) {
     return deny(`${agentType} may not use ${tool}.`);
+  }
+
+  if (agentType === "coder" && (tool === "Write" || tool === "Edit")) {
+    const rel = repoRelative(args.file_path, repoRoot);
+    if (rel == null || CODER_PROTECTED.test(rel)) {
+      return deny(
+        `coder may not ${tool} factory/CI/git files (.claude/, .github/, scripts/, .git/, .gitignore, .factory/runs/) ` +
+          `or paths outside the repo. Refusing "${args.file_path}".`
+      );
+    }
   }
 
   if (agentType === "planner" && tool === "Write") {

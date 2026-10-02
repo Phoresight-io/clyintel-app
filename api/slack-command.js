@@ -19,7 +19,7 @@ function verifySlack(raw, headers) {
   const ts = headers["x-slack-request-timestamp"];
   const sig = headers["x-slack-signature"];
   if (!ts || !sig) return false;
-  if (Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false; // replay guard
+  if (!/^\d+$/.test(ts) || Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false; // replay guard (NaN-safe)
   const base = `v0:${ts}:${raw}`;
   const mine = "v0=" + crypto.createHmac("sha256", secret).update(base).digest("hex");
   const a = Buffer.from(mine);

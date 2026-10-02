@@ -42,9 +42,25 @@ test("planner can read/search and write ONLY .factory/plan.md", () => {
   for (const t of ["Bash", "Edit"]) assert.ok(denied(call(t, {}, as("planner"))), t);
 });
 
-test("coder can write and run shell", () => {
+test("coder can write app code and run shell", () => {
   for (const t of ["Write", "Edit", "Bash", "Read"]) assert.ok(!denied(call(t, { file_path: "a.ts" }, as("coder"))), t);
+  for (const f of ["clyintel/app/page.tsx", "clyintel/lib/charge.ts", ".factory/build-notes.md", `${ROOT}/clyintel/x.ts`])
+    for (const t of ["Write", "Edit"]) assert.ok(!denied(call(t, { file_path: f }, as("coder"))), `${t} ${f}`);
   assert.ok(denied(call("WebSearch", {}, as("coder"))));
+});
+
+test("coder cannot Write/Edit factory, CI or git files", () => {
+  for (const f of [
+    ".claude/settings.json", ".claude/agents/reviewer.md", ".github/workflows/ci.yml",
+    "scripts/role-guard.mjs", "scripts/d3-orchestrator.mjs", ".git/config", ".git/hooks/pre-push",
+    ".gitignore", ".factory/runs/log.jsonl", `${ROOT}/.github/workflows/x.yml`,
+    "clyintel/../.claude/settings.json", // traversal into a protected dir
+    "/etc/passwd", "../outside.ts",
+  ])
+    for (const t of ["Write", "Edit"]) assert.ok(denied(call(t, { file_path: f }, as("coder"))), `${t} ${f}`);
+  // lookalikes are fine
+  for (const f of ["clyintel/scripts/seed.ts", "clyintel/.github-notes.md", "clyintel/lib/scripts.ts"])
+    assert.ok(!denied(call("Write", { file_path: f }, as("coder"))), f);
 });
 
 test("tester can write test files and its report only", () => {

@@ -12,6 +12,11 @@ tsconfig.tsbuildinfo
 .env
 .env.local
 .env.*.local
+# Stray secrets must never be swept in by the factory's unattended `git add -A`.
+.env.*
+!.env.example
+!.env.*.example
+*.key
 
 # misc
 .DS_Store
