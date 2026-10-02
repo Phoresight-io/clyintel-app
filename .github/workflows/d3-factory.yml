@@ -69,7 +69,9 @@ jobs:
       - name: Run pipeline (Planner → Coder → Tester → Reviewer)
         working-directory: scripts
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # A dedicated, spend-capped key can be set as D3_FACTORY_ANTHROPIC_API_KEY (so it can be
+          # capped and rotated apart from PR review); until then the shared ANTHROPIC_API_KEY is used.
+          ANTHROPIC_API_KEY: ${{ secrets.D3_FACTORY_ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           BRIEF: ${{ github.event.client_payload.brief || inputs.brief }}
           SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
