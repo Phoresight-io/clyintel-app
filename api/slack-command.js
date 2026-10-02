@@ -10,19 +10,23 @@ export const config = { api: { bodyParser: false } };
 const MAX_BODY_BYTES = 100_000;
 const readRaw = (req) =>
   new Promise((resolve, reject) => {
-    let data = "";
+    const chunks = [];
+    let bytes = 0;
     let tooBig = false;
     req.on("data", (c) => {
       if (tooBig) return; // stop accumulating once rejected
-      data += c;
-      if (data.length > MAX_BODY_BYTES) {
+      const buf = Buffer.isBuffer(c) ? c : Buffer.from(c);
+      bytes += buf.length; // bytes, not UTF-16 units
+      if (bytes > MAX_BODY_BYTES) {
         tooBig = true;
-        data = "";
+        chunks.length = 0;
         reject(new Error("body too large"));
         req.destroy?.();
+        return;
       }
+      chunks.push(buf); // concat as bytes so a multi-byte char split across chunks survives
     });
-    req.on("end", () => resolve(data));
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
 
