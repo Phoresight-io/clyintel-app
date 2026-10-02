@@ -70,6 +70,7 @@ jobs:
           SLACK_REVIEW_CHANNEL: ${{ vars.SLACK_REVIEW_CHANNEL }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           PR_TITLE: ${{ github.event.pull_request.title }}
+          REVIEW_STATUS: ${{ job.status }}
         run: |
           if [ -z "$SLACK_BOT_TOKEN" ]; then
             echo "SLACK_BOT_TOKEN not set; skipping Slack notification."
@@ -79,5 +80,5 @@ jobs:
             -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
             -H "Content-Type: application/json; charset=utf-8" \
             -d "$(jq -n --arg c "$SLACK_REVIEW_CHANNEL" \
-                   --arg t "🔍 PR reviewed: $PR_TITLE — $PR_URL (see PR comments for the verdict)" \
+                   --arg t "🔍 PR review $REVIEW_STATUS: $PR_TITLE — $PR_URL (see PR comments for the verdict)" \
                    '{channel:$c, text:($t | gsub("&";"&amp;") | gsub("<";"&lt;") | gsub(">";"&gt;"))}')" || true

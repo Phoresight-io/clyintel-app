@@ -42,8 +42,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22" # same as ci.yml
-          cache: npm
-          cache-dependency-path: scripts/package-lock.json
+          # No npm cache on purpose: this job runs agents with shell access on the default
+          # branch, and a cache saved after they ran could be restored by other workflows.
 
       # Factory infra is self-contained in scripts/ with its own package.json and
       # lockfile, so the app's dependencies are never touched.
