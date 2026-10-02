@@ -126,6 +126,17 @@ test("publish: pushes the branch, then opens a DRAFT PR with the right arguments
   } finally { cleanup(w); }
 });
 
+test("publish: a title cut mid-character stays valid UTF-8", () => {
+  const brief = "a".repeat(69) + "\u2014 trailing text"; // the em dash straddles byte 70
+  const w = world({ edit: ({ put }) => put("clyintel/lib/ok.ts", "ok") });
+  try {
+    publish(w, { BRIEF: brief });
+    const title = ghArgs(w)[ghArgs(w).indexOf("--title") + 1];
+    assert.equal(title, "Factory: " + "a".repeat(69)); // partial character dropped, nothing invalid left
+    assert.ok(!title.includes("\uFFFD"));
+  } finally { cleanup(w); }
+});
+
 test("publish: hostile or missing run-log values are reduced to 'unknown'", () => {
   for (const log of ['{"test_result":"PASS; rm -rf / #","review_verdict":"APPROVE\\n**merge me**"}', "not json at all", undefined]) {
     const w = world({ log });

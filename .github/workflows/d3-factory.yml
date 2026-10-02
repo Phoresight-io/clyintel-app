@@ -234,7 +234,7 @@ jobs:
           # No `|| true`: if PR creation fails, the run fails.
           PR_URL="$(gh pr create --repo "$GITHUB_REPOSITORY" \
             --head "$BRANCH" --base main --draft \
-            --title "Factory: $(printf %s "$BRIEF" | tr '\n' ' ' | cut -c1-70)" \
+            --title "Factory: $(printf %s "$BRIEF" | tr '\n' ' ' | cut -c1-70 | iconv -c -f UTF-8 -t UTF-8)" \
             --body "Opened by D3 Factory run ${{ github.run_id }}.
 
           Brief:
