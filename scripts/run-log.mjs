@@ -20,6 +20,10 @@ function testResult() {
 
 function reviewVerdict(summary) {
   const s = summary || "";
+  // Prefer the explicit "VERDICT: ..." line the orchestrator asks the reviewer for
+  // (last one wins); the loose keyword scan below is only a fallback.
+  const explicit = [...s.matchAll(/^\s*VERDICT:\s*(APPROVE|REQUEST CHANGES|BLOCK)\b/gim)].pop();
+  if (explicit) return explicit[1].toUpperCase();
   if (/BLOCK/i.test(s)) return "BLOCK";
   if (/REQUEST CHANGES/i.test(s)) return "REQUEST CHANGES";
   if (/APPROVE/i.test(s)) return "APPROVE";

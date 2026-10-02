@@ -5,6 +5,7 @@ import { dirname, resolve } from "node:path";
 import { chdir } from "node:process";
 import { postSlack } from "./slack.mjs";
 import { writeRunLog, pushRunLogToSheet } from "./run-log.mjs";
+import { makeGuardHook } from "./role-guard.mjs";
 
 // This script lives in scripts/ but the factory operates on the repo root
 // (.factory/, git, the app code). Anchor the working directory at the repo root
@@ -27,52 +28,83 @@ const agents = {
     prompt: load("planner"),
     tools: ["Read", "Grep", "Glob", "WebSearch"],
     model: "opus", // the one role that gets the expensive model
+    maxTurns: 40,
   },
   coder: {
     description: "Implementation agent. AFTER planner. Reads plan, writes code, commits.",
     prompt: load("coder"),
     tools: ["Read", "Write", "Edit", "Grep", "Glob", "Bash"],
     model: "sonnet",
+    maxTurns: 100,
   },
   tester: {
     description: "Testing agent. AFTER coder. Writes + runs tests vs acceptance criteria.",
     prompt: load("tester"),
-    tools: ["Read", "Write", "Edit", "Grep", "Glob", "Bash"], // writes tests, not feature code
+    // Write/Edit are limited to test files + .factory/ by the role guard below.
+    tools: ["Read", "Write", "Edit", "Grep", "Glob", "Bash"],
     model: "sonnet",
+    maxTurns: 80,
   },
   reviewer: {
     description: "Read-only review specialist. LAST. Checks diff + test report vs plan.",
     prompt: load("reviewer"),
-    tools: ["Read", "Grep", "Glob", "Bash"], // no Write/Edit — can't modify code
+    // No Write/Edit; Bash is limited to read-only git by the role guard below.
+    tools: ["Read", "Grep", "Glob", "Bash"],
     model: "sonnet",
+    maxTurns: 40,
   },
 };
 
+// NOTE: `allowedTools` only AUTO-APPROVES tools (so headless runs don't stall on
+// permission prompts); it does NOT restrict them. Roles are enforced by the
+// PreToolUse hook (role-guard.mjs), which can deny any call, including from
+// subagents: the top-level session may only use Agent/Task/Read (it must delegate),
+// the tester may only write test files, and the reviewer's Bash is read-only git.
 // Include BOTH "Agent" and "Task": the delegation tool was renamed Agent in
 // v2.1.63 but the init list still emits Task, so allow-listing both avoids
 // silent non-delegation.
-const allowedTools = ["Agent", "Task", "Read", "Grep", "Glob", "Bash", "Write", "Edit"];
+const allowedTools = ["Agent", "Task", "Read", "Grep", "Glob", "Bash", "Write", "Edit", "WebSearch"];
 
+// Cap on top-level (delegating) turns per run(); subagents have their own maxTurns.
+const MAX_TURNS = 60;
+
+// Counts hook invocations so we can refuse to continue if enforcement never ran.
+let guardCalls = 0;
+const hooks = { PreToolUse: [{ hooks: [makeGuardHook(repoRoot, () => guardCalls++)] }] };
+
+class PipelineError extends Error {}
+
+// Runs one delegated step and returns the agent's final text (`result` on the SDK
+// result message). Any non-success result (error_max_turns, error_during_execution,
+// ...) throws, so a failed run can never be mistaken for a successful one.
 async function run(prompt) {
-  const result = query({ prompt, options: { agents, allowedTools } });
-  let summary = "";
-  for await (const msg of result) {
-    if (msg.type === "result") {
-      summary = msg.summary ?? JSON.stringify(msg);
-      console.log(summary);
-    }
+  const stream = query({ prompt, options: { agents, allowedTools, hooks, maxTurns: MAX_TURNS } });
+  let final = null;
+  for await (const msg of stream) {
+    if (msg.type === "result") final = msg;
   }
-  return summary;
+  if (!final) throw new PipelineError("agent run ended without a result message");
+  if (final.subtype !== "success" || final.is_error) {
+    console.error("agent run failed:", final.subtype, final.errors ?? "");
+    throw new PipelineError(`agent run failed (${final.subtype})`);
+  }
+  if (guardCalls === 0) {
+    // Tools were never checked, so role limits can't be trusted. Fail closed.
+    throw new PipelineError("role guard hook never fired; refusing to trust this run");
+  }
+  console.log(final.result);
+  return final.result;
 }
 
 const testFailed = () =>
   existsSync(".factory/test-report.md") &&
   /##\s*Result:\s*FAIL/i.test(readFileSync(".factory/test-report.md", "utf8"));
 
-await postSlack(channel, `▶️ Design → build → test → review: ${brief}`);
+async function pipeline() {
+  await postSlack(channel, `▶️ Design → build → test → review: ${brief}`);
 
-// Design + build + test, in one delegated run.
-await run(`Run the Clyintel pipeline for this brief:
+  // Design + build + test, in one delegated run.
+  await run(`Run the Clyintel pipeline for this brief:
 
 "${brief}"
 
@@ -84,28 +116,44 @@ In order:
 
 Report the tester's PASS/FAIL result. Do not review or deploy yet.`);
 
-// Test gate: one fix loop if tests failed, so a red build doesn't reach review.
-if (testFailed()) {
-  await postSlack(channel, "⚠️ Tests failed — sending back to the coder once.");
-  await run(`The tester reported FAIL in .factory/test-report.md. Use the coder
+  // Test gate: one fix loop if tests failed, so a red build doesn't reach review.
+  if (testFailed()) {
+    await postSlack(channel, "⚠️ Tests failed — sending back to the coder once.");
+    await run(`The tester reported FAIL in .factory/test-report.md. Use the coder
 agent to fix the implementation (not the tests) per the failures listed, commit,
 then use the tester agent to re-run and rewrite .factory/test-report.md.`);
+  }
+
+  // Review last — reads the diff AND the test report.
+  const verdict = await run(`Use the reviewer agent to review the branch against
+.factory/plan.md, .factory/build-notes.md, and .factory/test-report.md. Return
+the review, and end your reply with exactly one final line of the form
+"VERDICT: APPROVE", "VERDICT: REQUEST CHANGES" or "VERDICT: BLOCK". Then STOP.`);
+
+  const stillFailing = testFailed();
+
+  // Durable run log: one record per run (in-repo JSONL, + optional Sheet row).
+  const record = writeRunLog({ brief, reviewSummary: verdict });
+  await pushRunLogToSheet(record);
+
+  // Deploy is not offered here: a human reviews the factory PR (opened by the
+  // workflow right after this script) and merges to main; Vercel auto-deploys main.
+  await postSlack(
+    channel,
+    `${verdict}\n\n${stillFailing ? "❌ Tests still failing — fix before merging. " : "✅ Build + test + review complete. "}` +
+      `A pull request for branch \`${process.env.BRANCH ?? "(unknown)"}\` is being opened for human review; ` +
+      `merging it to main deploys via Vercel.\n` +
+      `📋 Logged: *${record.plan_title}* — tests ${record.test_result}, review ${record.review_verdict}.`
+  );
 }
 
-// Review last — reads the diff AND the test report.
-const verdict = await run(`Use the reviewer agent to review the branch against
-.factory/plan.md, .factory/build-notes.md, and .factory/test-report.md. Return
-the verdict (APPROVE / REQUEST CHANGES / BLOCK). Then STOP — do not deploy.`);
-
-const stillFailing = testFailed();
-
-// Durable run log: one record per run (in-repo JSONL, + optional Sheet row).
-const record = writeRunLog({ brief, reviewSummary: verdict });
-await pushRunLogToSheet(record);
-
-await postSlack(
-  channel,
-  `${verdict}\n\n${stillFailing ? "❌ Tests still failing — do not deploy. " : "✅ Build + test + review complete. "}` +
-    `Reply \`/d3 approve\` to deploy to prod, or push fixes to the PR.\n` +
-    `📋 Logged: *${record.plan_title}* — tests ${record.test_result}, review ${record.review_verdict}.`
-);
+try {
+  await pipeline();
+} catch (err) {
+  console.error(err);
+  const reason = err instanceof PipelineError ? err.message : "unexpected error (see workflow logs)";
+  const record = writeRunLog({ brief, reviewSummary: `pipeline failed: ${reason}` });
+  await pushRunLogToSheet(record);
+  await postSlack(channel, `❌ D3 pipeline failed: ${reason}. No PR will be opened.`);
+  process.exit(1); // fail the workflow so the commit/PR steps are skipped
+}
