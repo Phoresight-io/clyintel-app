@@ -1,0 +1,95 @@
+name: Claude PR Review
+
+# Runs on EVERY pull request to clyintel-app — factory-generated and hand-opened
+# alike. Separate from the D3 pipeline on purpose: the pipeline's Reviewer guards
+# the branch before the PR exists; THIS guards the merge, on the PR itself.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Fork and Dependabot PRs get no secrets, so the review step would just fail: skip them.
+    # Drafts are skipped too (no paid review per push); `ready_for_review` runs it at hand-over.
+    if: ${{ !github.event.pull_request.draft && !github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20 # a stuck review must not keep spending on the API key for GitHub's 6h default
+    permissions:
+      contents: read # read the code
+      pull-requests: write # post review comments
+      # id-token not needed — github_token below bypasses the action's OIDC app-token exchange
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          # claude-code-action sets up its own git auth from github_token below, so don't
+          # also leave the token in .git/config for anything in this job to read.
+          persist-credentials: false
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Use the workflow token directly; without this the action tries OIDC
+          # (needs id-token: write + the Claude GitHub App installed) and fails.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Model intentionally unpinned (action default); re-pin once a model ID is confirmed.
+          claude_args: >-
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            You are reviewing a pull request for Clyintel — an AI-powered
+            accounts-receivable / revenue-recovery product on Next.js +
+            TypeScript + Supabase, deployed on Vercel. It handles customer
+            financial data, so data exposure is high severity.
+
+            Review the diff and leave feedback. Priorities, in order:
+            1. SECURITY — secrets committed, SQL/injection, auth bypass, unsafe
+               Supabase RLS assumptions, unvalidated user-facing input, any path
+               that could leak one customer's financial/AR data to another.
+            2. PROD-SAFETY — DB migrations, Vercel config, or Stripe writes that
+               look risky or unflagged. Call these out explicitly.
+            3. CORRECTNESS — bugs, broken types, missing error handling, async
+               mistakes.
+            4. SCOPE & QUALITY — dead code, needless complexity. Don't nitpick
+               style a linter catches.
+
+            How to respond:
+            - Leave INLINE comments on specific lines via
+              mcp__github_inline_comment__create_inline_comment for concrete issues.
+            - Post ONE top-level summary comment via `gh pr comment` with an
+              overall read and a plain verdict line:
+              "Review: looks good" / "Review: changes suggested" /
+              "Review: do not merge (security/prod risk)".
+            - You are advisory only. DO NOT approve or request-changes as a formal
+              GitHub review, and never merge. The human decides the merge.
+            - If the diff is clean, say so briefly. Don't invent problems.
+
+      # Mirror the review verdict into Slack so every stage reaches the channel.
+      # Non-fatal: skipped when no channel is configured; a missing bot token is
+      # handled inside the script. (A step's own `env:` isn't visible to its `if:`,
+      # so the condition can only use contexts like `vars`.)
+      - name: Notify Slack
+        if: ${{ always() && vars.SLACK_REVIEW_CHANNEL != '' }}
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_REVIEW_CHANNEL: ${{ vars.SLACK_REVIEW_CHANNEL }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          REVIEW_STATUS: ${{ job.status }}
+        run: |
+          if [ -z "$SLACK_BOT_TOKEN" ]; then
+            echo "SLACK_BOT_TOKEN not set; skipping Slack notification."
+            exit 0
+          fi
+          curl -s -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "$(jq -n --arg c "$SLACK_REVIEW_CHANNEL" \
+                   --arg t "🔍 PR review $REVIEW_STATUS: $PR_TITLE — $PR_URL (see PR comments for the verdict)" \
+                   '{channel:$c, text:($t | gsub("&";"&amp;") | gsub("<";"&lt;") | gsub(">";"&gt;"))}')" || true

@@ -12,7 +12,23 @@ tsconfig.tsbuildinfo
 .env
 .env.local
 .env.*.local
+# Stray secrets must never be swept in by the factory's unattended `git add -A`.
+.env.*
+!.env.example
+!.env.*.example
+*.key
+# Test/tool output the tester can leave behind (coverage HTML can embed source and fixtures;
+# `vercel pull` writes .vercel/.env.*.local).
+coverage/
+.vercel/
+*.log
+playwright-report/
+test-results/
 
 # misc
 .DS_Store
 *.pem
+
+# D3 Factory: commit run log, ignore per-run artifacts
+.factory/*
+!.factory/runs/

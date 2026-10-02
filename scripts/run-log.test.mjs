@@ -1,0 +1,57 @@
+// Run with: node --test scripts/run-log.test.mjs
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { parseTestResult, reviewVerdict, writeRunLog } from "./run-log.mjs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+test("parseTestResult: only an explicit result counts; last one wins; fails closed", () => {
+  const cases = [
+    [undefined, "none"],
+    ["", "none"],
+    ["## Result: PASS\n", "PASS"],
+    ["## Result: FAIL\n", "FAIL"],
+    ["## Result: **PASS**\n", "PASS"],
+    ["## result: pass", "PASS"],
+    ["## Result: PASS | FAIL\n", "unknown"], // unfilled template line is not a result
+    ["## Result: FAIL | PASS", "unknown"],
+    ["## Result: PASS | FAIL\n## Result: PASS", "PASS"],
+    ["## Result: FAIL\n...\n## Result: PASS\n", "PASS"],
+    ["## Result: PASS\n...\n## Result: FAIL\n", "FAIL"],
+    ["Ran out of turns while writing tests", "unknown"],
+  ];
+  for (const [text, want] of cases) assert.equal(parseTestResult(text), want, JSON.stringify(text));
+});
+
+test("reviewVerdict: only an explicit VERDICT line counts (bold allowed); prose never does", () => {
+  assert.equal(reviewVerdict("Looks fine.\n**VERDICT: APPROVE**"), "APPROVE");
+  assert.equal(reviewVerdict("notes\n__VERDICT: REQUEST CHANGES__\n"), "REQUEST CHANGES");
+  assert.equal(reviewVerdict("VERDICT: BLOCK"), "BLOCK");
+  assert.equal(reviewVerdict("VERDICT: BLOCK\nlater\nVERDICT: APPROVE"), "APPROVE"); // last wins
+  // prose without a VERDICT line is "unknown", never a guess
+  assert.equal(reviewVerdict("I can't approve this."), "unknown");
+  assert.equal(reviewVerdict("This is a disapprove situation."), "unknown");
+  assert.equal(reviewVerdict("No blockers; this is a code block. I would approve."), "unknown");
+  assert.equal(reviewVerdict("This must BLOCK the merge."), "unknown");
+  assert.equal(reviewVerdict(""), "unknown");
+});
+
+test("writeRunLog: the committed record holds a hash of the brief, never the brief", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rl-"));
+  const prev = process.cwd();
+  try {
+    process.chdir(dir);
+    const brief = "remind Acme Corp about overdue invoice #1234 ($9,800)";
+    const rec = writeRunLog({ brief, reviewSummary: "VERDICT: APPROVE" });
+    const line = readFileSync(join(dir, ".factory/runs/run-local.json"), "utf8");
+    assert.doesNotMatch(line, /Acme|1234|9,800/);
+    assert.equal(rec.brief, undefined);
+    assert.match(rec.brief_sha256, /^[0-9a-f]{12}$/);
+    assert.equal(rec.brief_chars, brief.length);
+    assert.equal(rec.review_verdict, "APPROVE");
+  } finally {
+    process.chdir(prev);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
