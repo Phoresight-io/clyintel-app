@@ -12,10 +12,18 @@ function parseTitle(planMd) {
   return m ? m[1].trim() : "(untitled)";
 }
 
+// The ONE parser for the tester's report, shared with the orchestrator's test gate so
+// the gate, the run log and the PR can never disagree. Fails closed: only an explicit
+// "## Result: PASS" is PASS. The last Result line wins, and the unfilled template line
+// "## Result: PASS | FAIL" is not a result.
+export function parseTestResult(text) {
+  if (!text) return "none";
+  const all = [...text.matchAll(/##\s*Result:\s*\**\s*(PASS|FAIL)\b(?!\s*\|)/gi)];
+  return all.length ? all[all.length - 1][1].toUpperCase() : "unknown";
+}
+
 function testResult() {
-  const r = read(".factory/test-report.md");
-  if (!r) return "none";
-  return /##\s*Result:\s*FAIL/i.test(r) ? "FAIL" : /##\s*Result:\s*PASS/i.test(r) ? "PASS" : "unknown";
+  return parseTestResult(read(".factory/test-report.md"));
 }
 
 function reviewVerdict(summary) {

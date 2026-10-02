@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { chdir } from "node:process";
 import { postSlack } from "./slack.mjs";
-import { writeRunLog, pushRunLogToSheet } from "./run-log.mjs";
+import { writeRunLog, pushRunLogToSheet, parseTestResult } from "./run-log.mjs";
 import { makeGuardHook } from "./role-guard.mjs";
 import { baseCommit, tamperedPaths } from "./instruction-guard.mjs";
 
@@ -123,15 +123,12 @@ async function run(prompt) {
   return final.result;
 }
 
-// The test gate fails CLOSED: only an explicit "## Result: PASS" counts as passing.
-// A missing report, an unparseable one, or a tester that hit maxTurns all count as
-// "not passed". If the report has several Result lines, the last one decides, and
-// the unfilled template line "## Result: PASS | FAIL" is not a result.
-const testPassed = () => {
-  if (!existsSync(".factory/test-report.md")) return false;
-  const results = [...readFileSync(".factory/test-report.md", "utf8").matchAll(/##\s*Result:\s*\**\s*(PASS|FAIL)\b(?!\s*\|)/gi)];
-  return results.length > 0 && results[results.length - 1][1].toUpperCase() === "PASS";
-};
+// The test gate fails CLOSED: only an explicit "## Result: PASS" counts as passing (a
+// missing report, an unparseable one, a tester that hit maxTurns, or the unfilled
+// template line all count as "not passed"). Parsing is shared with the run log.
+const testPassed = () =>
+  existsSync(".factory/test-report.md") &&
+  parseTestResult(readFileSync(".factory/test-report.md", "utf8")) === "PASS";
 
 async function pipeline() {
   await postSlack(channel, `▶️ Design → build → test → review: ${brief}`);
