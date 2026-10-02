@@ -221,6 +221,8 @@ test("publish: commits that touch protected paths are refused, and nothing is pu
     "weaken the agent-isolation test": ({ put }) => put("clyintel/lib/outreach/agent-isolation.test.ts", "// emptied"),
     "tenant-isolation helper": ({ put }) => put("clyintel/tests/tenant-isolation.helpers.ts", "x"),
     "vercel.json (crons)": ({ put }) => put("clyintel/vercel.json", "{}"),
+    "vercel.ts": ({ put }) => put("clyintel/vercel.ts", "export const config = {}"),
+    ".vercelignore": ({ put }) => put(".vercelignore", "x"),
     "root vercel.json": ({ put }) => put("vercel.json", "{}"),
     "next.config": ({ put }) => put("clyintel/next.config.ts", "export default {}"),
     "schema migration": ({ put }) => put("clyintel/schema/099_new.sql", "alter table x;"),
@@ -305,6 +307,7 @@ test("publish: dependency and middleware changes are allowed but flagged in the 
       put("clyintel/package.json", "{}");
       put("clyintel/package-lock.json", "{}");
       put("clyintel/middleware.ts", "export {}");
+      put("clyintel/proxy.ts", "export {}");
       put("clyintel/tsconfig.json", "{}");
       put("clyintel/lib/stray.sql", "select 1;");
       put("clyintel/lib/settlement/charge.ts", "x");
@@ -329,7 +332,7 @@ test("publish: dependency and middleware changes are allowed but flagged in the 
     assert.ok(remoteHas(w, "refs/heads/factory/run-1"));
     const body = ghArgs(w)[ghArgs(w).indexOf("--body") + 1];
     assert.match(body, /Touches sensitive files/);
-    for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/middleware.ts", "clyintel/tsconfig.json", "clyintel/lib/stray.sql", "clyintel/lib/settlement/charge.ts", "clyintel/lib/stripe.ts", "clyintel/app/api/sms-reply/route.ts", "clyintel/lib/demo-mode.ts", "clyintel/instrumentation.ts", "lib/supabase.ts", "clyintel/lib/providers/paypal.ts", "clyintel/app/api/connect/onboard/route.ts", "clyintel/app/api/stripe-webhook/route.ts", "clyintel/.npmrc", "clyintel/.husky/pre-commit", "clyintel/.vscode/tasks.json", "clyintel/lib/.gitignore"]) assert.ok(body.includes(f), f);
+    for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/middleware.ts", "clyintel/proxy.ts", "clyintel/tsconfig.json", "clyintel/lib/stray.sql", "clyintel/lib/settlement/charge.ts", "clyintel/lib/stripe.ts", "clyintel/app/api/sms-reply/route.ts", "clyintel/lib/demo-mode.ts", "clyintel/instrumentation.ts", "lib/supabase.ts", "clyintel/lib/providers/paypal.ts", "clyintel/app/api/connect/onboard/route.ts", "clyintel/app/api/stripe-webhook/route.ts", "clyintel/.npmrc", "clyintel/.husky/pre-commit", "clyintel/.vscode/tasks.json", "clyintel/lib/.gitignore"]) assert.ok(body.includes(f), f);
     assert.ok(!body.includes("app/page.tsx"), "ordinary files must not be listed as sensitive");
   } finally { cleanup(w); }
 });

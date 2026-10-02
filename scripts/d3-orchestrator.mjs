@@ -180,7 +180,7 @@ followed by paths.) Tell the reviewer to use that form.`);
   // workflow right after this script) and merges to main; Vercel auto-deploys main.
   await postSlack(
     channel,
-    `🔎 Factory reviewer verdict: ${record.review_verdict} (full review stays in the workflow logs).\n\n${stillFailing ? "❌ Tests did not pass (or no test report) — fix before merging. " : "✅ Build + test + review complete. "}` +
+    `🔎 Factory reviewer verdict: ${record.review_verdict} (full review stays in the workflow logs).\n\n${stillFailing ? "❌ Tests did not pass (or no test report) — fix before merging. " : record.review_verdict === "APPROVE" ? "✅ Build + test + review complete (self-reported; a human still reviews the PR). " : "⚠️ Tests passed but the factory reviewer did not approve — review carefully. "}` +
       `A pull request for branch \`${process.env.BRANCH ?? "(unknown)"}\` is being opened for human review; ` +
       `merging it to main deploys via Vercel.\n` +
       `📋 Logged: *${record.plan_title}* — tests ${record.test_result}, review ${record.review_verdict}.`

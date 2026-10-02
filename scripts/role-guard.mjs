@@ -87,7 +87,8 @@ const CODER_PROTECTED = new RegExp(
     "^\\.factory/runs/",
     "(^|/)(tenant|agent)-isolation[^/]*$",
     "(^|/)[^/]*isolation[^/]*\\.(test|spec)\\.[cm]?[jt]sx?$",
-    "(^|/)vercel\\.json$",
+    "(^|/)vercel\\.(json|[cm]?[jt]s)$",
+    "(^|/)\\.vercelignore$",
     "(^|/)next\\.config\\.[cm]?[jt]s$",
     "^(clyintel/)?schema/",
     "(^|/)\\.ai/", // product constitution, schema detail, Stripe IDs, specs
