@@ -11,8 +11,12 @@ on:
         description: "what to build"
         required: true
 
-# There is deliberately no deploy job. The deploy gate is: a human reviews the
-# factory PR and merges to main, and Vercel auto-deploys main (see CLAUDE.md).
+# There is deliberately no deploy job. The factory branches from DEVELOP and opens its PR
+# against develop. The deploy flow: a human reviews the factory PR and merges it to develop,
+# Vercel deploys develop to develop.clyintel (dev), and develop is later promoted to main,
+# which Vercel deploys to production. This workflow file itself runs from main (dispatch
+# workflows run from the default branch, and the kill switch below requires it); only the
+# code the agents work on comes from develop.
 #
 # Two jobs on purpose. Every step in a job shares $GITHUB_ENV and $GITHUB_PATH, so
 # an agent with Bash (e.g. after a prompt injection) could poison PATH or BASH_ENV
@@ -21,7 +25,36 @@ on:
 # only receives their commits as a git bundle, which carries objects, not hooks,
 # config or scripts.
 jobs:
+  # Resolves the base branch (develop) to ONE commit, in a job that runs no agent code, so the
+  # agent job and the publish job build on and compare against the exact same commit even if
+  # develop moves in between. Both read it from here, never from anything an agent produced.
+  prepare:
+    if: ${{ vars.D3_FACTORY_ENABLED == 'true' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      base_sha: ${{ steps.base.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+          persist-credentials: false
+
+      - name: Resolve the base commit
+        id: base
+        run: |
+          SHA="$(git rev-parse HEAD)"
+          case "$SHA" in
+            *[!0-9a-f]*|"") echo "Could not resolve develop to a commit." >&2; exit 1 ;;
+          esac
+          [ "${#SHA}" -eq 40 ] || { echo "Could not resolve develop to a commit." >&2; exit 1; }
+          echo "Factory base: develop at $SHA"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
   pipeline:
+    needs: prepare
     # KILL SWITCH: merging this workflow does not arm it. It runs only when the repository
     # variable D3_FACTORY_ENABLED is exactly "true" (Settings -> Secrets and variables ->
     # Actions -> Variables). Set it only after the Vercel preview question is settled:
@@ -43,7 +76,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # reviewer needs history for git diff main...HEAD
+          ref: ${{ needs.prepare.outputs.base_sha }} # develop, as resolved by the prepare job
+          fetch-depth: 0 # reviewer needs history for git diff <base>...HEAD
           persist-credentials: false
 
       - uses: actions/setup-node@v4
@@ -97,7 +131,7 @@ jobs:
       # via $GITHUB_ENV. The publish job re-validates the bundle regardless.
       - name: Export commits as a git bundle
         run: |
-          git bundle create "$RUNNER_TEMP/factory.bundle" "factory/run-${{ github.run_id }}" "^${{ github.sha }}"
+          git bundle create "$RUNNER_TEMP/factory.bundle" "factory/run-${{ github.run_id }}" "^${{ needs.prepare.outputs.base_sha }}"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -113,17 +147,18 @@ jobs:
   # The repo setting "Allow GitHub Actions to create and approve pull requests" is
   # needed for `gh pr create` either way.
   publish:
-    needs: pipeline # skipped if the pipeline failed, so a failed run opens no PR
+    needs: [prepare, pipeline] # skipped if the pipeline failed, so a failed run opens no PR
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
       pull-requests: write
     steps:
-      # Trusted checkout of the base commit only. Nothing the agents wrote is
-      # checked out or executed in this job.
+      # Trusted checkout of the base commit (develop, as resolved by the prepare job) only.
+      # Nothing the agents wrote is checked out or executed in this job.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.prepare.outputs.base_sha }}
           persist-credentials: false
 
       - uses: actions/download-artifact@v4
@@ -138,6 +173,7 @@ jobs:
           SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
           BRIEF: ${{ github.event.client_payload.brief || inputs.brief }}
           BRANCH: factory/run-${{ github.run_id }}
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }} # develop; set by the prepare job, never by an agent
         run: |
           BUNDLE="$RUNNER_TEMP/bundle/factory.bundle"
           git bundle verify "$BUNDLE"
@@ -157,11 +193,11 @@ jobs:
           # come from the base commit), so re-running this job after a push that succeeded but a
           # later step failed rebuilds the SAME commit: the push is then a no-op instead of a
           # rejected non-fast-forward, and `gh pr create` can be retried.
-          BASE_DATE="$(git show -s --format=%cI "$GITHUB_SHA")"
+          BASE_DATE="$(git show -s --format=%cI "$BASE_SHA")"
           SQUASHED="$(GIT_AUTHOR_NAME=d3-factory GIT_AUTHOR_EMAIL=d3-factory@users.noreply.github.com \
             GIT_COMMITTER_NAME=d3-factory GIT_COMMITTER_EMAIL=d3-factory@users.noreply.github.com \
             GIT_AUTHOR_DATE="$BASE_DATE" GIT_COMMITTER_DATE="$BASE_DATE" \
-            git -c core.hooksPath=/dev/null commit-tree "$TREE" -p "$GITHUB_SHA" -m "Factory run ${{ github.run_id }}")"
+            git -c core.hooksPath=/dev/null commit-tree "$TREE" -p "$BASE_SHA" -m "Factory run ${{ github.run_id }}")"
           git update-ref "refs/heads/$BRANCH" "$SQUASHED"
           # The factory's commits must not touch the factory itself, the Slack endpoint, CI,
           # or anything that steers a Claude Code session (.claude/, any CLAUDE.md, git
@@ -184,7 +220,7 @@ jobs:
           # Matched case-INSENSITIVELY (grep -i): the tree is checked on Linux, but a reviewer on a
           # case-insensitive checkout (macOS) would get `.Claude/settings.json` written into `.claude/`.
           PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)(tenant|agent)-isolation[^/]*$|(^|/)[^/]*isolation[^/]*\.(test|spec)\.[cm]?[jt]sx?$|(^|/)env-config\.test\.[cm]?[jt]s$|^(clyintel/)?test/stubs/|(^|/)vercel\.(json|[cm]?[jt]s)$|(^|/)\.vercelignore$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/|(^|/)\.ai/|(^|/)\.mcp\.json$|(^|/)\.env($|\.)|(^|/)\.gitmodules$|(^|/)(\.husky|\.vscode|\.devcontainer)/|(^|/)(middleware|proxy)\.[cm]?[jt]s$|(^|/)\.npmrc$|(^|/)CODEOWNERS$|(^|/)vitest\.config\.[cm]?[jt]s$|(^|/)supabase/'
-          CHANGED_FILES() { git diff --name-only -z --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH"; }
+          CHANGED_FILES() { git diff --name-only -z --no-renames --no-ext-diff --no-textconv "$BASE_SHA" "refs/heads/$BRANCH"; }
           # Under .factory/ (only .factory/runs/ can get past .gitignore) the ONE file a run may add
           # is its own run record; anything else there would ride along into main.
           BAD="$( { CHANGED_FILES | { grep -izE "$PROTECTED" || true; }
@@ -217,7 +253,7 @@ jobs:
           # never needs one, and a symlink under e.g. clyintel/public/ pointing outside the repo
           # would be resolved by the Vercel preview build. Only the NEW mode is checked, so
           # deleting one is fine. (A path containing a newline can only cause a refusal here.)
-          if git diff --raw --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH" | awk '{print $2}' | grep -qE '^(120000|160000)$'; then
+          if git diff --raw --no-renames --no-ext-diff --no-textconv "$BASE_SHA" "refs/heads/$BRANCH" | awk '{print $2}' | grep -qE '^(120000|160000)$'; then
             echo "Factory commits add symlinks or submodules; refusing to push." >&2
             exit 1
           fi
@@ -236,7 +272,7 @@ jobs:
             exit 0
           fi
           echo "What this run will push (each line prefixed with \"| \" so none can read as a workflow command):"
-          git diff --stat=120 --no-ext-diff --no-textconv --no-renames "$GITHUB_SHA" "refs/heads/$BRANCH" | sed 's/^/    | /'
+          git diff --stat=120 --no-ext-diff --no-textconv --no-renames "$BASE_SHA" "refs/heads/$BRANCH" | sed 's/^/    | /'
           echo "Review that list for anything that looks like data or a credential."
           # Not blocked (features legitimately change them) but flagged loudly in the PR body (including
           # billing/tenant-data code: CLAUDE.md rule 7 wants a human to confirm billing logic),
@@ -251,7 +287,7 @@ jobs:
           fi
           # Weakened tests are easy to miss in a big diff: list EXISTING test files that were
           # modified or deleted (new ones are not flagged). Same sanitising as above.
-          TEST_FILES="$(git diff --name-status -z --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH" \
+          TEST_FILES="$(git diff --name-status -z --no-renames --no-ext-diff --no-textconv "$BASE_SHA" "refs/heads/$BRANCH" \
             | tr '\0' '\n' | awk 'NR%2==1{s=$0;next} s ~ /^[MD]$/ {print}' \
             | { grep -E '\.(test|spec)\.[cm]?[jt]sx?$' || true; } | tr -c 'A-Za-z0-9_./+@\n-' '?' | head -n 15)"
           if [ -n "$TEST_FILES" ]; then
@@ -281,7 +317,7 @@ jobs:
             push -u origin "$BRANCH"
           # No `|| true`: if PR creation fails, the run fails.
           PR_URL="$(gh pr create --repo "$GITHUB_REPOSITORY" \
-            --head "$BRANCH" --base main --draft \
+            --head "$BRANCH" --base develop --draft \
             --title "Factory: $(printf %s "$BRIEF" | tr '\n' ' ' | cut -c1-70 | iconv -c -f UTF-8 -t UTF-8)" \
             --body "Opened by D3 Factory run ${{ github.run_id }}.
 
@@ -295,7 +331,7 @@ jobs:
 
           ${WARN_NOTE}
 
-          Review the diff, then merge to main to deploy (Vercel auto-deploys main).")"
+          Review the diff, then merge to develop (Vercel deploys develop to develop.clyintel). Promote develop to main for production.")"
           echo "Opened $PR_URL"
           # Best-effort Slack notice with the real PR link (never fails the run).
           if [ -n "$SLACK_BOT_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
@@ -303,7 +339,7 @@ jobs:
               -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
               -H "Content-Type: application/json; charset=utf-8" \
               -d "$(jq -n --arg c "$SLACK_CHANNEL" \
-                     --arg t "🔀 PR opened for review: $PR_URL (DRAFT; self-reported tests: $TEST_RESULT, reviewer: $VERDICT) — merge it to main to deploy (Vercel auto-deploys main)." \
+                     --arg t "🔀 PR opened for review: $PR_URL (DRAFT; self-reported tests: $TEST_RESULT, reviewer: $VERDICT) — merge it to develop to deploy to dev (develop.clyintel); promote develop to main for production." \
                      '{channel:$c, text:$t}')" || true
           fi
 
@@ -311,8 +347,8 @@ jobs:
   # the person who ran /d3 was already told "a pull request is being opened". Say that it
   # failed. Fixed message only: it never includes the brief or the offending paths.
   notify-failure:
-    needs: [pipeline, publish]
-    if: ${{ always() && (needs.pipeline.result == 'failure' || needs.publish.result == 'failure' || needs.pipeline.result == 'skipped' || needs.pipeline.result == 'cancelled' || needs.publish.result == 'cancelled') }}
+    needs: [prepare, pipeline, publish]
+    if: ${{ always() && (needs.prepare.result == 'failure' || needs.pipeline.result == 'failure' || needs.publish.result == 'failure' || needs.pipeline.result == 'skipped' || needs.pipeline.result == 'cancelled' || needs.publish.result == 'cancelled') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
@@ -322,6 +358,7 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PREPARE_RESULT: ${{ needs.prepare.result }}
           PIPELINE_RESULT: ${{ needs.pipeline.result }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
         run: |
@@ -329,7 +366,9 @@ jobs:
             echo "No Slack token/channel configured; nothing to notify."
             exit 0
           fi
-          if [ "$PIPELINE_RESULT" = "skipped" ]; then
+          if [ "$PREPARE_RESULT" = "failure" ]; then
+            MSG="❌ D3 Factory could not resolve the develop branch, so nothing ran. See $RUN_URL"
+          elif [ "$PIPELINE_RESULT" = "skipped" ]; then
             MSG="⏸️ D3 Factory is switched off (the repository variable D3_FACTORY_ENABLED is not 'true', or the run was not started from main), so nothing ran."
           elif [ "$PIPELINE_RESULT" = "cancelled" ] || [ "$PUBLISH_RESULT" = "cancelled" ]; then
             MSG="⚠️ D3 Factory run was cancelled or timed out before finishing. No PR was opened. See $RUN_URL"

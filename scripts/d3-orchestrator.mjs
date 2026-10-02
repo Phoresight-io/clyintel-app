@@ -228,12 +228,13 @@ followed by paths.) Tell the reviewer to use that form.`);
   await pushRunLogToSheet(record);
 
   // Deploy is not offered here: a human reviews the factory PR (opened by the
-  // workflow right after this script) and merges to main; Vercel auto-deploys main.
+  // workflow right after this script) and merges to develop (Vercel deploys develop to
+  // develop.clyintel); develop is promoted to main for production.
   await postSlack(
     channel,
     `🔎 Factory reviewer verdict: ${record.review_verdict} (full review stays in the workflow logs).\n\n${stillFailing ? "❌ Tests did not pass (or no test report) — fix before merging. " : record.review_verdict === "APPROVE" ? "✅ Build + test + review complete (self-reported; a human still reviews the PR). " : "⚠️ Tests passed but the factory reviewer did not approve — review carefully. "}` +
       `A pull request for branch \`${process.env.BRANCH ?? "(unknown)"}\` is being opened for human review; ` +
-      `merging it to main deploys via Vercel.\n` +
+      `merging it to develop deploys to dev (develop.clyintel); promote develop to main for production.\n` +
       `📋 Logged: *${record.plan_title}* — tests ${record.test_result}, review ${record.review_verdict}.`
   );
 }
