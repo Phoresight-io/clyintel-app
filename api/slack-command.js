@@ -6,11 +6,17 @@ import crypto from "node:crypto";
 // Slack sends x-www-form-urlencoded; we need the RAW body to verify the signature.
 export const config = { api: { bodyParser: false } };
 
+// Slash-command bodies are tiny; refuse anything big, and don't hang on a bad stream.
+const MAX_BODY_BYTES = 100_000;
 const readRaw = (req) =>
-  new Promise((resolve) => {
+  new Promise((resolve, reject) => {
     let data = "";
-    req.on("data", (c) => (data += c));
+    req.on("data", (c) => {
+      data += c;
+      if (data.length > MAX_BODY_BYTES) reject(new Error("body too large"));
+    });
     req.on("end", () => resolve(data));
+    req.on("error", reject);
   });
 
 function verifySlack(raw, headers) {
@@ -44,8 +50,18 @@ const ephemeral = (res, text) => res.status(200).json({ response_type: "ephemera
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
-  const raw = await readRaw(req);
+  let raw;
+  try {
+    raw = await readRaw(req);
+  } catch {
+    return res.status(413).send("bad request body");
+  }
   if (!verifySlack(raw, req.headers)) return res.status(401).send("bad signature");
+
+  // Slack retries a command it didn't get a timely answer to (with this header). The
+  // original attempt already started the run, so a retry must not start a second paid
+  // run, or push a different user's queued run out of the concurrency group.
+  if (req.headers["x-slack-retry-num"]) return res.status(200).end();
 
   const params = new URLSearchParams(raw);
   const brief = (params.get("text") || "").trim(); // e.g. "add invoice reminder"
