@@ -105,6 +105,28 @@ const CODER_PROTECTED = new RegExp(
   "i" // case-insensitive: a case-variant path lands in the real directory on macOS/Windows checkouts
 );
 
+// Best-effort rule for the coder's and tester's Bash: no force-adding ignored files and nothing
+// under .factory/ staged. .factory/ holds the plan, notes and test report (ignored by
+// .gitignore on purpose); only the workflow itself commits the run record. A prior run force-added
+// .factory/plan.md and publish refused the whole push. Like every Bash rule this stops honest
+// mistakes only: a variable, `sh -c` or a script can still do it, and publish is the real check.
+export function stagingViolation(command) {
+  if (typeof command !== "string") return null;
+  for (const seg of command.split(/;|&&|\|\||\||\n/)) {
+    const t = seg.trim().split(/\s+/);
+    const g = t.indexOf("git");
+    if (g === -1) continue;
+    let i = g + 1;
+    while (i < t.length && t[i].startsWith("-")) i += t[i] === "-c" || t[i] === "-C" ? 2 : 1; // global options
+    const sub = t[i];
+    if (!["add", "stage", "update-index"].includes(sub)) continue; // commit is not checked: a message may mention .factory/
+    const rest = t.slice(i + 1);
+    if (sub === "add" && rest.some((a) => a === "--force" || /^-[A-Za-z]*f[A-Za-z]*$/.test(a))) return "force-add";
+    if (rest.some((a) => /(^|[\/=])\.factory(\/|$)/.test(a))) return ".factory";
+  }
+  return null;
+}
+
 const deny = (reason) => ({
   hookSpecificOutput: {
     hookEventName: "PreToolUse",
@@ -246,6 +268,17 @@ export function decide(input, repoRoot) {
     }
   }
 
+  if ((agentType === "coder" || agentType === "tester") && tool === "Bash") {
+    const v = stagingViolation(args.command);
+    if (v) {
+      return deny(
+        `${agentType} may not ${v === "force-add" ? "force-add ignored files (git add -f / --force)" : "stage or commit anything under .factory/"}: ` +
+          `.factory/ files (plan, build notes, test report) are never committed by agents (the workflow commits the run record itself), ` +
+          `and ignored files stay ignored. Stage the files you changed by explicit path, without -f.`
+      );
+    }
+  }
+
   if (agentType === "reviewer" && tool === "Bash" && !isReadOnlyGit(args.command)) {
     return deny(GIT_HINT);
   }
@@ -256,13 +289,18 @@ export function decide(input, repoRoot) {
 // Hook callback for query() options.hooks.PreToolUse. Fails CLOSED: if the policy
 // code itself throws, the tool call is denied. `onCall` lets the orchestrator
 // verify the hook really fired (so enforcement can't silently be absent).
-export function makeGuardHook(repoRoot, onCall = () => {}) {
+export function makeGuardHook(repoRoot, onCall = () => {}, onDecision = () => {}) {
   return async (input) => {
     onCall();
+    let out;
     try {
-      return decide(input, repoRoot);
+      out = decide(input, repoRoot);
     } catch (err) {
-      return deny(`role guard error (failing closed): ${err?.message ?? err}`);
+      out = deny(`role guard error (failing closed): ${err?.message ?? err}`);
     }
+    try {
+      onDecision(input, out); // logging only; must never change the decision
+    } catch {}
+    return out;
   };
 }

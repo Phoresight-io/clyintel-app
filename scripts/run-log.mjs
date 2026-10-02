@@ -40,7 +40,7 @@ export function reviewVerdict(summary) {
 
 // Build the record and append it. Returns the record so the caller can also
 // push it to Slack / a Sheet if desired.
-export function writeRunLog({ brief, reviewSummary }) {
+export function writeRunLog({ brief, reviewSummary, usage = {} }) {
   const record = {
     ts: new Date().toISOString(),
     run_id: process.env.GITHUB_RUN_ID || "local",
@@ -55,6 +55,12 @@ export function writeRunLog({ brief, reviewSummary }) {
     test_result: testResult(),
     review_verdict: reviewVerdict(reviewSummary),
     repo: process.env.GITHUB_REPOSITORY || "Phoresight-io/clyintel-app",
+    // From the SDK result messages, summed over the orchestrator's query() calls. num_turns counts the
+    // main (delegating) session's model turns only; total_cost_usd covers subagents too. An estimate,
+    // not a billing statement. guard_denials: tool calls the role guard refused.
+    num_turns: Number(usage.turns) || 0,
+    total_cost_usd: Math.round((Number(usage.cost) || 0) * 10000) / 10000,
+    guard_denials: Number(usage.denials) || 0,
   };
 
   try {
