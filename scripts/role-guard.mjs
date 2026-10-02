@@ -83,6 +83,8 @@ const CODER_PROTECTED = new RegExp(
     "(^|/)vercel\\.json$",
     "(^|/)next\\.config\\.[cm]?[jt]s$",
     "^(clyintel/)?schema/",
+    "(^|/)\\.ai/", // product constitution, schema detail, Stripe IDs, specs
+    "(^|/)\\.mcp\\.json$", // registers MCP servers for Claude sessions
   ].join("|")
 );
 
@@ -201,7 +203,7 @@ export function decide(input, repoRoot) {
     if (rel == null || CODER_PROTECTED.test(rel)) {
       return deny(
         `coder may not ${tool} factory/CI/git files (.claude/, .github/, scripts/, .git/, .gitignore, .factory/runs/), ` +
-          `the tenant-isolation test, vercel.json, next.config.*, schema/ ` +
+          `the tenant-isolation test, vercel.json, next.config.*, schema/, .ai/, .mcp.json ` +
           `or paths outside the repo. Refusing "${args.file_path}".`
       );
     }

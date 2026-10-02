@@ -222,6 +222,10 @@ test("publish: commits that touch protected paths are refused, and nothing is pu
     "next.config": ({ put }) => put("clyintel/next.config.ts", "export default {}"),
     "schema migration": ({ put }) => put("clyintel/schema/099_new.sql", "alter table x;"),
     "root schema dir": ({ put }) => put("schema/099_new.sql", "alter table x;"),
+    "product context .ai/": ({ put }) => put(".ai/specs/new.md", "steer"),
+    "nested .ai/": ({ put }) => put("clyintel/.ai/context.md", "steer"),
+    "root .mcp.json": ({ put }) => put(".mcp.json", "{}"),
+    "nested .mcp.json": ({ put }) => put("clyintel/.mcp.json", "{}"),
     "delete a protected file": ({ git }) => git("rm", "-q", ".claude/agents/reviewer.md"),
     "rename out of a protected dir": ({ git, put }) => { put("clyintel/moved.md", "reviewer"); git("rm", "-q", ".claude/agents/reviewer.md"); },
   };
@@ -263,6 +267,10 @@ test("publish: dependency and middleware changes are allowed but flagged in the 
       put("clyintel/package.json", "{}");
       put("clyintel/package-lock.json", "{}");
       put("clyintel/middleware.ts", "export {}");
+      put("clyintel/.npmrc", "x");
+      put("clyintel/.husky/pre-commit", "x");
+      put("clyintel/.vscode/tasks.json", "{}");
+      put("clyintel/lib/.gitignore", "x");
       put("clyintel/app/page.tsx", "page");
       put("clyintel/lib/we`ird ```name.ts", "x"); // not sensitive; just proves odd names don't break anything
     },
@@ -272,7 +280,7 @@ test("publish: dependency and middleware changes are allowed but flagged in the 
     assert.ok(remoteHas(w, "refs/heads/factory/run-1"));
     const body = ghArgs(w)[ghArgs(w).indexOf("--body") + 1];
     assert.match(body, /Touches sensitive files/);
-    for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/middleware.ts"]) assert.ok(body.includes(f), f);
+    for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/middleware.ts", "clyintel/.npmrc", "clyintel/.husky/pre-commit", "clyintel/.vscode/tasks.json", "clyintel/lib/.gitignore"]) assert.ok(body.includes(f), f);
     assert.ok(!body.includes("app/page.tsx"), "ordinary files must not be listed as sensitive");
   } finally { cleanup(w); }
 });
@@ -345,9 +353,12 @@ test("notify-failure: fixed message, only with a token and channel, never the br
   assert.match(pub.text, /actions\/runs\/1/);
   assert.doesNotMatch(pub.text, /secret brief|scripts\/x/);
   assert.match(run({ SLACK_BOT_TOKEN: "x", SLACK_CHANNEL: "C1", PIPELINE_RESULT: "failure" }).text, /agent job/);
+  assert.match(run({ SLACK_BOT_TOKEN: "x", SLACK_CHANNEL: "C1", PIPELINE_RESULT: "skipped" }).text, /switched off.*D3_FACTORY_ENABLED/);
 });
 
 test("workflow: notify-failure runs on either job failing and holds no permissions", () => {
-  assert.match(WORKFLOW, /notify-failure:\n\s+needs: \[pipeline, publish\]\n\s+if: \$\{\{ always\(\) && \(needs\.pipeline\.result == 'failure' \|\| needs\.publish\.result == 'failure'\) \}\}/);
+  assert.match(WORKFLOW, /notify-failure:\n\s+needs: \[pipeline, publish\]\n\s+if: \$\{\{ always\(\) && \(needs\.pipeline\.result == 'failure' \|\| needs\.publish\.result == 'failure' \|\| needs\.pipeline\.result == 'skipped'\) \}\}/);
   assert.match(WORKFLOW, /notify-failure:[\s\S]*?permissions: \{\}/);
+  // kill switch: the agent job only runs when the repo variable is exactly 'true'
+  assert.match(WORKFLOW, /\n  pipeline:\n\s+(#.*\n\s+)*if: \$\{\{ vars\.D3_FACTORY_ENABLED == 'true' \}\}/);
 });

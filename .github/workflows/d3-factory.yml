@@ -22,6 +22,13 @@ on:
 # config or scripts.
 jobs:
   pipeline:
+    # KILL SWITCH: merging this workflow does not arm it. It runs only when the repository
+    # variable D3_FACTORY_ENABLED is exactly "true" (Settings -> Secrets and variables ->
+    # Actions -> Variables). Set it only after the Vercel preview question is settled:
+    # pushing factory/run-* makes Vercel build a preview of unreviewed agent code with the
+    # Preview environment's variables. With it unset, a run is skipped (publish is skipped
+    # too, as it needs this job) and notify-failure tells Slack so.
+    if: ${{ vars.D3_FACTORY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     # A stuck run must not burn API spend for GitHub's 6h default, and /d3 calls
     # don't run in parallel. Note this is not a FIFO queue: GitHub keeps at most ONE
@@ -141,8 +148,11 @@ jobs:
           # Also protected: the tenant-isolation test (weakening it would ship with a
           # "Tests: PASS" claim), and the build/deploy/data surface that a human must own:
           # vercel.json (it defines the every-minute QBO worker and settlement crons),
-          # next.config.*, and schema/ (SQL migrations, which can include RLS policies).
-          PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)tenant-isolation[^/]*$|(^|/)vercel\.json$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/'
+          # next.config.*, and schema/ (SQL migrations, which can include RLS policies). And
+          # .ai/ (the product constitution, schema detail, Stripe IDs and specs that
+          # clyintel/CLAUDE.md tells every agent to read) and .mcp.json (registers MCP servers
+          # for Claude sessions): changing either rewrites the rules agents work under.
+          PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)tenant-isolation[^/]*$|(^|/)vercel\.json$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/|(^|/)\.ai/|(^|/)\.mcp\.json$'
           CHANGED_FILES() { git diff --name-only -z --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH"; }
           BAD="$(CHANGED_FILES | { grep -zE "$PROTECTED" || true; } | tr '\0' '\n')"
           if [ -n "$BAD" ]; then
@@ -159,11 +169,11 @@ jobs:
           # because a missed detail here costs the most: dependencies and the auth/tenant
           # middleware. Names come from the agent, so reduce them to a safe character set
           # (no backticks, so they cannot break out of the code fence) and cap the list.
-          SENSITIVE='(^|/)(package(-lock)?\.json|middleware\.[cm]?[jt]s)$'
+          SENSITIVE='(^|/)(package(-lock)?\.json|middleware\.[cm]?[jt]s|\.npmrc|\.gitignore)$|(^|/)(\.husky|\.vscode)/'
           WARN_FILES="$(CHANGED_FILES | { grep -zE "$SENSITIVE" || true; } | tr '\0' '\n' | tr -c 'A-Za-z0-9_./+@\n-' '?' | head -n 10)"
           WARN_NOTE=""
           if [ -n "$WARN_FILES" ]; then
-            WARN_NOTE="$(printf '⚠️ Touches sensitive files (dependencies / auth middleware). Review these carefully:\n\n```\n%s\n```' "$WARN_FILES")"
+            WARN_NOTE="$(printf '⚠️ Touches sensitive files (dependencies, auth middleware, install/editor/hook config, nested .gitignore). Review these carefully:\n\n```\n%s\n```' "$WARN_FILES")"
           fi
           # Show the run's self-reported outcome on the PR, but NEVER trust it: the log
           # is written inside the agent job, so a prompt-injected agent could claim
@@ -211,7 +221,7 @@ jobs:
   # failed. Fixed message only: it never includes the brief or the offending paths.
   notify-failure:
     needs: [pipeline, publish]
-    if: ${{ always() && (needs.pipeline.result == 'failure' || needs.publish.result == 'failure') }}
+    if: ${{ always() && (needs.pipeline.result == 'failure' || needs.publish.result == 'failure' || needs.pipeline.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
@@ -227,11 +237,14 @@ jobs:
             echo "No Slack token/channel configured; nothing to notify."
             exit 0
           fi
-          WHERE="the agent job"
-          if [ "$PIPELINE_RESULT" = "success" ]; then WHERE="publishing (the push may have been refused, so no PR was opened)"; fi
+          if [ "$PIPELINE_RESULT" = "skipped" ]; then
+            MSG="⏸️ D3 Factory is switched off (the repository variable D3_FACTORY_ENABLED is not 'true'), so nothing ran."
+          elif [ "$PIPELINE_RESULT" = "success" ]; then
+            MSG="❌ D3 Factory run failed while publishing (the push may have been refused, so no PR was opened). See $RUN_URL"
+          else
+            MSG="❌ D3 Factory run failed in the agent job. See $RUN_URL"
+          fi
           curl -s -X POST https://slack.com/api/chat.postMessage \
             -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
             -H "Content-Type: application/json; charset=utf-8" \
-            -d "$(jq -n --arg c "$SLACK_CHANNEL" \
-                   --arg t "❌ D3 Factory run failed in $WHERE. See $RUN_URL" \
-                   '{channel:$c, text:$t}')" || true
+            -d "$(jq -n --arg c "$SLACK_CHANNEL" --arg t "$MSG" '{channel:$c, text:$t}')" || true

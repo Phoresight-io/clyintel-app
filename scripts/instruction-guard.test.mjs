@@ -75,6 +75,13 @@ test("new settings / nested CLAUDE.md / deleted agent file are flagged", () => {
   assert.deepEqual(check((d) => rmSync(join(d, ".claude/agents/reviewer.md"))), [".claude/agents/reviewer.md"]);
 });
 
+test("product context (.ai/) and .mcp.json are watched too", () => {
+  assert.deepEqual(check((d) => put(d, ".ai/constitution.md", "steer")), [".ai/constitution.md"]);
+  assert.deepEqual(check((d) => put(d, "clyintel/.ai/specs/s.md", "steer")), ["clyintel/.ai/specs/s.md"]);
+  assert.deepEqual(check((d) => put(d, ".mcp.json", '{"mcpServers":{}}')), [".mcp.json"]);
+  assert.deepEqual(check((d) => put(d, "clyintel/.mcp.json", "{}")), ["clyintel/.mcp.json"]);
+});
+
 test("hiding a file from git does not hide it from the check", () => {
   assert.deepEqual(
     check((d) => {

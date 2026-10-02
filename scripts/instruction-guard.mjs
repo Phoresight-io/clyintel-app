@@ -17,15 +17,18 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { join, relative, sep } from "node:path";
 
-// Watched: any CLAUDE.md / CLAUDE.local.md at any depth (Claude Code loads nested
-// ones lazily) and everything under any .claude/ directory.
+// Watched: any CLAUDE.md / CLAUDE.local.md / .mcp.json at any depth (Claude Code loads
+// nested CLAUDE.md lazily) and everything under any .claude/ or .ai/ directory.
 // Skipped by that walk: .git (not instructions) and node_modules. Skipping the
 // general case is a trade-off: an agent-run `npm ci` can create 100k+ files that we'd
 // re-hash on every run(), and a CLAUDE.md there is only loaded if an agent reads files
 // in that exact directory. The one node_modules that matters, scripts/node_modules
 // (the code that runs the agents), is covered in full by PINNED_TREES below.
 const SKIP_DIRS = new Set([".git", "node_modules"]);
-const isWatchedFile = (name) => name === "CLAUDE.md" || name === "CLAUDE.local.md";
+const isWatchedFile = (name) => name === "CLAUDE.md" || name === "CLAUDE.local.md" || name === ".mcp.json";
+// Directories whose whole contents steer sessions: .claude/ (settings, agents) and .ai/
+// (the product constitution, schema detail, Stripe IDs and specs that CLAUDE.md points agents at).
+const isSteeringDir = (name) => name === ".claude" || name === ".ai";
 
 // Trees that must stay byte-identical for the whole run, hashed in full. The agent
 // sessions are started from the CLI binary and JS inside scripts/node_modules, so a
@@ -60,11 +63,11 @@ export function snapshot(root, trees = PINNED_TREES) {
     for (const ent of readdirSync(dir, { withFileTypes: true })) {
       if (ent.isDirectory()) {
         if (SKIP_DIRS.has(ent.name)) continue;
-        walk(join(dir, ent.name), inClaude || ent.name === ".claude");
+        walk(join(dir, ent.name), inClaude || isSteeringDir(ent.name));
         continue;
       }
       // A symlink named .claude counts as watched too (it would redirect settings).
-      if (!(inClaude || ent.name === ".claude" || isWatchedFile(ent.name))) continue;
+      if (!(inClaude || isSteeringDir(ent.name) || isWatchedFile(ent.name))) continue;
       const full = join(dir, ent.name);
       out.set(relative(root, full).split(sep).join("/"), hashEntry(full));
     }
