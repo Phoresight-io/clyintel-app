@@ -147,9 +147,14 @@ jobs:
           BAD="$(CHANGED_FILES | { grep -zE "$PROTECTED" || true; } | tr '\0' '\n')"
           if [ -n "$BAD" ]; then
             echo "Factory commits touch protected paths; refusing to push:" >&2
-            echo "$BAD" >&2
+            # Names come from the agent: indent them so none can start a line that the
+            # runner would read as a workflow command (::add-mask::, ::stop-commands::, ...).
+            printf '%s\n' "$BAD" | sed 's/^/    - /' >&2
             exit 1
           fi
+          echo "What this run will push (names indented, see note above):"
+          git diff --stat=120 --no-ext-diff --no-textconv --no-renames "$GITHUB_SHA" "refs/heads/$BRANCH" | sed 's/^/    /'
+          echo "Review that list for anything that looks like data or a credential."
           # Not blocked (features legitimately change them) but flagged loudly in the PR body,
           # because a missed detail here costs the most: dependencies and the auth/tenant
           # middleware. Names come from the agent, so reduce them to a safe character set
@@ -200,3 +205,33 @@ jobs:
                      --arg t "🔀 PR opened for review: $PR_URL (DRAFT; self-reported tests: $TEST_RESULT, reviewer: $VERDICT) — merge it to main to deploy (Vercel auto-deploys main)." \
                      '{channel:$c, text:$t}')" || true
           fi
+
+  # If either job fails (e.g. publish REFUSES a push because commits touch protected paths),
+  # the person who ran /d3 was already told "a pull request is being opened". Say that it
+  # failed. Fixed message only: it never includes the brief or the offending paths.
+  notify-failure:
+    needs: [pipeline, publish]
+    if: ${{ always() && (needs.pipeline.result == 'failure' || needs.publish.result == 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Tell Slack the run failed
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PIPELINE_RESULT: ${{ needs.pipeline.result }}
+        run: |
+          if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_CHANNEL" ]; then
+            echo "No Slack token/channel configured; nothing to notify."
+            exit 0
+          fi
+          WHERE="the agent job"
+          if [ "$PIPELINE_RESULT" = "success" ]; then WHERE="publishing (the push may have been refused, so no PR was opened)"; fi
+          curl -s -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "$(jq -n --arg c "$SLACK_CHANNEL" \
+                   --arg t "❌ D3 Factory run failed in $WHERE. See $RUN_URL" \
+                   '{channel:$c, text:$t}')" || true

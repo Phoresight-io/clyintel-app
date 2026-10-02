@@ -302,3 +302,52 @@ test("publish: no sensitive files means no warning section", () => {
     assert.doesNotMatch(ghArgs(w)[ghArgs(w).indexOf("--body") + 1], /Touches sensitive files/);
   } finally { cleanup(w); }
 });
+
+test("publish: a refusal logs only indented names (no line can look like a workflow command)", () => {
+  const w = world({ edit: ({ put }) => put("scripts/::add-mask::secret.mjs", "x") });
+  try {
+    let stderr = "";
+    try { publish(w); } catch (e) { stderr = String(e.stderr || e.message); }
+    assert.match(stderr, /refusing to push/);
+    assert.ok(stderr.split("\n").every((l) => !l.startsWith("::")), "a log line starts with ::");
+    assert.match(stderr, /^    - scripts\/::add-mask::secret\.mjs$/m);
+  } finally { cleanup(w); }
+});
+
+test("publish: logs what is about to be pushed, indented", () => {
+  const w = world({ edit: ({ put }) => put("clyintel/lib/charge.ts", "x") });
+  try {
+    const out = publish(w);
+    assert.match(out, /What this run will push/);
+    assert.match(out, /^    .*clyintel\/lib\/charge\.ts/m);
+  } finally { cleanup(w); }
+});
+
+test("notify-failure: fixed message, only with a token and channel, never the brief or paths", () => {
+  const run = (env) => {
+    const root = mkdtempSync(join(tmpdir(), "nf-"));
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "curl"), `#!/bin/bash\nfor a in "$@"; do case "$a" in \\{*) printf '%s' "$a" > "${root}/payload";; esac; done\n`);
+    chmodSync(join(bin, "curl"), 0o755);
+    try {
+      execFileSync("bash", ["-e", "-c", stepScript("Tell Slack the run failed", {})], {
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, RUN_URL: "https://github.com/x/y/actions/runs/1", ...env }, stdio: "pipe",
+      });
+      return existsSync(join(root, "payload")) ? JSON.parse(readFileSync(join(root, "payload"), "utf8")) : null;
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  };
+  assert.equal(run({ SLACK_BOT_TOKEN: "", SLACK_CHANNEL: "C1", PIPELINE_RESULT: "success" }), null);
+  assert.equal(run({ SLACK_BOT_TOKEN: "x", SLACK_CHANNEL: "", PIPELINE_RESULT: "success" }), null);
+  const pub = run({ SLACK_BOT_TOKEN: "x", SLACK_CHANNEL: "C1", PIPELINE_RESULT: "success", BRIEF: "secret brief", BAD: "scripts/x" });
+  assert.equal(pub.channel, "C1");
+  assert.match(pub.text, /publishing/);
+  assert.match(pub.text, /actions\/runs\/1/);
+  assert.doesNotMatch(pub.text, /secret brief|scripts\/x/);
+  assert.match(run({ SLACK_BOT_TOKEN: "x", SLACK_CHANNEL: "C1", PIPELINE_RESULT: "failure" }).text, /agent job/);
+});
+
+test("workflow: notify-failure runs on either job failing and holds no permissions", () => {
+  assert.match(WORKFLOW, /notify-failure:\n\s+needs: \[pipeline, publish\]\n\s+if: \$\{\{ always\(\) && \(needs\.pipeline\.result == 'failure' \|\| needs\.publish\.result == 'failure'\) \}\}/);
+  assert.match(WORKFLOW, /notify-failure:[\s\S]*?permissions: \{\}/);
+});
