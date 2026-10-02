@@ -16,3 +16,7 @@ tsconfig.tsbuildinfo
 # misc
 .DS_Store
 *.pem
+
+# D3 Factory: commit run log, ignore per-run artifacts
+.factory/*
+!.factory/runs/

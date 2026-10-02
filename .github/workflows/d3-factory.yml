@@ -1,0 +1,85 @@
+name: D3 Factory
+
+on:
+  # Primary trigger: Slack → webhook → repository_dispatch
+  repository_dispatch:
+    types: [d3-run, d3-deploy]
+  # Fallback for testing WITHOUT Slack: run manually from the Actions tab
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "stage (plan|build|run)"
+        required: true
+        default: "run"
+      brief:
+        description: "what to build"
+        required: true
+
+jobs:
+  pipeline:
+    if: github.event.action != 'd3-deploy'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # reviewer needs history for git diff main...HEAD
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Factory infra is self-contained in scripts/ with its own package.json,
+      # so the app's dependencies are never touched.
+      - name: Install factory dependencies
+        working-directory: scripts
+        run: npm install
+
+      - name: Create working branch
+        run: |
+          BR="factory/run-${{ github.run_id }}"
+          git checkout -b "$BR"
+          git config user.name "d3-factory"
+          git config user.email "factory@phoresight.io"
+          echo "BRANCH=$BR" >> "$GITHUB_ENV"
+
+      - name: Run pipeline (Planner → Coder → Tester → Reviewer)
+        working-directory: scripts
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          STAGE: ${{ github.event.client_payload.stage || inputs.stage }}
+          BRIEF: ${{ github.event.client_payload.brief || inputs.brief }}
+          SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
+          SLACK_USER: ${{ github.event.client_payload.user }}
+          RUN_LOG_SHEET_WEBHOOK: ${{ secrets.RUN_LOG_SHEET_WEBHOOK }}
+        run: node d3-orchestrator.mjs
+
+      - name: Commit run log + any factory artifacts meant to persist
+        run: |
+          git add -A
+          git commit -m "factory run ${{ github.run_id }}" || echo "nothing to commit"
+
+      - name: Open PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push -u origin "$BRANCH"
+          gh pr create --fill --head "$BRANCH" --base main || true
+
+  # Deploy is a SEPARATE job on a SEPARATE event. Only reached when a human types
+  # "/d3 approve" in Slack, which dispatches d3-deploy. The gate.
+  deploy:
+    if: github.event.action == 'd3-deploy'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          npm i -g vercel
+          vercel deploy --prod --token "$VERCEL_TOKEN" --yes
+          # (verify this matches your project's actual deploy command / rootDirectory)

@@ -1,0 +1,13 @@
+{
+  "name": "clyintel-d3-factory",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "D3 Factory — agent pipeline infrastructure for Clyintel (separate from the app).",
+  "scripts": {
+    "orchestrate": "node d3-orchestrator.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "latest"
+  }
+}
