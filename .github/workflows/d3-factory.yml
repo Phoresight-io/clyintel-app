@@ -184,15 +184,16 @@ jobs:
           echo "What this run will push (names indented, see note above):"
           git diff --stat=120 --no-ext-diff --no-textconv --no-renames "$GITHUB_SHA" "refs/heads/$BRANCH" | sed 's/^/    /'
           echo "Review that list for anything that looks like data or a credential."
-          # Not blocked (features legitimately change them) but flagged loudly in the PR body,
+          # Not blocked (features legitimately change them) but flagged loudly in the PR body (including
+          # billing/tenant-data code: CLAUDE.md rule 7 wants a human to confirm billing logic),
           # because a missed detail here costs the most: dependencies and the auth/tenant
           # middleware. Names come from the agent, so reduce them to a safe character set
           # (no backticks, so they cannot break out of the code fence) and cap the list.
-          SENSITIVE='(^|/)(package(-lock)?\.json|tsconfig[^/]*\.json|middleware\.[cm]?[jt]s|\.npmrc|\.gitignore)$|(^|/)(\.husky|\.vscode)/'
-          WARN_FILES="$(CHANGED_FILES | { grep -zE "$SENSITIVE" || true; } | tr '\0' '\n' | tr -c 'A-Za-z0-9_./+@\n-' '?' | head -n 10)"
+          SENSITIVE='(^|/)(package(-lock)?\.json|tsconfig[^/]*\.json|middleware\.[cm]?[jt]s|\.npmrc|\.gitignore)$|(^|/)(\.husky|\.vscode)/|^clyintel/lib/(settlement|revshare|ledgerSync|balanceEvents|recovery|qbo)/|^clyintel/lib/(stripe[^/]*|supabase[^/]*|crypto)\.ts$|^clyintel/app/api/(stripe|stripe-webhook|settlement|webhooks|qbo)/'
+          WARN_FILES="$(CHANGED_FILES | { grep -zE "$SENSITIVE" || true; } | tr '\0' '\n' | tr -c 'A-Za-z0-9_./+@\n-' '?' | head -n 25)"
           WARN_NOTE=""
           if [ -n "$WARN_FILES" ]; then
-            WARN_NOTE="$(printf '⚠️ Touches sensitive files (dependencies, tsconfig paths, auth middleware, install/editor/hook config, nested .gitignore). Review these carefully:\n\n```\n%s\n```' "$WARN_FILES")"
+            WARN_NOTE="$(printf '⚠️ Touches sensitive files (dependencies, tsconfig paths, auth middleware, billing/settlement/Stripe/QBO code, Supabase clients, crypto, install/editor/hook config, nested .gitignore). CLAUDE.md rule 7: billing or payment logic needs a human to confirm it. Review these carefully:\n\n```\n%s\n```' "$WARN_FILES")"
           fi
           # Weakened tests are easy to miss in a big diff: list EXISTING test files that were
           # modified or deleted (new ones are not flagged). Same sanitising as above.

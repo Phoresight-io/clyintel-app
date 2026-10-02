@@ -305,6 +305,9 @@ test("publish: dependency and middleware changes are allowed but flagged in the 
       put("clyintel/package-lock.json", "{}");
       put("clyintel/middleware.ts", "export {}");
       put("clyintel/tsconfig.json", "{}");
+      put("clyintel/lib/settlement/charge.ts", "x");
+      put("clyintel/lib/stripe.ts", "x");
+      put("clyintel/app/api/stripe-webhook/route.ts", "x");
       put("clyintel/.npmrc", "x");
       put("clyintel/.husky/pre-commit", "x");
       put("clyintel/.vscode/tasks.json", "{}");
@@ -318,7 +321,7 @@ test("publish: dependency and middleware changes are allowed but flagged in the 
     assert.ok(remoteHas(w, "refs/heads/factory/run-1"));
     const body = ghArgs(w)[ghArgs(w).indexOf("--body") + 1];
     assert.match(body, /Touches sensitive files/);
-    for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/middleware.ts", "clyintel/tsconfig.json", "clyintel/.npmrc", "clyintel/.husky/pre-commit", "clyintel/.vscode/tasks.json", "clyintel/lib/.gitignore"]) assert.ok(body.includes(f), f);
+    for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/middleware.ts", "clyintel/tsconfig.json", "clyintel/lib/settlement/charge.ts", "clyintel/lib/stripe.ts", "clyintel/app/api/stripe-webhook/route.ts", "clyintel/.npmrc", "clyintel/.husky/pre-commit", "clyintel/.vscode/tasks.json", "clyintel/lib/.gitignore"]) assert.ok(body.includes(f), f);
     assert.ok(!body.includes("app/page.tsx"), "ordinary files must not be listed as sensitive");
   } finally { cleanup(w); }
 });
