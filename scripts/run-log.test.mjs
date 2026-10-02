@@ -1,7 +1,7 @@
 // Run with: node --test scripts/run-log.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseTestResult } from "./run-log.mjs";
+import { parseTestResult, reviewVerdict } from "./run-log.mjs";
 
 test("parseTestResult: only an explicit result counts; last one wins; fails closed", () => {
   const cases = [
@@ -19,4 +19,13 @@ test("parseTestResult: only an explicit result counts; last one wins; fails clos
     ["Ran out of turns while writing tests", "unknown"],
   ];
   for (const [text, want] of cases) assert.equal(parseTestResult(text), want, JSON.stringify(text));
+});
+
+test("reviewVerdict: bold verdict line is read; 'no blockers' is not BLOCK", () => {
+  assert.equal(reviewVerdict("Looks fine.\n**VERDICT: APPROVE**"), "APPROVE");
+  assert.equal(reviewVerdict("notes\n__VERDICT: REQUEST CHANGES__\n"), "REQUEST CHANGES");
+  assert.equal(reviewVerdict("VERDICT: BLOCK"), "BLOCK");
+  assert.equal(reviewVerdict("No blockers; this is non-blocking. I would approve."), "APPROVE");
+  assert.equal(reviewVerdict("This must BLOCK the merge."), "BLOCK");
+  assert.equal(reviewVerdict(""), "unknown");
 });

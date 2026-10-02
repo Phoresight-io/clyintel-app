@@ -26,13 +26,13 @@ function testResult() {
   return parseTestResult(read(".factory/test-report.md"));
 }
 
-function reviewVerdict(summary) {
+export function reviewVerdict(summary) {
   const s = summary || "";
   // Prefer the explicit "VERDICT: ..." line the orchestrator asks the reviewer for
   // (last one wins); the loose keyword scan below is only a fallback.
-  const explicit = [...s.matchAll(/^\s*VERDICT:\s*(APPROVE|REQUEST CHANGES|BLOCK)\b/gim)].pop();
+  const explicit = [...s.matchAll(/^[\s*_]*VERDICT:[\s*_]*(APPROVE|REQUEST CHANGES|BLOCK)\b/gim)].pop();
   if (explicit) return explicit[1].toUpperCase();
-  if (/BLOCK/i.test(s)) return "BLOCK";
+  if (/\bBLOCK\b/i.test(s)) return "BLOCK";
   if (/REQUEST CHANGES/i.test(s)) return "REQUEST CHANGES";
   if (/APPROVE/i.test(s)) return "APPROVE";
   return "unknown";
