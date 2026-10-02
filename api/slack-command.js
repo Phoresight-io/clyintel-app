@@ -54,10 +54,6 @@ const allowedUsers = () =>
     .map((s) => s.trim())
     .filter(Boolean);
 
-// Slack mrkdwn: escape the three control characters so a brief can't render
-// <!channel>, <@U123> or links.
-const escapeSlack = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
 const ephemeral = (res, text) => res.status(200).json({ response_type: "ephemeral", text });
 
 export default async function handler(req, res) {
