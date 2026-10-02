@@ -57,3 +57,17 @@ test("tracer: start/finish lines, denial lines with the reason, write/shell trac
   ]);
   assert.equal(usage.denials, 2);
 });
+
+test("tracer: a subagent's FINISH line is logged once even if the stop hook fires repeatedly", () => {
+  const lines = [];
+  const tr = createTracer((m) => lines.push(m), { turns: 0, cost: 0, denials: 0 }, () => 0);
+  const planner = { agent_id: "p1", agent_type: "planner" };
+  tr.onSubagentStart(planner);
+  for (let i = 0; i < 4; i++) tr.onSubagentStop(planner);
+  tr.onSubagentStart({ agent_id: "p2", agent_type: "planner" }); // a later, different subagent still logs
+  tr.onSubagentStop({ agent_id: "p2", agent_type: "planner" });
+  assert.deepEqual(lines.filter((l) => l.includes("FINISH")), [
+    "subagent FINISH planner (p1) in 0.0s, 0 tool calls, 0 denied",
+    "subagent FINISH planner (p2) in 0.0s, 0 tool calls, 0 denied",
+  ]);
+});

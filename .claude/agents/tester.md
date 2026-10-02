@@ -32,11 +32,19 @@ plan — by writing and running tests, not by trusting the build notes.
    for the type check. Capture real results — never report a pass you didn't observe.
    **If you cannot run the suite** (dependencies missing, `vitest` or `tsc` not found,
    the command errors before any test runs, a config problem), the result is **FAIL**,
-   never PASS: write `## Result: FAIL`, say "could not run the suite" and quote the
+   never PASS: write `## Result: FAIL` and `## Failure reason: could not run the suite`, and quote the
    command and its error under Failures. Checking file contents by hand is not a
    substitute for running the suite, even for a docs-only change, and does not earn a
    PASS. Do not install dependencies yourself or work around a broken setup.
-5. If tests fail, do NOT fix the feature code to make them pass. Report the
+5. **Judge every criterion exactly as written in the plan.** Never re-interpret, relax or
+   "judge by intent" a criterion, even when the code is plainly doing the right thing. If a
+   criterion is unmet **because the plan itself is wrong** (a miscounted line number, a wrong
+   file name, a premise that is false in the repo), that is a **FAIL with reason `plan error`**:
+   write `## Result: FAIL` and `## Failure reason: plan error`, and under Failures quote the
+   criterion, what it says, and what is actually true. The orchestrator sends it to the Planner to
+   correct the plan and then runs you again against the corrected criteria. Do not edit the plan
+   (you can't) and do not mark it PASS yourself.
+6. If tests fail, do NOT fix the feature code to make them pass. Report the
    failure with enough detail for the Coder to fix on the next pass. Only fix a
    test that is itself wrong (and say so).
 
@@ -57,6 +65,7 @@ plan — by writing and running tests, not by trusting the build notes.
 ```
 # Test report: <plan title>
 ## Result: PASS | FAIL
+## Failure reason: plan error | test failure | could not run the suite   (only when FAIL; exactly one of these three)
 ## Coverage of acceptance criteria
 - [x]/[ ] <criterion> — <test name/file that covers it>
 ## Failures (if any)

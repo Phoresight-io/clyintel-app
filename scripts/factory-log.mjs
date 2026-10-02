@@ -39,6 +39,7 @@ export const money = (usd) => `$${(Number(usd) || 0).toFixed(4)}`;
 // { turns, cost, denials } accumulator. Nothing here can change an agent's permissions.
 export function createTracer(log, usage, now = () => Date.now()) {
   const stats = new Map(); // agent_id -> { type, started, calls, denied }
+  const finished = new Set(); // the stop hook can fire more than once per subagent; log the first only
   const statsFor = (input) => {
     if (!input?.agent_id) return null;
     if (!stats.has(input.agent_id)) stats.set(input.agent_id, { type: who(input), started: now(), calls: 0, denied: 0 });
@@ -64,6 +65,8 @@ export function createTracer(log, usage, now = () => Date.now()) {
       log(`subagent START ${who(input)} (${input?.agent_id})`);
     },
     onSubagentStop(input) {
+      if (finished.has(input?.agent_id)) return;
+      finished.add(input?.agent_id);
       const st = stats.get(input?.agent_id);
       const took = st ? ` in ${seconds(now() - st.started)}s, ${st.calls} tool calls, ${st.denied} denied` : "";
       log(`subagent FINISH ${who(input)} (${input?.agent_id})${took}`);
