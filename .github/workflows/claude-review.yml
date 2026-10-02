@@ -80,4 +80,4 @@ jobs:
             -H "Content-Type: application/json; charset=utf-8" \
             -d "$(jq -n --arg c "$SLACK_REVIEW_CHANNEL" \
                    --arg t "🔍 PR reviewed: $PR_TITLE — $PR_URL (see PR comments for the verdict)" \
-                   '{channel:$c, text:$t}')" || true
+                   '{channel:$c, text:($t | gsub("&";"&amp;") | gsub("<";"&lt;") | gsub(">";"&gt;"))}')" || true

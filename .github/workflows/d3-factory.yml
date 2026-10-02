@@ -73,7 +73,7 @@ jobs:
       - name: Commit run log + any factory artifacts meant to persist
         run: |
           git add -A
-          git commit -m "factory run ${{ github.run_id }}" || echo "nothing to commit"
+          git -c core.hooksPath=/dev/null commit -m "factory run ${{ github.run_id }}" || echo "nothing to commit"
 
       # Hand the commits to the publish job. The branch name comes from the
       # workflow expression, NOT from $BRANCH, which an agent could have rewritten
@@ -129,29 +129,29 @@ jobs:
             exit 1
           fi
           git fetch -q --no-tags "$BUNDLE" "refs/heads/$BRANCH:refs/heads/$BRANCH"
-          # Show the run's outcome on the PR itself, since the human merge is the
-          # only gate. This is read from the branch's run log (data only) and
-          # reduced to known values; anything unexpected becomes "unknown".
+          # Show the run's self-reported outcome on the PR, but NEVER trust it: the log
+          # is written inside the agent job, so a prompt-injected agent could claim
+          # PASS/APPROVE. Values are reduced to known words (anything else is
+          # "unknown") only to keep injection out of the PR text. Factory PRs are
+          # therefore ALWAYS drafts; a human marks one ready after reviewing the diff
+          # (and, until CI runs on factory PRs, after checking the app's CI by hand).
           LOGLINE="$(git show "refs/heads/$BRANCH:.factory/runs/log.jsonl" 2>/dev/null | tail -n 1 || true)"
           TEST_RESULT="$(printf %s "$LOGLINE" | jq -r '.test_result // "unknown"' 2>/dev/null || echo unknown)"
           VERDICT="$(printf %s "$LOGLINE" | jq -r '.review_verdict // "unknown"' 2>/dev/null || echo unknown)"
           case "$TEST_RESULT" in PASS|FAIL|none) ;; *) TEST_RESULT=unknown ;; esac
           case "$VERDICT" in APPROVE|"REQUEST CHANGES"|BLOCK) ;; *) VERDICT=unknown ;; esac
-          DRAFT=""
-          if [ "$TEST_RESULT" != "PASS" ] || [ "$VERDICT" != "APPROVE" ]; then DRAFT=1; fi
-          AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
-            push -u origin "$BRANCH"
           # No `|| true`: if PR creation fails, the run fails.
           PR_URL="$(gh pr create --repo "$GITHUB_REPOSITORY" \
-            --head "$BRANCH" --base main ${DRAFT:+--draft} \
+            --head "$BRANCH" --base main --draft \
             --title "Factory: $(printf %s "$BRIEF" | tr '\n' ' ' | cut -c1-70)" \
             --body "Opened by D3 Factory run ${{ github.run_id }}.
 
           Brief: ${BRIEF}
 
-          Tests: ${TEST_RESULT} | Factory reviewer verdict: ${VERDICT}${DRAFT:+
-          Opened as a DRAFT because tests did not pass or the reviewer did not approve.}
+          Self-reported by the factory run (UNVERIFIED, written by the same agents that made the change):
+          Tests: ${TEST_RESULT} | Factory reviewer verdict: ${VERDICT}
+
+          Opened as a DRAFT. Review the diff yourself and run the app's CI before marking it ready.
 
           Review the diff, then merge to main to deploy (Vercel auto-deploys main).")"
           echo "Opened $PR_URL"
@@ -161,6 +161,6 @@ jobs:
               -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
               -H "Content-Type: application/json; charset=utf-8" \
               -d "$(jq -n --arg c "$SLACK_CHANNEL" \
-                     --arg t "🔀 PR opened for review: $PR_URL (tests: $TEST_RESULT, reviewer: $VERDICT${DRAFT:+, opened as draft}) — merge it to main to deploy (Vercel auto-deploys main)." \
+                     --arg t "🔀 PR opened for review: $PR_URL (DRAFT; self-reported tests: $TEST_RESULT, reviewer: $VERDICT) — merge it to main to deploy (Vercel auto-deploys main)." \
                      '{channel:$c, text:$t}')" || true
           fi
