@@ -71,9 +71,10 @@ export default async function handler(req, res) {
   }
   if (!verifySlack(raw, req.headers)) return res.status(401).send("bad signature");
 
-  // Slack retries a command it didn't get a timely answer to (with this header). The
-  // original attempt already started the run, so a retry must not start a second paid
-  // run, or push a different user's queued run out of the concurrency group.
+  // Defensive: Slack documents retry headers for the Events API, not slash commands, so this
+  // may never fire. If a retry ever arrives with it, the original attempt already started the
+  // run, and a second paid run (or pushing another user's queued run out of the concurrency
+  // group) must not follow.
   if (req.headers["x-slack-retry-num"]) return res.status(200).end();
 
   const params = new URLSearchParams(raw);
@@ -120,8 +121,7 @@ export default async function handler(req, res) {
     return ephemeral(res, "⚠️ Couldn't reach GitHub to start the run. Try again.");
   }
 
-  return res.status(200).json({
-    response_type: "in_channel",
-    text: `🏭 D3 pipeline starting for <@${user}>: ${escapeSlack(brief)}`,
-  });
+  // Ephemeral and without the brief: it may name customers or invoices, and the orchestrator's
+  // own start message already posts it to the configured channel.
+  return ephemeral(res, "🏭 D3 pipeline starting. Progress will be posted in the channel.");
 }

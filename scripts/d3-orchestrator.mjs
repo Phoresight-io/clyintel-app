@@ -118,6 +118,14 @@ async function run(prompt) {
       // Explicit, so CLAUDE.md (schema + billing rules) is always loaded and never
       // depends on the SDK default; excludes user/local settings on the runner.
       settingSources: ["project"],
+      // The agents have Bash/WebSearch, so they get only what they need: not SLACK_BOT_TOKEN,
+      // RUN_LOG_SHEET_WEBHOOK or the GITHUB_* variables. (The Anthropic key itself must still
+      // reach them; use the dedicated spend-capped key.)
+      env: Object.fromEntries(
+        ["PATH", "HOME", "ANTHROPIC_API_KEY", "LANG", "TMPDIR", "CI", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"]
+          .filter((k) => process.env[k] !== undefined)
+          .map((k) => [k, process.env[k]])
+      ),
     },
   });
   let final = null;
