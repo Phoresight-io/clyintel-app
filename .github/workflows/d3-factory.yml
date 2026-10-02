@@ -13,6 +13,13 @@ on:
 
 # There is deliberately no deploy job. The deploy gate is: a human reviews the
 # factory PR and merges to main, and Vercel auto-deploys main (see CLAUDE.md).
+#
+# Two jobs on purpose. Every step in a job shares $GITHUB_ENV and $GITHUB_PATH, so
+# an agent with Bash (e.g. after a prompt injection) could poison PATH or BASH_ENV
+# for every later step in ITS job. So the job that runs agents has NO write token,
+# and the job that has one (publish) never executes anything the agents wrote: it
+# only receives their commits as a git bundle, which carries objects, not hooks,
+# config or scripts.
 jobs:
   pipeline:
     runs-on: ubuntu-latest
@@ -23,15 +30,11 @@ jobs:
       group: d3-factory
       cancel-in-progress: false
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read # no write token in the job that runs agents
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # reviewer needs history for git diff main...HEAD
-          # Don't leave the write-scoped GITHUB_TOKEN in .git/config where a
-          # prompt-injected agent could read it. The push step below supplies it
-          # explicitly, after the agents have finished.
           persist-credentials: false
 
       - uses: actions/setup-node@v4
@@ -70,32 +73,65 @@ jobs:
           git add -A
           git commit -m "factory run ${{ github.run_id }}" || echo "nothing to commit"
 
-      # KNOWN FOLLOW-UP: PRs opened with the default GITHUB_TOKEN do not trigger
-      # other workflows, so claude-review.yml and ci.yml will NOT run on factory PRs.
-      # Fixing that needs a PAT or GitHub App token here, plus the repo setting
-      # "Allow GitHub Actions to create and approve pull requests". Not wired yet.
-      # This step holds a write token, and the agents could have planted anything in
-      # the workspace (scripts, .git/hooks, .git/config). So it runs NO repo code and
-      # never lets the workspace repo's hooks/config execute with the token present:
-      # the branch is pushed from a fresh, empty repo that only receives the commits
-      # (objects) from the workspace, and Slack is posted with plain curl + jq.
-      - name: Open PR
+      # Hand the commits to the publish job. The branch name comes from the
+      # workflow expression, NOT from $BRANCH, which an agent could have rewritten
+      # via $GITHUB_ENV. The publish job re-validates the bundle regardless.
+      - name: Export commits as a git bundle
+        run: |
+          git bundle create "$RUNNER_TEMP/factory.bundle" "factory/run-${{ github.run_id }}" ^main
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: factory-bundle
+          path: ${{ runner.temp }}/factory.bundle
+          if-no-files-found: error
+          retention-days: 3
+
+  # KNOWN FOLLOW-UP: PRs opened with the default GITHUB_TOKEN do not trigger other
+  # workflows, so claude-review.yml and ci.yml will NOT run on factory PRs. Fixing
+  # that needs a PAT or GitHub App token here, plus the repo setting "Allow GitHub
+  # Actions to create and approve pull requests". Not wired yet.
+  publish:
+    needs: pipeline # skipped if the pipeline failed, so a failed run opens no PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Trusted checkout of the base commit only. Nothing the agents wrote is
+      # checked out or executed in this job.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: factory-bundle
+          path: ${{ runner.temp }}/bundle
+
+      - name: Push branch and open PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
           BRIEF: ${{ github.event.client_payload.brief || inputs.brief }}
+          BRANCH: factory/run-${{ github.run_id }}
         run: |
-          CLEAN="$(mktemp -d)"
-          git init -q "$CLEAN"
-          git -C "$CLEAN" fetch -q --no-tags "$GITHUB_WORKSPACE" "refs/heads/$BRANCH:refs/heads/$BRANCH"
-          git -C "$CLEAN" remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          BUNDLE="$RUNNER_TEMP/bundle/factory.bundle"
+          git bundle verify "$BUNDLE"
+          # The bundle is untrusted: accept exactly one ref, our branch.
+          HEADS="$(git bundle list-heads "$BUNDLE" | awk '{print $2}')"
+          if [ "$HEADS" != "refs/heads/$BRANCH" ]; then
+            echo "Unexpected refs in bundle: $HEADS" >&2
+            exit 1
+          fi
+          git fetch -q --no-tags "$BUNDLE" "refs/heads/$BRANCH:refs/heads/$BRANCH"
           AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          git -C "$CLEAN" -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
             push -u origin "$BRANCH"
-          # No `|| true`: if PR creation fails, the run fails. Explicit title/body
-          # (not --fill) so gh never reads the workspace repo; run from the clean dir.
-          PR_URL="$(cd "$CLEAN" && gh pr create --repo "$GITHUB_REPOSITORY" \
+          # No `|| true`: if PR creation fails, the run fails.
+          PR_URL="$(gh pr create --repo "$GITHUB_REPOSITORY" \
             --head "$BRANCH" --base main \
             --title "Factory: $(printf %s "$BRIEF" | tr '\n' ' ' | cut -c1-70)" \
             --body "Opened by D3 Factory run ${{ github.run_id }}.
