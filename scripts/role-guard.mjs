@@ -16,25 +16,47 @@ const MAIN_THREAD_TOOLS = new Set(["Agent", "Task", "Read"]);
 
 // Tools each subagent may use at all (mirrors the AgentDefinition `tools`).
 const ROLE_TOOLS = {
-  planner: new Set(["Read", "Grep", "Glob", "WebSearch"]),
+  planner: new Set(["Read", "Write", "Grep", "Glob", "WebSearch"]),
   coder: new Set(["Read", "Write", "Edit", "Grep", "Glob", "Bash"]),
   tester: new Set(["Read", "Write", "Edit", "Grep", "Glob", "Bash"]),
   reviewer: new Set(["Read", "Grep", "Glob", "Bash"]),
 };
 
-// Tester may only create/edit test files and factory artifacts.
-const TEST_PATH = [
-  /(^|\/)(__tests__|tests?)\//, // test/, tests/, __tests__/ anywhere in the path
-  /\.(test|spec)\.[cm]?[jt]sx?$/, // foo.test.ts, foo.spec.tsx, ...
-  /^\.factory\//, // .factory/test-report.md etc.
-];
+// Planner may write exactly its own artifact.
+const PLANNER_FILE = /^\.factory\/plan\.md$/;
 
-// Reviewer's Bash is limited to read-only git. Arguments are restricted to a safe
-// character set (no spaces inside quotes, no shell metacharacters, no redirects).
-const READONLY_GIT =
-  /^git (diff|log|show|status|rev-parse|merge-base|ls-files|rev-list|blame)( [A-Za-z0-9_.\/:@~^=,%+-]+)*$/;
-// Flags that make otherwise read-only git commands write files or run programs.
-const UNSAFE_GIT_FLAG = /(^| )(--output|--ext-diff|--textconv|--exec|-c|-C|--git-dir|--work-tree)(=| |$)/;
+// Tester may only create/edit test files and its own report. A directory merely
+// NAMED test/tests is not enough (app/api/test/route.ts is a live route, and
+// lib/tests/x.ts is an importable module), so: a test FILENAME anywhere, or any
+// file under a TOP-LEVEL test directory (repo root or clyintel/).
+const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/;
+const TEST_DIR = /^(clyintel\/)?tests?\//;
+const TESTER_REPORT = /^\.factory\/test-report\.md$/;
+
+// Reviewer's Bash is limited to read-only git in ONE canonical form. The prefix
+// disables things a coder could have planted in .git/config to run code when the
+// reviewer runs git (fsmonitor, signature verification via gpg.program, pagers).
+// diff/log/show must also pass --no-ext-diff --no-textconv, which disable external
+// diff drivers and textconv filters set via .gitattributes + config.
+const GIT_PREFIX = "git --no-pager -c core.fsmonitor=false -c log.showSignature=false ";
+const GIT_SUBS = new Set(["diff", "log", "show", "status", "rev-parse", "merge-base", "ls-files", "rev-list"]);
+const GIT_DRIVER_SUBS = new Set(["diff", "log", "show"]);
+// Exact-match flags only. git accepts unambiguous prefixes of long options (so
+// --outp= is --output), which makes a denylist unsafe; anything not listed here
+// is rejected.
+const SAFE_FLAGS = new Set([
+  "--no-ext-diff", "--no-textconv", "--stat", "--numstat", "--shortstat",
+  "--name-only", "--name-status", "--oneline", "--no-color", "--cached",
+  "--staged", "--no-merges", "--first-parent", "--count", "--abbrev-commit",
+  "--short", "-s", "--porcelain", "-p", "--patch", "-n",
+]);
+const SAFE_FLAG_PATTERNS = [
+  /^-n\d+$/, /^-U\d+$/, /^--max-count=\d+$/,
+  /^--(format|pretty)=(oneline|short|medium|full|fuller)$/,
+];
+// Refs and paths: a restricted character set (no quotes, spaces, shell
+// metacharacters or redirects) and never a leading dash.
+const SAFE_ARG = /^[A-Za-z0-9_.\/:@~^,%+][A-Za-z0-9_.\/:@~^=,%+-]*$/;
 
 const deny = (reason) => ({
   hookSpecificOutput: {
@@ -67,14 +89,41 @@ export function repoRelative(filePath, root) {
 }
 
 export function isTestPath(relPath) {
-  return relPath != null && TEST_PATH.some((re) => re.test(relPath));
+  return relPath != null && (TEST_FILE.test(relPath) || TEST_DIR.test(relPath) || TESTER_REPORT.test(relPath));
 }
 
 export function isReadOnlyGit(command) {
   if (typeof command !== "string") return false;
   const c = command.trim();
-  return READONLY_GIT.test(c) && !UNSAFE_GIT_FLAG.test(c);
+  if (!c.startsWith(GIT_PREFIX)) return false;
+  const [sub, ...args] = c.slice(GIT_PREFIX.length).split(" ");
+  if (!GIT_SUBS.has(sub)) return false;
+
+  let noExtDiff = false;
+  let noTextconv = false;
+  let afterDashDash = false;
+  for (const a of args) {
+    if (a === "") return false; // stray double space
+    if (afterDashDash) {
+      if (!SAFE_ARG.test(a)) return false;
+    } else if (a === "--") {
+      afterDashDash = true;
+    } else if (a.startsWith("-")) {
+      if (!SAFE_FLAGS.has(a) && !SAFE_FLAG_PATTERNS.some((re) => re.test(a))) return false;
+      if (a === "--no-ext-diff") noExtDiff = true;
+      if (a === "--no-textconv") noTextconv = true;
+    } else if (!SAFE_ARG.test(a)) {
+      return false;
+    }
+  }
+  if (GIT_DRIVER_SUBS.has(sub) && !(noExtDiff && noTextconv)) return false;
+  return true;
 }
+
+const GIT_HINT =
+  `reviewer Bash is limited to read-only git, written exactly as: ` +
+  `${GIT_PREFIX}<diff|log|show|status|rev-parse|merge-base|ls-files|rev-list> [safe flags] [refs] [-- paths], ` +
+  `and diff/log/show must also pass --no-ext-diff --no-textconv.`;
 
 // Decide one tool call. `input` is a PreToolUse hook input. Returns a hook output
 // object ({} = no objection) — deny wins over any allow rule.
@@ -101,18 +150,26 @@ export function decide(input, repoRoot) {
     return deny(`${agentType} may not use ${tool}.`);
   }
 
+  if (agentType === "planner" && tool === "Write") {
+    const rel = repoRelative(args.file_path, repoRoot);
+    if (rel == null || !PLANNER_FILE.test(rel)) {
+      return deny(`planner may only write .factory/plan.md. Refusing Write on "${args.file_path}".`);
+    }
+  }
+
   if (agentType === "tester" && (tool === "Write" || tool === "Edit")) {
     const rel = repoRelative(args.file_path, repoRoot);
     if (!isTestPath(rel)) {
       return deny(
-        `tester may only write test files (tests/, test/, __tests__/, *.test.*, *.spec.*) or .factory/. ` +
-          `Refusing ${tool} on "${args.file_path}". Report feature-code problems instead of editing them.`
+        `tester may only write test files (*.test.* / *.spec.*, or files under a top-level test/ or tests/ ` +
+          `directory) and .factory/test-report.md. Refusing ${tool} on "${args.file_path}". ` +
+          `Report feature-code problems instead of editing them.`
       );
     }
   }
 
   if (agentType === "reviewer" && tool === "Bash" && !isReadOnlyGit(args.command)) {
-    return deny("reviewer Bash is limited to read-only git (diff, log, show, status, rev-parse, merge-base, ls-files, rev-list, blame).");
+    return deny(GIT_HINT);
   }
 
   return {};

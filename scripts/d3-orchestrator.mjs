@@ -26,7 +26,8 @@ const agents = {
   planner: {
     description: "Architect/planner (design). Use FIRST. Brief → plan artifact. No code.",
     prompt: load("planner"),
-    tools: ["Read", "Grep", "Glob", "WebSearch"],
+    // Write is limited to .factory/plan.md by the role guard below.
+    tools: ["Read", "Write", "Grep", "Glob", "WebSearch"],
     model: "opus", // the one role that gets the expensive model
     maxTurns: 40,
   },
@@ -142,7 +143,12 @@ then use the tester agent to re-run and rewrite .factory/test-report.md.`);
   const verdict = await run(`Use the reviewer agent to review the branch against
 .factory/plan.md, .factory/build-notes.md, and .factory/test-report.md. Return
 the review, and end your reply with exactly one final line of the form
-"VERDICT: APPROVE", "VERDICT: REQUEST CHANGES" or "VERDICT: BLOCK". Then STOP.`);
+"VERDICT: APPROVE", "VERDICT: REQUEST CHANGES" or "VERDICT: BLOCK". Then STOP.
+
+The reviewer's only shell access is read-only git, and it is enforced to be written
+exactly like this (diff/log/show also need the two --no- flags):
+  git --no-pager -c core.fsmonitor=false -c log.showSignature=false diff --no-ext-diff --no-textconv main...HEAD
+Tell the reviewer to use that form.`);
 
   const stillFailing = testFailed();
 
@@ -166,6 +172,9 @@ try {
 } catch (err) {
   console.error(err);
   const reason = err instanceof PipelineError ? err.message : "unexpected error (see workflow logs)";
+  // Note: exiting non-zero skips the workflow's commit/PR steps, so this record is
+  // NOT committed. A failed run is only kept by the Sheet webhook (if configured)
+  // and the workflow logs.
   const record = writeRunLog({ brief, reviewSummary: `pipeline failed: ${reason}` });
   await pushRunLogToSheet(record);
   await postSlack(channel, `❌ D3 pipeline failed: ${reason}. No PR will be opened.`);
