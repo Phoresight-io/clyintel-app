@@ -1,5 +1,6 @@
 -- Migration: add_invoices_outreach_started_at
--- APPLIED to Test (clyintel-dev) 2026-10-01 (out-of-band, version 20261001025250); NOT yet applied to Prod.
+-- APPLIED to Test (clyintel-dev) 2026-10-01 (out-of-band, version 20261001025250).
+-- APPLIED to Prod (clyintel-prod) 2026-10-02 from the SQL editor, placeholder = 'vapi-not-configured-in-prod'.
 --
 -- ⚠️ PER-DATABASE INPUT. Before EACH apply, replace the ONE placeholder
 --    __VAPI_ASSISTANT_ID_TEST__   (in the `_mig_outreach_cfg` insert below)
