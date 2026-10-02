@@ -177,7 +177,11 @@ jobs:
           # case-insensitive checkout (macOS) would get `.Claude/settings.json` written into `.claude/`.
           PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)(tenant|agent)-isolation[^/]*$|(^|/)[^/]*isolation[^/]*\.(test|spec)\.[cm]?[jt]sx?$|(^|/)env-config\.test\.[cm]?[jt]s$|^(clyintel/)?test/stubs/|(^|/)vercel\.(json|[cm]?[jt]s)$|(^|/)\.vercelignore$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/|(^|/)\.ai/|(^|/)\.mcp\.json$|(^|/)\.env($|\.)|(^|/)\.gitmodules$|(^|/)(\.husky|\.vscode|\.devcontainer)/|(^|/)(middleware|proxy)\.[cm]?[jt]s$|(^|/)CODEOWNERS$|(^|/)vitest\.config\.[cm]?[jt]s$|(^|/)supabase/'
           CHANGED_FILES() { git diff --name-only -z --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH"; }
-          BAD="$(CHANGED_FILES | { grep -izE "$PROTECTED" || true; } | tr '\0' '\n')"
+          # Under .factory/ (only .factory/runs/ can get past .gitignore) the ONE file a run may add
+          # is its own run record; anything else there would ride along into main.
+          BAD="$( { CHANGED_FILES | { grep -izE "$PROTECTED" || true; }
+                    CHANGED_FILES | { grep -izE '^\.factory/' || true; } | { grep -izvE "^\.factory/runs/run-${{ github.run_id }}\.json$" || true; }
+                  } | tr '\0' '\n')"
           if [ -n "$BAD" ]; then
             echo "Factory commits touch protected paths; refusing to push:" >&2
             # Names come from the agent: indent them so none can start a line that the

@@ -48,7 +48,7 @@ export function writeRunLog({ brief, reviewSummary }) {
     actor: process.env.SLACK_USER || process.env.GITHUB_ACTOR || "unknown",
     // NOT the brief itself: this file is committed (so it ends up in main's history) and POSTed to
     // a third-party Sheet, and briefs in an AR product tend to name customers and invoices. The
-    // full brief stays in the workflow log (limited retention) and the PR body.
+    // full brief stays in the workflow log (limited retention) AND in the PR title/body and Slack (durable, visible to repo/channel members). The hash only identifies which brief was used; it does not hide a short or guessable one.
     brief_sha256: createHash("sha256").update(brief ?? "").digest("hex").slice(0, 12),
     brief_chars: (brief ?? "").length,
     plan_title: parseTitle(read(".factory/plan.md")).slice(0, 80),
