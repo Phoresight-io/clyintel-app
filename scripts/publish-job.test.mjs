@@ -362,11 +362,32 @@ test("publish: pushes ONE commit of the checked tree, so a committed-then-delete
   } finally { cleanup(w); }
 });
 
+test("publish: modified or deleted existing tests are flagged; new tests and app files are not", () => {
+  const w = world({
+    baseFiles: { "clyintel/lib/a.test.ts": "a", "clyintel/lib/b.spec.tsx": "b", "clyintel/lib/keep.test.ts": "k" },
+    edit: ({ put, git }) => {
+      put("clyintel/lib/a.test.ts", "weakened");
+      git("rm", "-q", "clyintel/lib/b.spec.tsx");
+      put("clyintel/lib/new.test.ts", "new");
+      put("clyintel/package.json", "{}"); // so both notes appear together
+    },
+  });
+  try {
+    publish(w);
+    const body = ghArgs(w)[ghArgs(w).indexOf("--body") + 1];
+    assert.match(body, /Modifies or deletes existing tests/);
+    assert.match(body, /Touches sensitive files/);
+    const tests = body.slice(body.indexOf("Modifies or deletes existing tests"));
+    assert.ok(tests.includes("clyintel/lib/a.test.ts") && tests.includes("clyintel/lib/b.spec.tsx"));
+    assert.ok(!tests.includes("new.test.ts") && !tests.includes("keep.test.ts"), "new/untouched tests must not be flagged");
+  } finally { cleanup(w); }
+});
+
 test("publish: no sensitive files means no warning section", () => {
   const w = world({ edit: ({ put }) => put("clyintel/app/page.tsx", "page") });
   try {
     publish(w);
-    assert.doesNotMatch(ghArgs(w)[ghArgs(w).indexOf("--body") + 1], /Touches sensitive files/);
+    assert.doesNotMatch(ghArgs(w)[ghArgs(w).indexOf("--body") + 1], /Touches sensitive files|existing tests/);
   } finally { cleanup(w); }
 });
 

@@ -194,6 +194,19 @@ jobs:
           if [ -n "$WARN_FILES" ]; then
             WARN_NOTE="$(printf '⚠️ Touches sensitive files (dependencies, tsconfig paths, auth middleware, install/editor/hook config, nested .gitignore). Review these carefully:\n\n```\n%s\n```' "$WARN_FILES")"
           fi
+          # Weakened tests are easy to miss in a big diff: list EXISTING test files that were
+          # modified or deleted (new ones are not flagged). Same sanitising as above.
+          TEST_FILES="$(git diff --name-status -z --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH" \
+            | tr '\0' '\n' | awk 'NR%2==1{s=$0;next} s ~ /^[MD]$/ {print}' \
+            | { grep -E '\.(test|spec)\.[cm]?[jt]sx?$' || true; } | tr -c 'A-Za-z0-9_./+@\n-' '?' | head -n 15)"
+          if [ -n "$TEST_FILES" ]; then
+            TEST_NOTE="$(printf '⚠️ Modifies or deletes existing tests. Check that no assertion was weakened:\n\n```\n%s\n```' "$TEST_FILES")"
+            if [ -n "$WARN_NOTE" ]; then
+              WARN_NOTE="$(printf '%s\n\n%s' "$WARN_NOTE" "$TEST_NOTE")"
+            else
+              WARN_NOTE="$TEST_NOTE"
+            fi
+          fi
           # Show the run's self-reported outcome on the PR, but NEVER trust it: the log
           # is written inside the agent job, so a prompt-injected agent could claim
           # PASS/APPROVE. Values are reduced to known words (anything else is

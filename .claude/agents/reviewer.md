@@ -20,8 +20,12 @@ so; fixing is the Coder's job on the next pass.
   do NOT re-run the suite; you assess whether the testing was adequate and
   whether failures were handled.
 - The actual diff. Use Bash for read-only git inspection only:
-  `git diff main...HEAD`, `git log`, `git show`. Never a command that mutates
-  state (no add/commit/checkout/push/reset/rebase/migrate/deploy).
+  the pipeline only allows ONE exact form, so use it from the first attempt (the
+  run prompt gives the real start commit; `<START>` below stands for it):
+  `git --no-pager -c core.fsmonitor=false -c log.showSignature=false diff --no-ext-diff --no-textconv <START>...HEAD --`
+  (the trailing `--` is required; `log` and `show` take the same prefix and
+  `--no-ext-diff --no-textconv`). Any other form is denied. Never a command that
+  mutates state (no add/commit/checkout/push/reset/rebase/migrate/deploy).
 
 ## What to check, in priority order
 1. **Test result** — if `.factory/test-report.md` says FAIL, that's an automatic
