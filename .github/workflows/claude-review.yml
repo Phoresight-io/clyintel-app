@@ -60,15 +60,21 @@ jobs:
             - If the diff is clean, say so briefly. Don't invent problems.
 
       # Mirror the review verdict into Slack so every stage reaches the channel.
-      # Non-fatal: if Slack isn't configured yet, this step is skipped.
+      # Non-fatal: skipped when no channel is configured; a missing bot token is
+      # handled inside the script. (A step's own `env:` isn't visible to its `if:`,
+      # so the condition can only use contexts like `vars`.)
       - name: Notify Slack
-        if: ${{ always() && env.SLACK_BOT_TOKEN != '' && env.SLACK_REVIEW_CHANNEL != '' }}
+        if: ${{ always() && vars.SLACK_REVIEW_CHANNEL != '' }}
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_REVIEW_CHANNEL: ${{ vars.SLACK_REVIEW_CHANNEL }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
+          if [ -z "$SLACK_BOT_TOKEN" ]; then
+            echo "SLACK_BOT_TOKEN not set; skipping Slack notification."
+            exit 0
+          fi
           curl -s -X POST https://slack.com/api/chat.postMessage \
             -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
             -H "Content-Type: application/json; charset=utf-8" \
