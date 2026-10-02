@@ -85,8 +85,13 @@ describe("liveChargesAllowed", () => {
   it("false for preview env even with a live key", () => {
     expect(liveChargesAllowed({ VERCEL_ENV: "preview", STRIPE_SECRET_KEY: "sk_live_abc" })).toBe(false);
   });
-  it("false for a test key even in production", () => {
+  it("false for a test key in production unless QBO_ENVIRONMENT=sandbox (test-mode rule)", () => {
     expect(liveChargesAllowed({ VERCEL_ENV: "production", STRIPE_SECRET_KEY: "sk_test_abc" })).toBe(false);
+  });
+  it("true for a test key + VERCEL_ENV set + QBO_ENVIRONMENT=sandbox", () => {
+    expect(
+      liveChargesAllowed({ VERCEL_ENV: "production", STRIPE_SECRET_KEY: "sk_test_abc", QBO_ENVIRONMENT: "sandbox" }),
+    ).toBe(true);
   });
   it("false when unset", () => {
     expect(liveChargesAllowed({})).toBe(false);
