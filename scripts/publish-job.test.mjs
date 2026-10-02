@@ -302,6 +302,19 @@ test("publish: ordinary app, test and run-log changes are allowed", () => {
   } finally { cleanup(w); }
 });
 
+test("publish: a run that changed only its own record pushes nothing and opens no PR", () => {
+  const w = world({
+    log: '{"test_result":"none","review_verdict":"unknown"}',
+    edit: ({ j1 }) => rmSync(join(j1, "feat.txt")),
+  });
+  try {
+    publish(w, { SLACK_BOT_TOKEN: "xoxb", SLACK_CHANNEL: "C1" });
+    assert.ok(!remoteHas(w, "refs/heads/factory/run-1"), "pushed a record-only branch");
+    assert.ok(!existsSync(join(w.root, "gh.args")), "opened a PR for a record-only run");
+    assert.match(readFileSync(join(w.root, "slack.payload"), "utf8"), /no code changes; no PR opened/);
+  } finally { cleanup(w); }
+});
+
 test("publish: symlinks and submodules are refused, deleting one is not", () => {
   const cases = {
     "symlink out of the repo": ({ j1, put }) => { put("clyintel/public/.keep"); symlinkSync("/proc/self/environ", join(j1, "clyintel/public/env.txt")); },
@@ -349,6 +362,10 @@ test("publish: dependency and config changes are allowed but flagged in the PR b
       put("clyintel/app/api/stripe-webhook/route.ts", "x");
       put("clyintel/.npmrc", "x");
       put("clyintel/lib/.gitignore", "x");
+      put("clyintel/app/api/contacts/route.ts", "x");
+      put("clyintel/lib/capture/ingest.ts", "x");
+      put("clyintel/lib/voice-calls.ts", "x");
+      put("clyintel/lib/validatePaymentLink.ts", "x");
       put("clyintel/app/page.tsx", "page");
       put("clyintel/lib/we`ird ```name.ts", "x"); // not sensitive; just proves odd names don't break anything
     },
@@ -358,7 +375,7 @@ test("publish: dependency and config changes are allowed but flagged in the PR b
     assert.ok(remoteHas(w, "refs/heads/factory/run-1"));
     const body = ghArgs(w)[ghArgs(w).indexOf("--body") + 1];
     assert.match(body, /Touches sensitive files/);
-    for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/tsconfig.json", "clyintel/lib/stray.sql", "clyintel/lib/settlement/charge.ts", "clyintel/lib/stripe.ts", "clyintel/app/api/sms-reply/route.ts", "clyintel/lib/demo-mode.ts", "clyintel/instrumentation.ts", "lib/supabase.ts", "clyintel/lib/providers/paypal.ts", "clyintel/app/api/connect/onboard/route.ts", "clyintel/app/api/stripe-webhook/route.ts", "clyintel/.npmrc", "clyintel/lib/.gitignore"]) assert.ok(body.includes(f), f);
+    for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/tsconfig.json", "clyintel/lib/stray.sql", "clyintel/lib/settlement/charge.ts", "clyintel/lib/stripe.ts", "clyintel/app/api/sms-reply/route.ts", "clyintel/lib/demo-mode.ts", "clyintel/instrumentation.ts", "lib/supabase.ts", "clyintel/lib/providers/paypal.ts", "clyintel/app/api/connect/onboard/route.ts", "clyintel/app/api/stripe-webhook/route.ts", "clyintel/.npmrc", "clyintel/lib/.gitignore", "clyintel/app/api/contacts/route.ts", "clyintel/lib/capture/ingest.ts", "clyintel/lib/voice-calls.ts", "clyintel/lib/validatePaymentLink.ts"]) assert.ok(body.includes(f), f);
     assert.ok(!body.includes("app/page.tsx"), "ordinary files must not be listed as sensitive");
   } finally { cleanup(w); }
 });

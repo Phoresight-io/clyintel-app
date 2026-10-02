@@ -197,6 +197,20 @@ jobs:
             echo "Factory commits add symlinks or submodules; refusing to push." >&2
             exit 1
           fi
+          # A run that changed no code (only its own record) gets no PR: nothing to review, and a
+          # PR holding just a log file is noise. Say so in Slack instead.
+          if [ -z "$(CHANGED_FILES | tr '\0' '\n' | { grep -vE '^\.factory/runs/' || true; })" ]; then
+            echo "Run changed no files outside .factory/runs/; not pushing and not opening a PR."
+            if [ -n "$SLACK_BOT_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
+              curl -s -X POST https://slack.com/api/chat.postMessage \
+                -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+                -H "Content-Type: application/json; charset=utf-8" \
+                -d "$(jq -n --arg c "$SLACK_CHANNEL" \
+                       --arg t "ℹ️ Factory run ${{ github.run_id }} finished with no code changes; no PR opened." \
+                       '{channel:$c, text:$t}')" || true
+            fi
+            exit 0
+          fi
           echo "What this run will push (names indented, see note above):"
           git diff --stat=120 --no-ext-diff --no-textconv --no-renames "$GITHUB_SHA" "refs/heads/$BRANCH" | sed 's/^/    /'
           echo "Review that list for anything that looks like data or a credential."
@@ -205,7 +219,7 @@ jobs:
           # because a missed detail here costs the most: dependencies and the auth/tenant
           # middleware. Names come from the agent, so reduce them to a safe character set
           # (no backticks, so they cannot break out of the code fence) and cap the list.
-          SENSITIVE='\.sql$|(^|/)(package(-lock)?\.json|tsconfig[^/]*\.json|\.npmrc|\.gitignore)$|^(clyintel/)?lib/(settlement|revshare|ledgerSync|balanceEvents|recovery|qbo|providers|subscriber|outreach|config)/|^(clyintel/)?lib/(stripe[^/]*|supabase[^/]*|crypto|data|demo-mode)\.ts$|^clyintel/app/api/(stripe|stripe-webhook|settlement|webhooks|qbo|connect|clients|invoices|email-reply|sms-reply|voice|import-invoices|sources|outreach|settings|diagnostics)/|(^|/)instrumentation\.[cm]?[jt]s$'
+          SENSITIVE='\.sql$|(^|/)(package(-lock)?\.json|tsconfig[^/]*\.json|\.npmrc|\.gitignore)$|^(clyintel/)?lib/(settlement|revshare|ledgerSync|balanceEvents|recovery|qbo|providers|subscriber|outreach|config|contacts|capture|voice)/|^(clyintel/)?lib/(stripe[^/]*|supabase[^/]*|crypto|data|demo-mode|email|voice-calls|invoiceSources|adapters|validatePaymentLink)\.ts$|^clyintel/app/api/|(^|/)instrumentation\.[cm]?[jt]s$'
           WARN_FILES="$(CHANGED_FILES | { grep -izE "$SENSITIVE" || true; } | tr '\0' '\n' | tr -c 'A-Za-z0-9_./+@\n-' '?' | head -n 25)"
           WARN_NOTE=""
           if [ -n "$WARN_FILES" ]; then
