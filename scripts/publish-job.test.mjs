@@ -224,6 +224,8 @@ test("publish: commits that touch protected paths are refused, and nothing is pu
     "root schema dir": ({ put }) => put("schema/099_new.sql", "alter table x;"),
     "weaken env-config test": ({ put }) => put("clyintel/lib/config/env-config.test.ts", "// emptied"),
     "test stubs": ({ put }) => put("clyintel/test/stubs/server-only.ts", "x"),
+    "force-added .env": ({ put }) => put(".env", "ANTHROPIC_API_KEY=x"),
+    "nested .env.local": ({ put }) => put("clyintel/.env.local", "x"),
     "product context .ai/": ({ put }) => put(".ai/specs/new.md", "steer"),
     "nested .ai/": ({ put }) => put("clyintel/.ai/context.md", "steer"),
     "root .mcp.json": ({ put }) => put(".mcp.json", "{}"),
@@ -376,12 +378,14 @@ test("notify-failure: fixed message, only with a token and channel, never the br
   assert.match(pub.text, /actions\/runs\/1/);
   assert.doesNotMatch(pub.text, /secret brief|scripts\/x/);
   assert.match(run({ SLACK_BOT_TOKEN: "x", SLACK_CHANNEL: "C1", PIPELINE_RESULT: "failure" }).text, /agent job/);
+  assert.match(run({ SLACK_BOT_TOKEN: "x", SLACK_CHANNEL: "C1", PIPELINE_RESULT: "success", PUBLISH_RESULT: "cancelled" }).text, /cancelled or timed out/);
+  assert.match(run({ SLACK_BOT_TOKEN: "x", SLACK_CHANNEL: "C1", PIPELINE_RESULT: "cancelled" }).text, /cancelled or timed out/);
   assert.match(run({ SLACK_BOT_TOKEN: "x", SLACK_CHANNEL: "C1", PIPELINE_RESULT: "skipped" }).text, /switched off.*D3_FACTORY_ENABLED/);
 });
 
 test("workflow: notify-failure runs on either job failing and holds no permissions", () => {
-  assert.match(WORKFLOW, /notify-failure:\n\s+needs: \[pipeline, publish\]\n\s+if: \$\{\{ always\(\) && \(needs\.pipeline\.result == 'failure' \|\| needs\.publish\.result == 'failure' \|\| needs\.pipeline\.result == 'skipped'\) \}\}/);
+  assert.match(WORKFLOW, /notify-failure:\n\s+needs: \[pipeline, publish\]\n\s+if: \$\{\{ always\(\) && \(needs\.pipeline\.result == 'failure' \|\| needs\.publish\.result == 'failure' \|\| needs\.pipeline\.result == 'skipped' \|\| needs\.pipeline\.result == 'cancelled' \|\| needs\.publish\.result == 'cancelled'\) \}\}/);
   assert.match(WORKFLOW, /notify-failure:[\s\S]*?permissions: \{\}/);
   // kill switch: the agent job only runs when the repo variable is exactly 'true'
-  assert.match(WORKFLOW, /\n  pipeline:\n\s+(#.*\n\s+)*if: \$\{\{ vars\.D3_FACTORY_ENABLED == 'true' \}\}/);
+  assert.match(WORKFLOW, /\n  pipeline:\n\s+(#.*\n\s+)*if: \$\{\{ vars\.D3_FACTORY_ENABLED == 'true' && github\.ref == 'refs\/heads\/main' \}\}/);
 });

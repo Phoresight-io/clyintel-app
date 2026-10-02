@@ -28,7 +28,7 @@ jobs:
     # pushing factory/run-* makes Vercel build a preview of unreviewed agent code with the
     # Preview environment's variables. With it unset, a run is skipped (publish is skipped
     # too, as it needs this job) and notify-failure tells Slack so.
-    if: ${{ vars.D3_FACTORY_ENABLED == 'true' }}
+    if: ${{ vars.D3_FACTORY_ENABLED == 'true' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     # A stuck run must not burn API spend for GitHub's 6h default, and /d3 calls
     # don't run in parallel. Note this is not a FIFO queue: GitHub keeps at most ONE
@@ -163,7 +163,7 @@ jobs:
           # .ai/ (the product constitution, schema detail, Stripe IDs and specs that
           # clyintel/CLAUDE.md tells every agent to read) and .mcp.json (registers MCP servers
           # for Claude sessions): changing either rewrites the rules agents work under.
-          PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)tenant-isolation[^/]*$|(^|/)env-config\.test\.[cm]?[jt]s$|^(clyintel/)?test/stubs/|(^|/)vercel\.json$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/|(^|/)\.ai/|(^|/)\.mcp\.json$'
+          PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)tenant-isolation[^/]*$|(^|/)env-config\.test\.[cm]?[jt]s$|^(clyintel/)?test/stubs/|(^|/)vercel\.json$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/|(^|/)\.ai/|(^|/)\.mcp\.json$|(^|/)\.env($|\.)'
           CHANGED_FILES() { git diff --name-only -z --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH"; }
           BAD="$(CHANGED_FILES | { grep -zE "$PROTECTED" || true; } | tr '\0' '\n')"
           if [ -n "$BAD" ]; then
@@ -232,7 +232,7 @@ jobs:
   # failed. Fixed message only: it never includes the brief or the offending paths.
   notify-failure:
     needs: [pipeline, publish]
-    if: ${{ always() && (needs.pipeline.result == 'failure' || needs.publish.result == 'failure' || needs.pipeline.result == 'skipped') }}
+    if: ${{ always() && (needs.pipeline.result == 'failure' || needs.publish.result == 'failure' || needs.pipeline.result == 'skipped' || needs.pipeline.result == 'cancelled' || needs.publish.result == 'cancelled') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
@@ -243,13 +243,16 @@ jobs:
           SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           PIPELINE_RESULT: ${{ needs.pipeline.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
         run: |
           if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_CHANNEL" ]; then
             echo "No Slack token/channel configured; nothing to notify."
             exit 0
           fi
           if [ "$PIPELINE_RESULT" = "skipped" ]; then
-            MSG="⏸️ D3 Factory is switched off (the repository variable D3_FACTORY_ENABLED is not 'true'), so nothing ran."
+            MSG="⏸️ D3 Factory is switched off (the repository variable D3_FACTORY_ENABLED is not 'true', or the run was not started from main), so nothing ran."
+          elif [ "$PIPELINE_RESULT" = "cancelled" ] || [ "$PUBLISH_RESULT" = "cancelled" ]; then
+            MSG="⚠️ D3 Factory run was cancelled or timed out before finishing. No PR was opened. See $RUN_URL"
           elif [ "$PIPELINE_RESULT" = "success" ]; then
             MSG="❌ D3 Factory run failed while publishing (the push may have been refused, so no PR was opened). See $RUN_URL"
           else
