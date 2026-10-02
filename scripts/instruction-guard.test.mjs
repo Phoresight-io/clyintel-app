@@ -123,6 +123,33 @@ test("checking executes nothing planted in .git/config (it never calls git)", ()
   }
 });
 
+test("the pinned dependency tree (scripts/node_modules) must stay byte-identical", () => {
+  const withDeps = (fn) => {
+    const { dir } = repo();
+    try {
+      put(dir, "scripts/node_modules/pkg/index.js", "original");
+      put(dir, "scripts/node_modules/pkg/bin/cli", "\u0000binary\u0000");
+      symlinkSync("../pkg/bin/cli", join(dir, "scripts/node_modules/.link"));
+      const base = snapshot(dir);
+      fn(dir);
+      return tamperedPaths(dir, base);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  assert.deepEqual(withDeps(() => {}), []);
+  assert.deepEqual(withDeps((d) => put(d, "scripts/node_modules/pkg/index.js", "patched")), ["scripts/node_modules/pkg/index.js"]);
+  assert.deepEqual(withDeps((d) => put(d, "scripts/node_modules/pkg/bin/cli", "patched binary")), ["scripts/node_modules/pkg/bin/cli"]);
+  assert.deepEqual(withDeps((d) => put(d, "scripts/node_modules/evil/index.js", "new")), ["scripts/node_modules/evil/index.js"]);
+  assert.deepEqual(withDeps((d) => rmSync(join(d, "scripts/node_modules/pkg/index.js"))), ["scripts/node_modules/pkg/index.js"]);
+  assert.deepEqual(
+    withDeps((d) => { unlinkSync(join(d, "scripts/node_modules/.link")); symlinkSync("/bin/sh", join(d, "scripts/node_modules/.link")); }),
+    ["scripts/node_modules/.link"]
+  );
+  // other node_modules are still skipped, and ordinary scripts/ files are not pinned
+  assert.deepEqual(withDeps((d) => { put(d, "clyintel/node_modules/x/y.js", "z"); put(d, "scripts/notes.md", "n"); }), []);
+});
+
 test("baseCommit returns the HEAD sha", () => {
   const { dir } = repo();
   try {
