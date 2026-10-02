@@ -216,8 +216,10 @@ export function decide(input, repoRoot) {
     const rel = repoRelative(args.file_path, repoRoot);
     if (rel == null || CODER_PROTECTED.test(rel)) {
       return deny(
-        `coder may not ${tool} factory/CI/git files (.claude/, .github/, scripts/, .git/, .gitignore, .factory/runs/), ` +
-          `the tenant-isolation test, vercel.json, next.config.*, schema/, .ai/, .mcp.json ` +
+        `coder may not ${tool} factory/CI/git files (.claude/, .github/, scripts/, .git/, .gitignore, .factory/runs/, any CLAUDE.md), ` +
+          `.env* files (including .env.local.example), supabase/, schema/, .ai/, .mcp.json, vercel.json/vercel.ts, next.config.*, ` +
+          `vitest.config.*, the isolation tests, env-config.test.ts, test/stubs/, .husky/, .vscode/, .devcontainer/ ` +
+          `(describe such needs under "Needs a human" in .factory/build-notes.md instead) `+
           `or paths outside the repo. Refusing "${args.file_path}".`
       );
     }

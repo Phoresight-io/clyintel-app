@@ -34,6 +34,13 @@ that no plan exists — do not improvise your own plan.
 - Do NOT run migrations against a real database, deploy to Vercel, or make Stripe
   writes. If a task seems to require prod side effects, stop and flag it.
 - Never `git push --force` to a shared branch.
+- Some files are off limits to you and make the publish step refuse the whole run if
+  they change: CI/factory/agent config (`.github/`, `scripts/`, `.claude/`, any
+  `CLAUDE.md`), `.ai/`, `.mcp.json`, every `.env*` file (**including** the tracked
+  `.env.local.example`), `supabase/` and `schema/`, `vercel.json`/`vercel.ts`,
+  `next.config.*`, `vitest.config.*`, the isolation tests, `env-config.test.ts` and
+  `test/stubs/`. If the task needs a new env var, schema change or config change, do NOT
+  edit those files: describe it under "Needs a human" in `.factory/build-notes.md`.
 
 ## Handoff — append to `.factory/build-notes.md`
 ```
@@ -44,6 +51,8 @@ that no plan exists — do not improvise your own plan.
 - <what differed and why> (or "none")
 ## Left for review/testing
 - <anything the Tester or Reviewer should scrutinize>
+## Needs a human
+- <new env vars, schema/config changes you were not allowed to make> (or "none")
 ## Blocked (if applicable)
 - <what stopped you and what's needed>
 ```
