@@ -158,12 +158,12 @@ jobs:
           # "Tests: PASS" claim), and the build/deploy/data surface that a human must own:
           # vercel.json (it defines the every-minute QBO worker and settlement crons),
           # next.config.*, and schema/ (SQL migrations, which can include RLS policies). And
-          # env-config.test.ts (stops server secrets leaking to client bundles; gates live Stripe
+          # vitest.config.* (it decides whether tenant-isolation runs at all), env-config.test.ts (stops server secrets leaking to client bundles; gates live Stripe
           # charges) and test/stubs/ (aliased into every suite). And
           # .ai/ (the product constitution, schema detail, Stripe IDs and specs that
           # clyintel/CLAUDE.md tells every agent to read) and .mcp.json (registers MCP servers
           # for Claude sessions): changing either rewrites the rules agents work under.
-          PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)tenant-isolation[^/]*$|(^|/)env-config\.test\.[cm]?[jt]s$|^(clyintel/)?test/stubs/|(^|/)vercel\.json$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/|(^|/)\.ai/|(^|/)\.mcp\.json$|(^|/)\.env($|\.)|(^|/)\.gitmodules$'
+          PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)tenant-isolation[^/]*$|(^|/)env-config\.test\.[cm]?[jt]s$|^(clyintel/)?test/stubs/|(^|/)vercel\.json$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/|(^|/)\.ai/|(^|/)\.mcp\.json$|(^|/)\.env($|\.)|(^|/)\.gitmodules$|(^|/)vitest\.config\.[cm]?[jt]s$'
           CHANGED_FILES() { git diff --name-only -z --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH"; }
           BAD="$(CHANGED_FILES | { grep -zE "$PROTECTED" || true; } | tr '\0' '\n')"
           if [ -n "$BAD" ]; then
@@ -188,11 +188,11 @@ jobs:
           # because a missed detail here costs the most: dependencies and the auth/tenant
           # middleware. Names come from the agent, so reduce them to a safe character set
           # (no backticks, so they cannot break out of the code fence) and cap the list.
-          SENSITIVE='(^|/)(package(-lock)?\.json|middleware\.[cm]?[jt]s|\.npmrc|\.gitignore)$|(^|/)(\.husky|\.vscode)/'
+          SENSITIVE='(^|/)(package(-lock)?\.json|tsconfig[^/]*\.json|middleware\.[cm]?[jt]s|\.npmrc|\.gitignore)$|(^|/)(\.husky|\.vscode)/'
           WARN_FILES="$(CHANGED_FILES | { grep -zE "$SENSITIVE" || true; } | tr '\0' '\n' | tr -c 'A-Za-z0-9_./+@\n-' '?' | head -n 10)"
           WARN_NOTE=""
           if [ -n "$WARN_FILES" ]; then
-            WARN_NOTE="$(printf '⚠️ Touches sensitive files (dependencies, auth middleware, install/editor/hook config, nested .gitignore). Review these carefully:\n\n```\n%s\n```' "$WARN_FILES")"
+            WARN_NOTE="$(printf '⚠️ Touches sensitive files (dependencies, tsconfig paths, auth middleware, install/editor/hook config, nested .gitignore). Review these carefully:\n\n```\n%s\n```' "$WARN_FILES")"
           fi
           # Show the run's self-reported outcome on the PR, but NEVER trust it: the log
           # is written inside the agent job, so a prompt-injected agent could claim
@@ -205,6 +205,9 @@ jobs:
           VERDICT="$(printf %s "$LOGLINE" | jq -r '.review_verdict // "unknown"' 2>/dev/null || echo unknown)"
           case "$TEST_RESULT" in PASS|FAIL|none) ;; *) TEST_RESULT=unknown ;; esac
           case "$VERDICT" in APPROVE|"REQUEST CHANGES"|BLOCK) ;; *) VERDICT=unknown ;; esac
+          # The brief is user text: show it as plain text in a code fence (no mentions, links or
+          # images), with backticks removed so it cannot close the fence.
+          BRIEF_NOTE="$(printf '```\n%s\n```' "$(printf %s "$BRIEF" | tr -d '`')")"
           AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
             push -u origin "$BRANCH"
@@ -214,7 +217,8 @@ jobs:
             --title "Factory: $(printf %s "$BRIEF" | tr '\n' ' ' | cut -c1-70)" \
             --body "Opened by D3 Factory run ${{ github.run_id }}.
 
-          Brief: ${BRIEF}
+          Brief:
+          ${BRIEF_NOTE}
 
           Self-reported by the factory run (UNVERIFIED, written by the same agents that made the change):
           Tests: ${TEST_RESULT} | Factory reviewer verdict: ${VERDICT}

@@ -121,6 +121,7 @@ test("publish: pushes the branch, then opens a DRAFT PR with the right arguments
     assert.equal(a[a.indexOf("--title") + 1], "Factory: add invoice reminder second line"); // newline stripped
     const body = a[a.indexOf("--body") + 1];
     assert.match(body, /UNVERIFIED/);
+    assert.match(body, /Brief:\n\s*```\nadd invoice reminder\nsecond line\n```/);
     assert.match(body, /Tests: PASS \| Factory reviewer verdict: APPROVE/);
   } finally { cleanup(w); }
 });
@@ -227,6 +228,7 @@ test("publish: commits that touch protected paths are refused, and nothing is pu
     "test stubs": ({ put }) => put("clyintel/test/stubs/server-only.ts", "x"),
     "force-added .env": ({ put }) => put(".env", "ANTHROPIC_API_KEY=x"),
     "nested .env.local": ({ put }) => put("clyintel/.env.local", "x"),
+    "vitest config": ({ put }) => put("clyintel/vitest.config.ts", "export default {}"),
     ".gitmodules": ({ put }) => put(".gitmodules", "[submodule \"x\"]"),
     "product context .ai/": ({ put }) => put(".ai/specs/new.md", "steer"),
     "nested .ai/": ({ put }) => put("clyintel/.ai/context.md", "steer"),
@@ -301,6 +303,7 @@ test("publish: dependency and middleware changes are allowed but flagged in the 
       put("clyintel/package.json", "{}");
       put("clyintel/package-lock.json", "{}");
       put("clyintel/middleware.ts", "export {}");
+      put("clyintel/tsconfig.json", "{}");
       put("clyintel/.npmrc", "x");
       put("clyintel/.husky/pre-commit", "x");
       put("clyintel/.vscode/tasks.json", "{}");
@@ -314,7 +317,7 @@ test("publish: dependency and middleware changes are allowed but flagged in the 
     assert.ok(remoteHas(w, "refs/heads/factory/run-1"));
     const body = ghArgs(w)[ghArgs(w).indexOf("--body") + 1];
     assert.match(body, /Touches sensitive files/);
-    for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/middleware.ts", "clyintel/.npmrc", "clyintel/.husky/pre-commit", "clyintel/.vscode/tasks.json", "clyintel/lib/.gitignore"]) assert.ok(body.includes(f), f);
+    for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/middleware.ts", "clyintel/tsconfig.json", "clyintel/.npmrc", "clyintel/.husky/pre-commit", "clyintel/.vscode/tasks.json", "clyintel/lib/.gitignore"]) assert.ok(body.includes(f), f);
     assert.ok(!body.includes("app/page.tsx"), "ordinary files must not be listed as sensitive");
   } finally { cleanup(w); }
 });

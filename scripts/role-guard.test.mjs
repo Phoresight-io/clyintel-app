@@ -220,7 +220,7 @@ test("coder protections cover everything the publish job refuses (kept in sync)"
     "clyintel/.gitattributes", "CLAUDE.md", "clyintel/lib/CLAUDE.md", "CLAUDE.local.md", "clyintel/.claude/settings.json",
     "clyintel/tests/tenant-isolation.test.ts", "clyintel/lib/config/env-config.test.ts", "clyintel/test/stubs/server-only.ts",
     "vercel.json", "clyintel/vercel.json", "clyintel/next.config.ts", "schema/1.sql", "clyintel/schema/1.sql",
-    ".ai/x.md", "clyintel/.ai/x.md", ".mcp.json", "clyintel/.mcp.json", ".gitmodules", ".env", ".env.local", "clyintel/.env.production",
+    ".ai/x.md", "clyintel/.ai/x.md", ".mcp.json", "clyintel/.mcp.json", ".gitmodules", "clyintel/vitest.config.ts", ".env", ".env.local", "clyintel/.env.production",
   ];
   for (const f of samples) {
     assert.ok(PROTECTED.test(f), `sample not protected by publish: ${f}`);
