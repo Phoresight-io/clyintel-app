@@ -13,7 +13,7 @@ jobs:
     permissions:
       contents: read # read the code
       pull-requests: write # post review comments
-      # id-token not needed — using a direct API key, not OIDC federation
+      # id-token not needed — github_token below bypasses the action's OIDC app-token exchange
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,6 +22,9 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Use the workflow token directly; without this the action tries OIDC
+          # (needs id-token: write + the Claude GitHub App installed) and fails.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           # Opus for adversarial review — a stronger, different model than the
           # Sonnet Coder, so build-time blind spots don't carry into review.
           claude_args: >-
