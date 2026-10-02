@@ -129,6 +129,22 @@ jobs:
             exit 1
           fi
           git fetch -q --no-tags "$BUNDLE" "refs/heads/$BRANCH:refs/heads/$BRANCH"
+          # The factory's commits must not touch the factory itself, the Slack endpoint, CI,
+          # or anything that steers a Claude Code session (.claude/, any CLAUDE.md, git
+          # attributes/ignore). The agent job's own tripwire only watches files on disk, and
+          # a coder can commit a change and then restore the working tree. This is the
+          # check that holds: it compares two commits in this trusted checkout, so it runs no
+          # filters or drivers. -z so git does not quote unusual paths (a quoted name would
+          # start with " and slip past the ^ anchors); --no-renames so moving a file out of a
+          # protected directory still lists the old path.
+          PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/'
+          BAD="$(git diff --name-only -z --no-renames --no-ext-diff --no-textconv "$GITHUB_SHA" "refs/heads/$BRANCH" \
+            | { grep -zE "$PROTECTED" || true; } | tr '\0' '\n')"
+          if [ -n "$BAD" ]; then
+            echo "Factory commits touch protected paths; refusing to push:" >&2
+            echo "$BAD" >&2
+            exit 1
+          fi
           # Show the run's self-reported outcome on the PR, but NEVER trust it: the log
           # is written inside the agent job, so a prompt-injected agent could claim
           # PASS/APPROVE. Values are reduced to known words (anything else is
