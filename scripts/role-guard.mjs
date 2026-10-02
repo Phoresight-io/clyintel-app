@@ -97,7 +97,8 @@ const CODER_PROTECTED = new RegExp(
     "(^|/)vitest\\.config\\.[cm]?[jt]s$", // decides whether tenant-isolation runs at all
     "(^|/)\\.env($|\\.)", // credentials must never be committed
     "(^|/)\\.mcp\\.json$", // registers MCP servers for Claude sessions
-  ].join("|")
+  ].join("|"),
+  "i" // case-insensitive: a case-variant path lands in the real directory on macOS/Windows checkouts
 );
 
 const deny = (reason) => ({

@@ -82,6 +82,11 @@ test("product context (.ai/) and .mcp.json are watched too", () => {
   assert.deepEqual(check((d) => put(d, "clyintel/.mcp.json", "{}")), ["clyintel/.mcp.json"]);
 });
 
+test("case-variant steering files are watched too", () => {
+  assert.deepEqual(check((d) => put(d, ".Claude/settings.json", "{}")), [".Claude/settings.json"]);
+  assert.deepEqual(check((d) => put(d, "clyintel/lib/claude.md", "steer")), ["clyintel/lib/claude.md"]);
+});
+
 test("hiding a file from git does not hide it from the check", () => {
   assert.deepEqual(
     check((d) => {

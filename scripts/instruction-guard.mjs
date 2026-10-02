@@ -25,10 +25,10 @@ import { join, relative, sep } from "node:path";
 // in that exact directory. The one node_modules that matters, scripts/node_modules
 // (the code that runs the agents), is covered in full by PINNED_TREES below.
 const SKIP_DIRS = new Set([".git", "node_modules"]);
-const isWatchedFile = (name) => name === "CLAUDE.md" || name === "CLAUDE.local.md" || name === ".mcp.json";
+const isWatchedFile = (name) => ["claude.md", "claude.local.md", ".mcp.json"].includes(name.toLowerCase());
 // Directories whose whole contents steer sessions: .claude/ (settings, agents) and .ai/
 // (the product constitution, schema detail, Stripe IDs and specs that CLAUDE.md points agents at).
-const isSteeringDir = (name) => name === ".claude" || name === ".ai";
+const isSteeringDir = (name) => [".claude", ".ai"].includes(name.toLowerCase());
 
 // Trees that must stay byte-identical for the whole run, hashed in full. The agent
 // sessions are started from the CLI binary and JS inside scripts/node_modules, so a
