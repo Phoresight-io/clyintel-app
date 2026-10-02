@@ -6,12 +6,17 @@ import { chdir } from "node:process";
 import { postSlack } from "./slack.mjs";
 import { writeRunLog, pushRunLogToSheet } from "./run-log.mjs";
 import { makeGuardHook } from "./role-guard.mjs";
+import { baseCommit, tamperedPaths } from "./instruction-guard.mjs";
 
 // This script lives in scripts/ but the factory operates on the repo root
 // (.factory/, git, the app code). Anchor the working directory at the repo root
 // so every .factory read/write and git op is correct no matter where node runs.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 chdir(repoRoot);
+
+// The commit this run started from, taken before any agent runs. Used to detect
+// agents tampering with the files that steer later sessions (see instruction-guard).
+const startCommit = baseCommit(repoRoot);
 
 const channel = process.env.SLACK_CHANNEL; // undefined when run outside Slack
 const brief = process.env.BRIEF ?? "No brief provided";
@@ -81,6 +86,13 @@ class PipelineError extends Error {}
 // result message). Any non-success result (error_max_turns, error_during_execution,
 // ...) throws, so a failed run can never be mistaken for a successful one.
 async function run(prompt) {
+  // Every run() starts a new session that loads project settings and CLAUDE.md. If an
+  // earlier agent planted or edited any (hooks in .claude/settings.json, a steering
+  // CLAUDE.md), refuse to start the next session.
+  const tampered = tamperedPaths(repoRoot, startCommit);
+  if (tampered.length) {
+    throw new PipelineError(`agent modified instruction/settings files: ${tampered.slice(0, 5).join(", ")}`);
+  }
   guardCalls = 0;
   const stream = query({
     prompt,
