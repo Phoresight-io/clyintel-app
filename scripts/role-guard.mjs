@@ -70,8 +70,21 @@ const SAFE_ARG = /^[A-Za-z0-9_.\/:@~^,%+][A-Za-z0-9_.\/:@~^=,%+-]*$/;
 // stop the same edits via Bash; it blocks honest mistakes and the easy path.
 // Also the tenant-isolation test: a coder that breaks tenant scoping must not be able to
 // make the one test that catches it pass (the tester is already blocked from it).
-const CODER_PROTECTED =
-  /^(\.claude|\.github|scripts|\.git)\/|^\.factory\/runs\/|^\.gitignore$|(^|\/)tenant-isolation[^/]*$/;
+// And the build/deploy surface, where a change becomes a Vercel preview build or a cron
+// change: vercel.json (it defines the every-minute QBO worker and settlement crons),
+// next.config.*, and schema/ (CLAUDE.md: "do not invent schema"; migrations come from a
+// human). package.json is deliberately NOT blocked: a feature legitimately adds dependencies.
+const CODER_PROTECTED = new RegExp(
+  [
+    "^(\\.claude|\\.github|scripts|\\.git)/",
+    "^\\.factory/runs/",
+    "^\\.gitignore$",
+    "(^|/)tenant-isolation[^/]*$",
+    "(^|/)vercel\\.json$",
+    "(^|/)next\\.config\\.[cm]?[jt]s$",
+    "^(clyintel/)?schema/",
+  ].join("|")
+);
 
 const deny = (reason) => ({
   hookSpecificOutput: {
@@ -188,7 +201,7 @@ export function decide(input, repoRoot) {
     if (rel == null || CODER_PROTECTED.test(rel)) {
       return deny(
         `coder may not ${tool} factory/CI/git files (.claude/, .github/, scripts/, .git/, .gitignore, .factory/runs/), ` +
-          `the tenant-isolation test, ` +
+          `the tenant-isolation test, vercel.json, next.config.*, schema/ ` +
           `or paths outside the repo. Refusing "${args.file_path}".`
       );
     }

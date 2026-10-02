@@ -61,6 +61,12 @@ test("coder cannot Write/Edit factory, CI or git files", () => {
   // lookalikes are fine
   for (const f of ["clyintel/scripts/seed.ts", "clyintel/.github-notes.md", "clyintel/lib/scripts.ts"])
     assert.ok(!denied(call("Write", { file_path: f }, as("coder"))), f);
+  // build/deploy surface: vercel.json (crons), next.config.*, schema/
+  for (const f of ["vercel.json", "clyintel/vercel.json", "clyintel/next.config.ts", "next.config.mjs", "clyintel/schema/001.sql", "schema/002.sql"])
+    for (const t of ["Write", "Edit"]) assert.ok(denied(call(t, { file_path: f }, as("coder"))), `${t} ${f}`);
+  // ...but ordinary dependency and app changes stay allowed (a feature may add a package)
+  for (const f of ["clyintel/package.json", "clyintel/package-lock.json", "clyintel/app/schema-view.tsx", "clyintel/lib/schemaUtil.ts", "clyintel/lib/vercel-helper.ts"])
+    assert.ok(!denied(call("Write", { file_path: f }, as("coder"))), f);
   // the tenant-isolation test guards against one customer seeing another's data
   for (const f of ["clyintel/tests/tenant-isolation.test.ts", "tests/tenant-isolation.helpers.ts", "clyintel/lib/tenant-isolation.ts"])
     for (const t of ["Write", "Edit"]) assert.ok(denied(call(t, { file_path: f }, as("coder"))), `${t} ${f}`);
