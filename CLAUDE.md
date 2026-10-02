@@ -72,12 +72,13 @@ All agents must follow these rules unless the product CLAUDE.md explicitly overr
 
 ## Branching SOP
 
-- Always branch off `main`
+- Always branch off `develop`
 - Branch naming: `feature/<short-description>` or `fix/<short-description>`
-- Merge back to `main` within the same session via PR
+- Open the PR against `develop` and merge it there within the same session
 - Delete the feature branch immediately after merge
+- `develop` deploys to develop.clyintel (dev) on every push
+- Production: promote `develop` to `main` with a "Promote develop to main" PR, reviewed and merged by a human; Vercel deploys `main` to production on every push
 - Never promote a non-main branch to Vercel production
-- Vercel auto-deploys `main` on every push — no manual promotion needed
 
 ---
 
