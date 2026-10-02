@@ -3,21 +3,18 @@ name: D3 Factory
 on:
   # Primary trigger: Slack → webhook → repository_dispatch
   repository_dispatch:
-    types: [d3-run, d3-deploy]
+    types: [d3-run]
   # Fallback for testing WITHOUT Slack: run manually from the Actions tab
   workflow_dispatch:
     inputs:
-      stage:
-        description: "stage (plan|build|run)"
-        required: true
-        default: "run"
       brief:
         description: "what to build"
         required: true
 
+# There is deliberately no deploy job. The deploy gate is: a human reviews the
+# factory PR and merges to main, and Vercel auto-deploys main (see CLAUDE.md).
 jobs:
   pipeline:
-    if: github.event.action != 'd3-deploy'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -26,16 +23,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # reviewer needs history for git diff main...HEAD
+          # Don't leave the write-scoped GITHUB_TOKEN in .git/config where a
+          # prompt-injected agent could read it. The push step below supplies it
+          # explicitly, after the agents have finished.
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "22" # same as ci.yml
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
 
-      # Factory infra is self-contained in scripts/ with its own package.json,
-      # so the app's dependencies are never touched.
-      - name: Install factory dependencies
+      # Factory infra is self-contained in scripts/ with its own package.json and
+      # lockfile, so the app's dependencies are never touched.
+      - name: Install factory dependencies (clean, from lockfile)
         working-directory: scripts
-        run: npm install
+        run: npm ci
 
       - name: Create working branch
         run: |
@@ -50,7 +53,6 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          STAGE: ${{ github.event.client_payload.stage || inputs.stage }}
           BRIEF: ${{ github.event.client_payload.brief || inputs.brief }}
           SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
           SLACK_USER: ${{ github.event.client_payload.user }}
@@ -62,24 +64,27 @@ jobs:
           git add -A
           git commit -m "factory run ${{ github.run_id }}" || echo "nothing to commit"
 
+      # KNOWN FOLLOW-UP: PRs opened with the default GITHUB_TOKEN do not trigger
+      # other workflows, so claude-review.yml and ci.yml will NOT run on factory PRs.
+      # Fixing that needs a PAT or GitHub App token here, plus the repo setting
+      # "Allow GitHub Actions to create and approve pull requests". Not wired yet.
       - name: Open PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
         run: |
-          git push -u origin "$BRANCH"
-          gh pr create --fill --head "$BRANCH" --base main || true
-
-  # Deploy is a SEPARATE job on a SEPARATE event. Only reached when a human types
-  # "/d3 approve" in Slack, which dispatches d3-deploy. The gate.
-  deploy:
-    if: github.event.action == 'd3-deploy'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Deploy to Vercel
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          npm i -g vercel
-          vercel deploy --prod --token "$VERCEL_TOKEN" --yes
-          # (verify this matches your project's actual deploy command / rootDirectory)
+          AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
+            push -u origin "$BRANCH"
+          # No `|| true`: if PR creation fails, the run fails.
+          PR_URL="$(gh pr create --fill --head "$BRANCH" --base main)"
+          echo "Opened $PR_URL"
+          # Best-effort Slack notice with the real PR link (never fails the run).
+          if [ -n "$SLACK_BOT_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
+            PR_URL="$PR_URL" node --input-type=module -e '
+              import { postSlack } from "./scripts/slack.mjs";
+              await postSlack(process.env.SLACK_CHANNEL,
+                `🔀 PR opened for review: ${process.env.PR_URL}\nMerge it to main to deploy (Vercel auto-deploys main).`);
+            '
+          fi
