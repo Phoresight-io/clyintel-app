@@ -79,6 +79,7 @@ export async function pushRunLogToSheet(record) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(record),
+      signal: AbortSignal.timeout(10_000), // a hung webhook must not hold a finished run until the job timeout
     });
   } catch (err) {
     console.error("run log sheet push failed:", err);

@@ -51,6 +51,10 @@ function world({ log, mutateBundle, fromBranch, baseFiles = {}, baseLink, edit }
   if (baseLink) symlinkSync("f", join(root, "base", baseLink));
   git(join(root, "base"), "add", "-A");
   git(join(root, "base"), "commit", "-qm", "base");
+  // a second commit, so that a depth-1 checkout really is shallow (its parent is missing)
+  writeFileSync(join(root, "base/history"), "more history");
+  git(join(root, "base"), "add", "history");
+  git(join(root, "base"), "commit", "-qm", "more history");
   if (fromBranch) {
     // a non-default branch with its own commit, as with workflow_dispatch "Use workflow from"
     git(join(root, "base"), "checkout", "-qb", fromBranch);
@@ -82,7 +86,9 @@ function world({ log, mutateBundle, fromBranch, baseFiles = {}, baseLink, edit }
   if (mutateBundle) mutateBundle({ root, j1, rt1, git });
 
   // publish job: fresh checkout of the base commit, bundle downloaded as an artifact
-  git(root, "clone", "-q", ...cloneArgs, "--no-local", `file://${join(root, "remote.git")}`, "job2");
+  // the real publish job uses actions/checkout with the default fetch-depth: 1, so test against a shallow clone
+  git(root, "clone", "-q", "--depth", "1", ...cloneArgs, "--no-local", `file://${join(root, "remote.git")}`, "job2");
+  assert.equal(git(join(root, "job2"), "rev-parse", "--is-shallow-repository").trim(), "true", "publish checkout must be shallow");
   const rt2 = join(root, "rt2");
   mkdirSync(join(rt2, "bundle"), { recursive: true });
   copyFileSync(join(rt1, "factory.bundle"), join(rt2, "bundle/factory.bundle"));

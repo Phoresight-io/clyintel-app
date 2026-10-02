@@ -15,6 +15,7 @@ export async function postSlack(channel, text) {
         "Content-Type": "application/json; charset=utf-8",
       },
       body: JSON.stringify({ channel, text: escapeSlack(text) }),
+      signal: AbortSignal.timeout(10_000), // never let Slack hold the pipeline
     });
     const data = await r.json();
     if (!data.ok) console.error("slack post failed:", data.error);
