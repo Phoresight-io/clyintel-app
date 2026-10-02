@@ -28,13 +28,12 @@ function testResult() {
 
 export function reviewVerdict(summary) {
   const s = summary || "";
-  // Prefer the explicit "VERDICT: ..." line the orchestrator asks the reviewer for
-  // (last one wins); the loose keyword scan below is only a fallback.
-  const explicit = [...s.matchAll(/^[\s*_]*VERDICT:[\s*_]*(APPROVE|REQUEST CHANGES|BLOCK)\b/gim)].pop();
+  // Only an explicit "VERDICT: ..." line (the orchestrator asks the reviewer for it; last one
+  // wins, markdown emphasis allowed) counts. There is deliberately NO keyword fallback:
+  // "I can't approve this", "disapprove" or "code block" would be misread, and a wrong
+  // APPROVE (a green check in Slack) is worse than "unknown".
+  const explicit = [...s.matchAll(/^[\s*_]*VERDICT:[\s*_]*(APPROVE|REQUEST CHANGES|BLOCK)(?![A-Za-z])/gim)].pop();
   if (explicit) return explicit[1].toUpperCase();
-  if (/\bBLOCK\b/i.test(s)) return "BLOCK";
-  if (/REQUEST CHANGES/i.test(s)) return "REQUEST CHANGES";
-  if (/APPROVE/i.test(s)) return "APPROVE";
   return "unknown";
 }
 

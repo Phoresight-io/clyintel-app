@@ -8,6 +8,8 @@ export const config = { api: { bodyParser: false } };
 
 // Slash-command bodies are tiny; refuse anything big, and don't hang on a bad stream.
 const MAX_BODY_BYTES = 100_000;
+// The brief ends up in the agent prompt, the run log and the PR body (GitHub rejects bodies over 65,536 chars).
+const MAX_BRIEF_CHARS = 4000;
 const readRaw = (req) =>
   new Promise((resolve, reject) => {
     const chunks = [];
@@ -86,6 +88,7 @@ export default async function handler(req, res) {
     return ephemeral(res, "⛔ You're not authorized to run /d3.");
   }
   if (!brief) return ephemeral(res, "Usage: `/d3 <what to build>`");
+  if (brief.length > MAX_BRIEF_CHARS) return ephemeral(res, `Brief is too long (max ${MAX_BRIEF_CHARS} characters).`);
 
   if (!process.env.GH_DISPATCH_PAT) {
     console.error("d3: GH_DISPATCH_PAT is not set");

@@ -21,11 +21,15 @@ test("parseTestResult: only an explicit result counts; last one wins; fails clos
   for (const [text, want] of cases) assert.equal(parseTestResult(text), want, JSON.stringify(text));
 });
 
-test("reviewVerdict: bold verdict line is read; 'no blockers' is not BLOCK", () => {
+test("reviewVerdict: only an explicit VERDICT line counts (bold allowed); prose never does", () => {
   assert.equal(reviewVerdict("Looks fine.\n**VERDICT: APPROVE**"), "APPROVE");
   assert.equal(reviewVerdict("notes\n__VERDICT: REQUEST CHANGES__\n"), "REQUEST CHANGES");
   assert.equal(reviewVerdict("VERDICT: BLOCK"), "BLOCK");
-  assert.equal(reviewVerdict("No blockers; this is non-blocking. I would approve."), "APPROVE");
-  assert.equal(reviewVerdict("This must BLOCK the merge."), "BLOCK");
+  assert.equal(reviewVerdict("VERDICT: BLOCK\nlater\nVERDICT: APPROVE"), "APPROVE"); // last wins
+  // prose without a VERDICT line is "unknown", never a guess
+  assert.equal(reviewVerdict("I can't approve this."), "unknown");
+  assert.equal(reviewVerdict("This is a disapprove situation."), "unknown");
+  assert.equal(reviewVerdict("No blockers; this is a code block. I would approve."), "unknown");
+  assert.equal(reviewVerdict("This must BLOCK the merge."), "unknown");
   assert.equal(reviewVerdict(""), "unknown");
 });

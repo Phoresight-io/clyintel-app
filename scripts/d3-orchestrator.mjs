@@ -28,6 +28,12 @@ if (!brief) {
   console.error("No brief provided; refusing to start a run with an empty brief.");
   process.exit(1);
 }
+// Same cap as the Slack handler (workflow_dispatch has no such check): a huge brief would burn a
+// paid run and then fail at `gh pr create` (PR bodies are limited to 65,536 characters).
+if (brief.length > 4000) {
+  console.error("Brief is too long (max 4000 characters); refusing to start a run.");
+  process.exit(1);
+}
 
 // Load the same prompt bodies the .claude/agents/*.md files hold, so filesystem
 // and programmatic definitions stay in sync. (Programmatic wins if both exist.)
