@@ -15,13 +15,14 @@
 // any pre-existing/production Stripe object.
 
 import { describe, it, expect, beforeAll } from "vitest";
+import { resolveStripeSecretKey } from "@/lib/config/env.server";
 
 const SMOKE = process.env.STRIPE_TEST_SMOKE === "1";
 
 // Local hand-rolled Stripe POST — same fetch/form-encoding convention as
 // lib/stripe.ts, used only for TEST-MODE setup (charge, customer, invoice item).
 async function stripeTestPost<T>(path: string, params: Record<string, string>): Promise<T> {
-  const key = process.env.STRIPE_SECRET_KEY ?? "";
+  const key = resolveStripeSecretKey() ?? "";
   const res = await fetch(`https://api.stripe.com/v1${path}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/x-www-form-urlencoded" },
@@ -34,7 +35,7 @@ async function stripeTestPost<T>(path: string, params: Record<string, string>): 
 
 describe.runIf(SMOKE)("Layer 2 — real Stripe test-mode refund/void smoke", () => {
   beforeAll(() => {
-    const key = process.env.STRIPE_SECRET_KEY ?? "";
+    const key = resolveStripeSecretKey() ?? "";
     if (!key.startsWith("sk_test")) {
       throw new Error(
         "STRIPE_TEST_SMOKE is set but STRIPE_SECRET_KEY is not an sk_test key — refusing to run against a non-test account.",
