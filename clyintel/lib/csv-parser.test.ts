@@ -16,7 +16,7 @@ describe("parseCsv", () => {
   // BUG: splitLines already collapses "" into a single " (and keeps the
   // surrounding quote chars), then parseLine treats the lone " as a quote
   // toggle, so embedded quotes are lost (actual note: 'He said hi').
-  it.skip("handles escaped quote (double double-quote) inside quoted field", () => {
+  it("handles escaped quote (double double-quote) inside quoted field", () => {
     const input = 'name,note\nAcme,"He said ""hi"""';
     expect(parseCsv(input)).toEqual({
       headers: ["name", "note"],
