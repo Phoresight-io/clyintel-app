@@ -237,3 +237,17 @@ test("vercel.json: this project deploys only main; previews of every other branc
   for (const b of ["develop", "fix/x", "feature/a-b", "factory/run-1", "dependabot/npm_and_yarn/x", "release/1.0", "mainline"])
     assert.equal(deploys(b), false, b);
 });
+
+test("tooling: Node 22 is a dev/CI requirement (.nvmrc + CI), and does not change the deployed runtime", () => {
+  // Vercel reads engines.node to choose the runtime of the deployed /d3 function, so it stays as it was.
+  const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
+  assert.equal(pkg.engines.node, ">=20");
+  // The tests need path.matchesGlob (Node 22.5+); .nvmrc and CI carry that requirement instead.
+  const nvmrc = readFileSync(new URL("./.nvmrc", import.meta.url), "utf8").trim();
+  assert.match(nvmrc, /^22(\.\d+){0,2}$/);
+  assert.equal(typeof matchesGlob, "function");
+  const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const factory = ci.slice(ci.indexOf("\n  factory:"));
+  assert.match(factory, /node-version-file: slack-dispatch\/\.nvmrc/);
+  assert.doesNotMatch(factory, /^\s+node-version: /m, "the factory job must take its Node from .nvmrc, not a second literal");
+});
