@@ -301,6 +301,8 @@ test("publish: commits that touch protected paths are refused, and nothing is pu
     "new file under scripts/": ({ put }) => put("scripts/evil.mjs", "x"),
     "edit scripts/": ({ put }) => put("scripts/old.mjs", "patched"),
     "new file under api/": ({ put }) => put("api/x.js", "x"),
+    "edit the /d3 handler": ({ put }) => put("slack-dispatch/api/slack-command.js", "evil"),
+    "new file under slack-dispatch/": ({ put }) => put("slack-dispatch/api/x.js", "x"),
     "workflow": ({ put }) => put(".github/workflows/x.yml", "x"),
     ".gitignore": ({ put }) => put(".gitignore", "tmp/\n"),
     ".gitattributes (root)": ({ put }) => put(".gitattributes", "* filter=x"),
@@ -367,6 +369,7 @@ test("publish: ordinary app, test and run-log changes are allowed", () => {
       put("clyintel/tests/new.test.ts", "t");
       put("clyintel/scripts/seed.ts", "lookalike of scripts/, not the factory's"); // not top-level
       put("clyintel/api/route.ts", "lookalike of api/, not the Slack endpoint");
+      put("clyintel/lib/slack-dispatch/x.ts", "lookalike of slack-dispatch/, not the Slack endpoint");
       put("clyintel/.github-notes.md", "n");
     },
   });

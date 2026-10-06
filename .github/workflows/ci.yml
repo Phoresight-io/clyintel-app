@@ -77,6 +77,8 @@ jobs:
       - name: Install (clean, from lockfile)
         run: npm ci --no-audit --no-fund
 
+      # ../slack-dispatch/*.test.mjs: the /d3 handler's tests (it has no dependencies, so
+      # nothing more to install).
       # GITHUB_RUN_ID is unset because run-log.mjs names the record after it, and the run-log
       # tests expect the local name (run-local.json), as when they run on a laptop.
       # A copy of the results goes to a TAP file, and every failing test becomes an error annotation
@@ -86,7 +88,7 @@ jobs:
         run: |
           set +e
           env -u GITHUB_RUN_ID node --test --test-reporter=tap --test-reporter-destination=stdout \
-            --test-reporter=tap --test-reporter-destination="$RUNNER_TEMP/factory.tap" ./*.test.mjs
+            --test-reporter=tap --test-reporter-destination="$RUNNER_TEMP/factory.tap" ./*.test.mjs ../slack-dispatch/*.test.mjs
           RC=$?
           set -e
           if [ "$RC" -ne 0 ]; then

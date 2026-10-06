@@ -1,0 +1,9 @@
+{
+  "git": {
+    "deploymentEnabled": {
+      "factory/**": false,
+      "**": false,
+      "main": true
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "clyintel-d3-slack-dispatch",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The /d3 Slack slash command: verifies the request and starts a D3 Factory run (its own Vercel project, Root Directory slack-dispatch).",
+  "engines": {
+    "node": ">=20"
+  }
+}

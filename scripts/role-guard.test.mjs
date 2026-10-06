@@ -75,7 +75,7 @@ test("coder cannot Write/Edit factory, CI or git files", () => {
   for (const f of ["vercel.json", "clyintel/vercel.json", "clyintel/vercel.ts", ".vercelignore", "clyintel/next.config.ts", "next.config.mjs", "clyintel/schema/001.sql", "schema/002.sql"])
     for (const t of ["Write", "Edit"]) assert.ok(denied(call(t, { file_path: f }, as("coder"))), `${t} ${f}`);
   // parity with the publish job's list: refuse up front instead of wasting a paid run
-  for (const f of ["api/slack-command.js", ".gitattributes", "clyintel/.gitattributes", "CLAUDE.md", "clyintel/CLAUDE.md", "clyintel/lib/CLAUDE.local.md", "clyintel/.claude/settings.json", "clyintel/lib/config/env-config.test.ts", "clyintel/test/stubs/server-only.ts"])
+  for (const f of ["api/slack-command.js", "slack-dispatch/api/slack-command.js", "slack-dispatch/vercel.json", "slack-dispatch/package.json", ".gitattributes", "clyintel/.gitattributes", "CLAUDE.md", "clyintel/CLAUDE.md", "clyintel/lib/CLAUDE.local.md", "clyintel/.claude/settings.json", "clyintel/lib/config/env-config.test.ts", "clyintel/test/stubs/server-only.ts"])
     for (const t of ["Write", "Edit"]) assert.ok(denied(call(t, { file_path: f }, as("coder"))), `${t} ${f}`);
   // product context the agents are steered by (.ai/) and MCP server config
   for (const f of [".ai/constitution.md", "clyintel/.ai/specs/x.md", ".mcp.json", "clyintel/.mcp.json"])
@@ -224,7 +224,7 @@ test("coder protections cover everything the publish job refuses (kept in sync)"
   const wf = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../.github/workflows/d3-factory.yml"), "utf8");
   const PROTECTED = new RegExp(wf.match(/PROTECTED='([^']+)'/)[1], "i"); // publish greps with -i
   const samples = [
-    ".claude/agents/x.md", ".github/workflows/x.yml", "scripts/x.mjs", "api/x.js", ".gitignore", ".gitattributes",
+    ".claude/agents/x.md", ".github/workflows/x.yml", "scripts/x.mjs", "api/x.js", "slack-dispatch/api/slack-command.js", "slack-dispatch/package.json", ".gitignore", ".gitattributes",
     "clyintel/.gitattributes", "CLAUDE.md", "clyintel/lib/CLAUDE.md", "CLAUDE.local.md", "clyintel/.claude/settings.json",
     "clyintel/tests/tenant-isolation.test.ts", "clyintel/lib/outreach/agent-isolation.test.ts", "clyintel/lib/x/org-isolation.spec.ts", "clyintel/lib/config/env-config.test.ts", "clyintel/test/stubs/server-only.ts",
     "vercel.json", "clyintel/vercel.json", "clyintel/vercel.ts", "clyintel/.vercelignore", "clyintel/next.config.ts", "schema/1.sql", "clyintel/schema/1.sql",

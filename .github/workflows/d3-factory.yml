@@ -99,8 +99,9 @@ jobs:
     # Actions -> Variables). With it unset, a run is skipped (publish is skipped too, as it
     # needs this job) and notify-failure tells Slack so.
     # Vercel previews: pushing factory/run-* would make Vercel build a preview of unreviewed
-    # agent code with the Preview environment's variables. clyintel/vercel.json (the projects'
-    # Root Directory; the repo-root vercel.json carries the same rule) turns Git deployments
+    # agent code with the Preview environment's variables. clyintel/vercel.json (the app projects'
+    # Root Directory; the repo-root vercel.json and slack-dispatch/vercel.json, the /d3 handler's
+    # project, carry the same rule) turns Git deployments
     # off for factory/** (git.deploymentEnabled), and publish's PROTECTED list refuses any run
     # that changes a vercel.json, so an agent cannot switch them back on.
     if: ${{ vars.D3_FACTORY_ENABLED == 'true' && github.ref == 'refs/heads/main' }}
@@ -462,7 +463,7 @@ jobs:
           # for Claude sessions): changing either rewrites the rules agents work under.
           # Matched case-INSENSITIVELY (grep -i): the tree is checked on Linux, but a reviewer on a
           # case-insensitive checkout (macOS) would get `.Claude/settings.json` written into `.claude/`.
-          PROTECTED='^(\.claude|\.github|scripts|api)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)(tenant|agent)-isolation[^/]*$|(^|/)[^/]*isolation[^/]*\.(test|spec)\.[cm]?[jt]sx?$|(^|/)env-config\.test\.[cm]?[jt]s$|^(clyintel/)?test/stubs/|(^|/)vercel\.(json|[cm]?[jt]s)$|(^|/)\.vercelignore$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/|(^|/)\.ai/|(^|/)\.mcp\.json$|(^|/)\.env($|\.)|(^|/)\.gitmodules$|(^|/)(\.husky|\.vscode|\.devcontainer)/|(^|/)(middleware|proxy)\.[cm]?[jt]s$|(^|/)\.npmrc$|(^|/)CODEOWNERS$|(^|/)vitest\.config\.[cm]?[jt]s$|(^|/)supabase/'
+          PROTECTED='^(\.claude|\.github|scripts|api|slack-dispatch)/|^(\.gitignore|\.gitattributes)$|(^|/)(CLAUDE\.md|CLAUDE\.local\.md|\.gitattributes)$|(^|/)\.claude/|(^|/)(tenant|agent)-isolation[^/]*$|(^|/)[^/]*isolation[^/]*\.(test|spec)\.[cm]?[jt]sx?$|(^|/)env-config\.test\.[cm]?[jt]s$|^(clyintel/)?test/stubs/|(^|/)vercel\.(json|[cm]?[jt]s)$|(^|/)\.vercelignore$|(^|/)next\.config\.[cm]?[jt]s$|^(clyintel/)?schema/|(^|/)\.ai/|(^|/)\.mcp\.json$|(^|/)\.env($|\.)|(^|/)\.gitmodules$|(^|/)(\.husky|\.vscode|\.devcontainer)/|(^|/)(middleware|proxy)\.[cm]?[jt]s$|(^|/)\.npmrc$|(^|/)CODEOWNERS$|(^|/)vitest\.config\.[cm]?[jt]s$|(^|/)supabase/'
           CHANGED_FILES() { git diff --name-only -z --no-renames --no-ext-diff --no-textconv "$BASE_SHA" "refs/heads/$BRANCH"; }
           # Under .factory/ (only .factory/runs/ can get past .gitignore) the ONE file a run may add
           # is its own run record; anything else there would ride along into main.
