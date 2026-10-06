@@ -77,5 +77,7 @@ jobs:
       - name: Install (clean, from lockfile)
         run: npm ci --no-audit --no-fund
 
+      # GITHUB_RUN_ID is unset because run-log.mjs names the record after it, and the run-log
+      # tests expect the local name (run-local.json), as when they run on a laptop.
       - name: Test
-        run: node --test ./*.test.mjs
+        run: env -u GITHUB_RUN_ID node --test ./*.test.mjs
