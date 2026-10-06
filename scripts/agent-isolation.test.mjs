@@ -622,7 +622,8 @@ test("vercel.json: Git deployments are off for factory branches, and publish pro
   const root = join(dirname(fileURLToPath(import.meta.url)), "..");
   // Both Vercel projects build from clyintel/ (their Root Directory). The repo-root vercel.json is
   // not used today but carries the same rule, so a project pointed at the repo root is covered too.
-  for (const rel of ["clyintel/vercel.json", "vercel.json"]) {
+  // slack-dispatch/ is the /d3 handler's own project; its vercel.json carries the rule as well.
+  for (const rel of ["clyintel/vercel.json", "vercel.json", "slack-dispatch/vercel.json"]) {
     const vercel = JSON.parse(readFileSync(join(root, rel), "utf8"));
     assert.equal(vercel.git?.deploymentEnabled?.["factory/**"], false, rel);
     // no other rule may re-enable a factory branch (Vercel deploys if ANY matching rule is true)
@@ -638,7 +639,7 @@ test("vercel.json: Git deployments are off for factory branches, and publish pro
   // publish's PROTECTED list covers vercel.json
   const protectedLine = WORKFLOW.split("\n").find((l) => l.trim().startsWith("PROTECTED="));
   const re = new RegExp(protectedLine.trim().replace(/^PROTECTED='/, "").replace(/'$/, ""), "i");
-  for (const rel of ["clyintel/vercel.json", "vercel.json"]) assert.ok(re.test(rel), `publish must refuse a change to ${rel}`);
+  for (const rel of ["clyintel/vercel.json", "vercel.json", "slack-dispatch/vercel.json"]) assert.ok(re.test(rel), `publish must refuse a change to ${rel}`);
 });
 
 // What the agents can reach on the network, reported from inside the real agent container by a

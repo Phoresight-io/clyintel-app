@@ -1,20 +1,33 @@
 import crypto from "node:crypto";
 
-// Vercel serverless function. Receives Slack slash-command POSTs, verifies them,
+// Vercel serverless function (its own Vercel project, Root Directory slack-dispatch/, so the
+// dispatch token never sits in the customer app's runtime). Receives Slack slash-command POSTs, verifies them,
 // checks the caller against an allowlist, fires a GitHub repository_dispatch, then
 // tells Slack the result. Usage in Slack: `/d3 <what to build>`.
 // Slack sends x-www-form-urlencoded; we need the RAW body to verify the signature.
+// `config` is a Next.js setting; a plain Vercel function ignores it. This handler never reads
+// req.body, so the stream should reach it unread. If the runtime ever hands over a consumed
+// stream, readRaw fails fast (400, logged) instead of hanging past Slack's 3-second window.
+// The first end-to-end /d3 after deploy is what confirms it.
 export const config = { api: { bodyParser: false } };
 
 // Slash-command bodies are tiny; refuse anything big, and don't hang on a bad stream.
 const MAX_BODY_BYTES = 100_000;
+const READ_TIMEOUT_MS = 1500; // leaves room for the GitHub call inside Slack's 3s window
 // The brief ends up in the agent prompt, the run log and the PR body (GitHub rejects bodies over 65,536 chars).
 const MAX_BRIEF_CHARS = 4000;
-const readRaw = (req) =>
+export const readRaw = (req, timeoutMs = READ_TIMEOUT_MS) =>
   new Promise((resolve, reject) => {
+    // Already read by someone else: the data/end events have fired and would never come again.
+    if (req.readableEnded) return reject(new Error("body already consumed"));
     const chunks = [];
     let bytes = 0;
     let tooBig = false;
+    const timer = setTimeout(() => {
+      tooBig = true; // ignore anything that trickles in afterwards
+      chunks.length = 0;
+      reject(new Error("body read timed out")); // no destroy: the 400 still has to go out
+    }, timeoutMs);
     req.on("data", (c) => {
       if (tooBig) return; // stop accumulating once rejected
       const buf = Buffer.isBuffer(c) ? c : Buffer.from(c);
@@ -22,14 +35,21 @@ const readRaw = (req) =>
       if (bytes > MAX_BODY_BYTES) {
         tooBig = true;
         chunks.length = 0;
+        clearTimeout(timer);
         reject(new Error("body too large"));
         req.destroy?.();
         return;
       }
       chunks.push(buf); // concat as bytes so a multi-byte char split across chunks survives
     });
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    req.on("error", reject);
+    req.on("end", () => {
+      clearTimeout(timer);
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    });
+    req.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
   });
 
 function verifySlack(raw, headers) {
@@ -62,8 +82,9 @@ export default async function handler(req, res) {
   let raw;
   try {
     raw = await readRaw(req);
-  } catch {
-    return res.status(413).send("bad request body");
+  } catch (err) {
+    if (err.message !== "body too large") console.error("d3: could not read the request body:", err.message);
+    return res.status(err.message === "body too large" ? 413 : 400).send("bad request body");
   }
   if (!verifySlack(raw, req.headers)) return res.status(401).send("bad signature");
 
@@ -117,7 +138,7 @@ export default async function handler(req, res) {
     return ephemeral(res, "⚠️ Couldn't reach GitHub to start the run. Try again.");
   }
 
-  // Ephemeral and without the brief: it may name customers or invoices, and the orchestrator's
-  // own start message already posts it to the configured channel.
+  // Ephemeral and without the brief: it may name customers or invoices. The factory workflow's
+  // notify-start job posts the start message to the configured channel.
   return ephemeral(res, "🏭 D3 pipeline starting. Progress will be posted in the channel.");
 }
