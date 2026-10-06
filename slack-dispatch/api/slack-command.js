@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
-// Vercel serverless function. Receives Slack slash-command POSTs, verifies them,
+// Vercel serverless function (its own Vercel project, Root Directory slack-dispatch/, so the
+// dispatch token never sits in the customer app's runtime). Receives Slack slash-command POSTs, verifies them,
 // checks the caller against an allowlist, fires a GitHub repository_dispatch, then
 // tells Slack the result. Usage in Slack: `/d3 <what to build>`.
 // Slack sends x-www-form-urlencoded; we need the RAW body to verify the signature.
@@ -117,7 +118,7 @@ export default async function handler(req, res) {
     return ephemeral(res, "⚠️ Couldn't reach GitHub to start the run. Try again.");
   }
 
-  // Ephemeral and without the brief: it may name customers or invoices, and the orchestrator's
-  // own start message already posts it to the configured channel.
+  // Ephemeral and without the brief: it may name customers or invoices. The factory workflow's
+  // notify-start job posts the start message to the configured channel.
   return ephemeral(res, "🏭 D3 pipeline starting. Progress will be posted in the channel.");
 }

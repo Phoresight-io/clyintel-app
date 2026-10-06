@@ -92,7 +92,7 @@ const SAFE_ARG = /^[A-Za-z0-9_.\/:@~^,%+][A-Za-z0-9_.\/:@~^=,%+-]*$/;
 // human). package.json is deliberately NOT blocked: a feature legitimately adds dependencies.
 const CODER_PROTECTED = new RegExp(
   [
-    "^(\\.claude|\\.github|scripts|api|\\.git)/",
+    "^(\\.claude|\\.github|scripts|api|slack-dispatch|\\.git)/",
     "^(\\.gitignore|\\.gitattributes)$",
     "(^|/)(CLAUDE\\.md|CLAUDE\\.local\\.md|\\.gitattributes)$",
     "(^|/)\\.claude/",
