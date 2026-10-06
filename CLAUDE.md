@@ -50,10 +50,10 @@ Not configured yet. Update this file when a test framework is chosen.
 | What | Where |
 |---|---|
 | Product config | `clyintel/CLAUDE.md` |
-| Next.js entry | `app/` |
-| Shared types | `types/` |
+| Next.js entry | `clyintel/app/` |
+| Shared types | `clyintel/types/` |
 | Schema history | `schema/` |
-| Supabase types | `types/supabase.ts` |
+| Supabase types | `clyintel/types/supabase.ts` |
 
 ---
 

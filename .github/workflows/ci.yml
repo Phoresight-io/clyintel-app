@@ -1,12 +1,17 @@
 name: CI
 
 # Minimal CI: typecheck + tests on every PR into main or develop. The app lives
-# in clyintel/, so all steps run there. No secrets: STRIPE_TEST_SMOKE stays unset,
+# in clyintel/, so the app job runs there. No secrets: STRIPE_TEST_SMOKE stays unset,
 # so the env-gated Stripe test-mode smoke (lib/settlement/chargePathSmoke.test.ts)
 # skips — the default suite is fully hermetic (no network, no real DB/Stripe).
+#
+# ready_for_review: the D3 Factory opens its draft PRs with GITHUB_TOKEN, and events
+# caused by GITHUB_TOKEN start no workflows, so `opened` never runs CI on a factory PR.
+# A person marking the draft ready does start workflows, so CI runs at hand-over.
 on:
   pull_request:
     branches: [main, develop]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 # Least privilege — CI only needs to read the checked-out code.
 permissions:
@@ -43,3 +48,34 @@ jobs:
 
       - name: Test
         run: npx vitest run
+
+  # The D3 Factory's own suite (scripts/*.test.mjs): the guards, the publish checks and the
+  # workflow invariants (one secret in the pipeline job, protected paths, vercel.json rules).
+  # Needs only node, git, bash and jq, which ubuntu-latest has. The two real-container tests
+  # skip unless D3_SANDBOX_TEST_IMAGE is set, so this job pulls no images. No path filter on
+  # purpose: if this becomes a required check, a skipped job would sit at "pending" forever.
+  factory:
+    name: factory scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: scripts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+
+      - name: Install (clean, from lockfile)
+        run: npm ci --no-audit --no-fund
+
+      - name: Test
+        run: node --test ./*.test.mjs

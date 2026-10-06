@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, existsSync, symlinkSync, readdirSync, lstatSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, matchesGlob } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const WORKFLOW = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../.github/workflows/d3-factory.yml"), "utf8");
@@ -474,6 +474,23 @@ function commitScript() {
   return body.join("\n").trim() + "\n";
 }
 
+// Rules (other than "factory/**" itself) set to true that could match a factory branch. Two checks,
+// either is enough to flag a rule, so the guard errs towards refusing:
+//   - a real glob match against sample branch names (node's path.matchesGlob, minimatch-style);
+//   - a loose one, in case Vercel's matcher lets * cross "/": the pattern's literal prefix (up to
+//     its first glob character) is a prefix of "factory/run-", or is itself under factory.
+const FACTORY_BRANCHES = ["factory/run-1", "factory/run-18157293401"];
+function factoryReEnablingRules(deploymentEnabled) {
+  return Object.entries(deploymentEnabled)
+    .filter(([pattern, on]) => pattern !== "factory/**" && on !== false)
+    .filter(([pattern]) => {
+      if (FACTORY_BRANCHES.some((b) => matchesGlob(b, pattern))) return true;
+      const literal = pattern.match(/^[^*?[{\\]*/)[0];
+      return "factory/run-".startsWith(literal) || literal.toLowerCase().startsWith("factory");
+    })
+    .map(([pattern]) => pattern);
+}
+
 // Vercel would otherwise build a preview of every factory/run-* branch: unreviewed agent code, run
 // with the Preview environment's variables. clyintel/vercel.json turns those deployments off, and
 // publish refuses any run that edits vercel.json, so an agent cannot turn them back on.
@@ -485,11 +502,13 @@ test("vercel.json: Git deployments are off for factory branches, and publish pro
     const vercel = JSON.parse(readFileSync(join(root, rel), "utf8"));
     assert.equal(vercel.git?.deploymentEnabled?.["factory/**"], false, rel);
     // no other rule may re-enable a factory branch (Vercel deploys if ANY matching rule is true)
-    for (const [pattern, on] of Object.entries(vercel.git.deploymentEnabled)) {
-      const couldMatchFactory = pattern.startsWith("factory") || pattern === "**" || pattern === "*";
-      if (pattern !== "factory/**") assert.ok(!(on && couldMatchFactory), `${rel}: rule ${pattern} could re-enable factory previews`);
-    }
+    assert.deepEqual(factoryReEnablingRules(vercel.git.deploymentEnabled), [], rel);
   }
+  // the guard itself catches rules a prefix check missed
+  for (const evil of ["*/**", "f*", "fac*/*", "{factory,x}/**", "?actory/**", "**", "*", "factory/run-*", "factory/run-1", "factory*"])
+    assert.deepEqual(factoryReEnablingRules({ "factory/**": false, [evil]: true }), [evil], evil);
+  // and leaves ordinary rules alone
+  assert.deepEqual(factoryReEnablingRules({ "factory/**": false, main: true, develop: true, "release/*": true, "feature/**": true, "*/**": false }), []);
   // the branch the workflow pushes is under factory/
   assert.match(WORKFLOW, /BRANCH: factory\/run-\$\{\{ github\.run_id \}\}/);
   // publish's PROTECTED list covers vercel.json
