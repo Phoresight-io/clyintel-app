@@ -331,18 +331,27 @@ jobs:
 
       # The agents' notes. The orchestrator writes factory-notes.json after each stage into a directory
       # mounted from the host, so a failed run keeps the notes of the stages that finished: these two
-      # steps run even after a failed or cancelled agent step. An agent's Bash can reach the same
-      # mount, so the file is taken like the bundle: only as a regular file (never through a link),
-      # only if small, copied to a path the container never saw. notify-agents re-validates it anyway.
+      # steps run even after a failed, timed-out or cancelled agent step. An agent's Bash can reach the
+      # same mount, and after a timeout or cancel the agent container can still be running, so:
+      #   1. the container is removed FIRST (nothing can write the file during the copy);
+      #   2. only a regular, non-link file is copied at all (a FIFO would hang cp), WITHOUT following
+      #      links (cp -P), and the checks run again on the COPY, which only this step can reach: a
+      #      regular file, at most 8 KB. Anything else is deleted.
+      # notify-agents still re-validates every byte.
       - name: Collect the agents' notes (a regular file of at most 8 KB, or nothing)
         if: always()
         run: |
+          docker rm -f "d3-agents-$GITHUB_RUN_ID" >/dev/null 2>&1 || true
           IN="$RUNNER_TEMP/d3-notes/factory-notes.json"
           OUT="$RUNNER_TEMP/notes-up"
           rm -rf "$OUT" && mkdir -p "$OUT"
-          if [ -f "$IN" ] && [ ! -L "$IN" ] && [ "$(wc -c < "$IN")" -le 8192 ]; then
-            cp -- "$IN" "$OUT/factory-notes.json"
+          # Only a regular, non-link file is ever opened: cp on a FIFO would block (nothing writes to it any
+          # more) until the job timeout. The container is gone, so this pre-check cannot race.
+          if [ -f "$IN" ] && [ ! -L "$IN" ]; then cp -P -- "$IN" "$OUT/factory-notes.json" 2>/dev/null || true; fi
+          if [ -f "$OUT/factory-notes.json" ] && [ ! -L "$OUT/factory-notes.json" ] && [ "$(wc -c < "$OUT/factory-notes.json")" -le 8192 ]; then
+            echo "Notes file collected."
           else
+            rm -rf "$OUT" && mkdir -p "$OUT"
             echo "No usable notes file; nothing to upload."
           fi
 

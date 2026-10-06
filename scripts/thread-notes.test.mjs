@@ -8,7 +8,7 @@
 //   - a Slack failure never blocks a PR and never raises a failure alarm.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, existsSync, symlinkSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -59,6 +59,9 @@ printf '%s' ${JSON.stringify(response)}
 exit ${curlExit}
 `);
   chmodSync(join(bin, "curl"), 0o755);
+  // docker is only ever asked to remove the agent container: record the call, touch nothing
+  writeFileSync(join(bin, "docker"), `#!/bin/bash\nprintf '%s\\n' "$*" >> "${root}/docker.calls"\n`);
+  chmodSync(join(bin, "docker"), 0o755);
   return { root, bin, cwd };
 }
 const postsOf = (root) => {
@@ -67,8 +70,8 @@ const postsOf = (root) => {
 };
 const callsOf = (root) =>
   existsSync(join(root, "curl.calls")) ? readFileSync(join(root, "curl.calls"), "utf8").split("\0\n").filter(Boolean).map((l) => l.split("\0")) : [];
-const run = (w, step, env) =>
-  spawnSync("bash", ["-e", "-c", stepScript(step)], { cwd: w.cwd, env: { PATH: `${w.bin}:${process.env.PATH}`, HOME: w.root, ...env }, encoding: "utf8" });
+const run = (w, step, env, timeout) =>
+  spawnSync("bash", ["-e", "-c", stepScript(step)], { cwd: w.cwd, env: { PATH: `${w.bin}:${process.env.PATH}`, HOME: w.root, ...env }, encoding: "utf8", timeout });
 
 const BASE_ENV = { SLACK_BOT_TOKEN: "xoxb-test", SLACK_CHANNEL: "C0CHAN", SLACK_USER: "U0ABC123", THREAD_TS: "1700000000.000100" };
 const note = (agent, text, extra = {}) => ({ agent, text, needs_you: false, ...extra });
@@ -573,6 +576,8 @@ test("pipeline collect step: takes only a regular file of at most 8 KB, never th
     exact: (dir) => writeFileSync(join(dir, "factory-notes.json"), "x".repeat(8192)),
     link: (dir, w) => { writeFileSync(join(w.root, "elsewhere"), "{}"); symlinkSync(join(w.root, "elsewhere"), join(dir, "factory-notes.json")); },
     dir: (dir) => mkdirSync(join(dir, "factory-notes.json")),
+    // nothing writes to a planted FIFO once the container is gone: cp on it would block until the job timeout
+    fifo: (dir) => execFileSync("mkfifo", [join(dir, "factory-notes.json")]),
     none: () => {},
   };
   for (const [name, make] of Object.entries(cases)) {
@@ -581,11 +586,33 @@ test("pipeline collect step: takes only a regular file of at most 8 KB, never th
       const dir = join(w.root, "d3-notes");
       mkdirSync(dir);
       make(dir, w);
-      const r = run(w, step, { RUNNER_TEMP: w.root });
-      assert.equal(r.status, 0, `${name}: ${r.stderr}`);
+      const r = run(w, step, { RUNNER_TEMP: w.root, GITHUB_RUN_ID: "42" }, 10_000);
+      assert.equal(r.status, 0, `${name}: ${r.error?.code ?? ""} ${r.stderr}`); // a hang (killed by the timeout) has no status
+      assert.equal(readFileSync(join(w.root, "docker.calls"), "utf8"), "rm -f d3-agents-42\n", `${name}: the agent container is removed first`);
       const up = join(w.root, "notes-up", "factory-notes.json");
       assert.equal(existsSync(up), ["ok", "exact"].includes(name), name);
       if (existsSync(up)) assert.ok(!readFileSync(up, "utf8").includes("elsewhere"));
     } finally { rmSync(w.root, RM); }
   }
+});
+
+test("pipeline collect step: the agent container is removed BEFORE the copy, and the copy never follows a link", () => {
+  const script = stepScript("Collect the agents' notes (a regular file of at most 8 KB, or nothing)");
+  assert.ok(script.indexOf('docker rm -f "d3-agents-$GITHUB_RUN_ID"') >= 0 && script.indexOf("docker rm -f") < script.indexOf("cp "), "docker rm must come before cp");
+  assert.match(script, /if \[ -f "\$IN" \] && \[ ! -L "\$IN" \]; then cp -P -- "\$IN" "\$OUT\/factory-notes\.json"/);
+  // the checks are made on the copy, not on the file the container could have been writing
+  const checks = script.split("\n").find((l) => l.startsWith(`if [ -f "$OUT`));
+  assert.match(checks, /"\$OUT\/factory-notes\.json"/);
+  assert.doesNotMatch(checks, /\$IN/);
+  // a link left in the notes directory is copied AS a link, caught by the check on the copy, and deleted
+  const w = sandbox();
+  try {
+    const dir = join(w.root, "d3-notes");
+    mkdirSync(dir);
+    writeFileSync(join(w.root, "secret"), "host file");
+    symlinkSync(join(w.root, "secret"), join(dir, "factory-notes.json"));
+    const r = run(w, "Collect the agents' notes (a regular file of at most 8 KB, or nothing)", { RUNNER_TEMP: w.root, GITHUB_RUN_ID: "1" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(readdirSync(join(w.root, "notes-up")), [], "nothing from the link was kept");
+  } finally { rmSync(w.root, RM); }
 });
