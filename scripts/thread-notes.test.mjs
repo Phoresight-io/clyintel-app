@@ -59,6 +59,9 @@ printf '%s' ${JSON.stringify(response)}
 exit ${curlExit}
 `);
   chmodSync(join(bin, "curl"), 0o755);
+  // docker is only ever asked to remove the agent container: record the call, touch nothing
+  writeFileSync(join(bin, "docker"), `#!/bin/bash\nprintf '%s\\n' "$*" >> "${root}/docker.calls"\n`);
+  chmodSync(join(bin, "docker"), 0o755);
   return { root, bin, cwd };
 }
 const postsOf = (root) => {
@@ -581,11 +584,33 @@ test("pipeline collect step: takes only a regular file of at most 8 KB, never th
       const dir = join(w.root, "d3-notes");
       mkdirSync(dir);
       make(dir, w);
-      const r = run(w, step, { RUNNER_TEMP: w.root });
+      const r = run(w, step, { RUNNER_TEMP: w.root, GITHUB_RUN_ID: "42" });
       assert.equal(r.status, 0, `${name}: ${r.stderr}`);
+      assert.equal(readFileSync(join(w.root, "docker.calls"), "utf8"), "rm -f d3-agents-42\n", `${name}: the agent container is removed first`);
       const up = join(w.root, "notes-up", "factory-notes.json");
       assert.equal(existsSync(up), ["ok", "exact"].includes(name), name);
       if (existsSync(up)) assert.ok(!readFileSync(up, "utf8").includes("elsewhere"));
     } finally { rmSync(w.root, RM); }
   }
+});
+
+test("pipeline collect step: the agent container is removed BEFORE the copy, and the copy never follows a link", () => {
+  const script = stepScript("Collect the agents' notes (a regular file of at most 8 KB, or nothing)");
+  assert.ok(script.indexOf('docker rm -f "d3-agents-$GITHUB_RUN_ID"') >= 0 && script.indexOf("docker rm -f") < script.indexOf("cp "), "docker rm must come before cp");
+  assert.match(script, /cp -P -- "\$IN" "\$OUT\/factory-notes\.json"/);
+  // the checks are made on the copy, not on the file the container could have been writing
+  const checks = script.split("\n").find((l) => l.startsWith("if [ -f"));
+  assert.match(checks, /"\$OUT\/factory-notes\.json"/);
+  assert.doesNotMatch(checks, /\$IN/);
+  // a link left in the notes directory is copied AS a link, caught by the check on the copy, and deleted
+  const w = sandbox();
+  try {
+    const dir = join(w.root, "d3-notes");
+    mkdirSync(dir);
+    writeFileSync(join(w.root, "secret"), "host file");
+    symlinkSync(join(w.root, "secret"), join(dir, "factory-notes.json"));
+    const r = run(w, "Collect the agents' notes (a regular file of at most 8 KB, or nothing)", { RUNNER_TEMP: w.root, GITHUB_RUN_ID: "1" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(readdirSync(join(w.root, "notes-up")), [], "nothing from the link was kept");
+  } finally { rmSync(w.root, RM); }
 });
