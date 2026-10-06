@@ -143,6 +143,12 @@ jobs:
           AGENT_REPO="$RUNNER_TEMP/d3-agent-repo"
           rm -rf "$AGENT_REPO" && mkdir -p "$AGENT_REPO"
           cp -a "$GITHUB_WORKSPACE/." "$AGENT_REPO/"
+          # The egress proxy runs from its own read-only copy of the TRUSTED script, taken here before
+          # any agent runs and kept outside the agents' copy (which they can edit).
+          PROXY_DIR="$RUNNER_TEMP/d3-proxy"
+          rm -rf "$PROXY_DIR" && mkdir -p "$PROXY_DIR"
+          cp -- "$GITHUB_WORKSPACE/scripts/egress-proxy.mjs" "$PROXY_DIR/egress-proxy.mjs"
+          chmod 0444 "$PROXY_DIR/egress-proxy.mjs" && chmod 0555 "$PROXY_DIR"
 
       # Factory infra is self-contained in scripts/ with its own package.json and
       # lockfile, so the app's dependencies are never touched.
@@ -179,6 +185,57 @@ jobs:
           grep -q "^[^:]*:[^:]*:$G:" "$ETC/group" || echo "d3agent:x:$G:" >> "$ETC/group"
           chmod 0444 "$ETC/passwd" "$ETC/group"
 
+      # EGRESS LOCKDOWN. The agents' only route out is a proxy that allows exactly CONNECT
+      # api.anthropic.com:443 (scripts/egress-proxy.mjs). Three pieces:
+      #   1. an --internal Docker network for the agent container: no route to anything outside it
+      #      (other hosts, the cloud metadata addresses 169.254.169.254 / 168.63.129.16, the default
+      #      bridge, DNS for outside names);
+      #   2. a host firewall rule dropping everything that network sends to the runner itself. An
+      #      --internal network still reaches the host on its own gateway address, so without this any
+      #      service listening on the runner would be one connect() away;
+      #   3. the proxy container, on that network (as "proxy") and on the default bridge. It runs the
+      #      proxy script from $RUNNER_TEMP/d3-proxy, the read-only copy of the TRUSTED checkout's
+      #      script taken in the Copy step (the agents never see it), with no secret, no capabilities
+      #      and a read-only filesystem.
+      # The bridge interface has a fixed name so the firewall rule can name it; runs never overlap
+      # (concurrency group d3-factory), and cleanup removes all three.
+      - name: Start the agents' internal network and egress proxy
+        run: |
+          EGRESS_NET="d3-egress-$GITHUB_RUN_ID"
+          EGRESS_IF=d3egress0 # also named in the cleanup step
+          docker network create --internal -o "com.docker.network.bridge.name=$EGRESS_IF" "$EGRESS_NET" >/dev/null
+          sudo iptables -I INPUT -i "$EGRESS_IF" -j DROP
+          # IPv6 too, wherever the kernel has it. Fails the run if the rule cannot be added, rather than
+          # carrying on with half a lockdown; skipped only where IPv6 does not exist at all.
+          if [ -e /proc/net/if_inet6 ]; then sudo ip6tables -I INPUT -i "$EGRESS_IF" -j DROP; fi
+          docker run -d --init --name "d3-proxy-$GITHUB_RUN_ID" \
+            --user "$(id -u):$(id -g)" \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --read-only --pids-limit 256 --memory 256m \
+            --network bridge \
+            -v "$RUNNER_TEMP/d3-proxy/egress-proxy.mjs:/proxy/egress-proxy.mjs:ro" \
+            "$AGENT_IMAGE" node /proxy/egress-proxy.mjs >/dev/null
+          docker network connect --alias proxy "$EGRESS_NET" "d3-proxy-$GITHUB_RUN_ID"
+          READY=""
+          for _ in $(seq 1 30); do
+            if docker logs "d3-proxy-$GITHUB_RUN_ID" 2>&1 | grep -q "egress proxy listening"; then READY=1; break; fi
+            sleep 1
+          done
+          if [ -z "$READY" ]; then
+            echo "The egress proxy did not start." >&2
+            docker logs "d3-proxy-$GITHUB_RUN_ID" 2>&1 | sed 's/^/    | /' >&2
+            exit 1
+          fi
+          # Fail closed if the internal network resolves outside names. Docker engines before 26
+          # forwarded those lookups to the host's resolver, which would leave DNS (<data>.attacker.example)
+          # as a way out past the proxy. A lookup that SUCCEEDS stops the run before any agent starts.
+          if docker run --rm --name "d3-dnscheck-$GITHUB_RUN_ID" --network "$EGRESS_NET" \
+               --user "$(id -u):$(id -g)" --cap-drop ALL --security-opt no-new-privileges --read-only \
+               "$AGENT_IMAGE" node -e 'require("dns").promises.lookup("example.com").then(() => process.exit(0), () => process.exit(1))'; then
+            echo "Outside DNS resolves on the agents' internal network; refusing to run the agents." >&2
+            exit 1
+          fi
+
       # THE AGENT CONTAINER. The orchestrator and every agent session it starts run here, never on
       # the runner itself. What the agents can reach:
       #   - files: only the agents' copy of the repo (read-write at /work/repo; the coder commits there),
@@ -191,8 +248,13 @@ jobs:
       #     line. No GITHUB_TOKEN, no ACTIONS_* runtime tokens, no Slack token, no Sheet webhook.
       #   - privileges: the runner's own non-root uid (so the files it writes stay the runner's),
       #     no capabilities, no setuid escalation, read-only root filesystem.
-      #   - network: open (the sessions call the Anthropic API). An injected agent can therefore send
-      #     out what it can read: the repo and the spend-capped key. Rotate the key if in doubt.
+      #   - network: only the egress proxy (see the step above). The container sits on the internal
+      #     network d3-egress-<run id>, whose sole way out is CONNECT api.anthropic.com:443 through
+      #     http://proxy:8888. Non-essential CLI traffic (telemetry, error reports, update checks) is
+      #     switched off, as those hosts are not allowed. The npm registry is not reachable either:
+      #     the agents work with the dependencies installed above, and a new dependency needs a human
+      #     (coder.md says so). What is left: an injected agent can still
+      #     call the Anthropic API, with this key or one of its own, so the key stays spend-capped.
       # The orchestrator refuses to start without D3_FACTORY_SANDBOX=container, or if any other
       # credential-like variable is set (agent-env.mjs), so moving this step back onto the runner fails.
       # The container is named so the cleanup step can kill it: cancelling a run or hitting the job
@@ -214,12 +276,14 @@ jobs:
             --cap-drop ALL --security-opt no-new-privileges \
             --read-only --tmpfs /tmp:rw,exec,nosuid,nodev,size=2g \
             --pids-limit 4096 \
-            --network bridge \
+            --network "d3-egress-$GITHUB_RUN_ID" \
             -v "$RUNNER_TEMP/d3-agent-repo:/work/repo" \
             -v "$RUNNER_TEMP/d3-etc/passwd:/etc/passwd:ro" -v "$RUNNER_TEMP/d3-etc/group:/etc/group:ro" \
             --workdir /work/repo/scripts \
             -e D3_FACTORY_SANDBOX=container \
             -e HOME=/tmp -e TMPDIR=/tmp -e CI=true -e LANG=C.UTF-8 \
+            -e HTTPS_PROXY=http://proxy:8888 -e HTTP_PROXY=http://proxy:8888 -e NO_PROXY=localhost,127.0.0.1 \
+            -e CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
             -e D3_FACTORY_ANTHROPIC_API_KEY \
             -e BRIEF -e SLACK_USER -e BRANCH \
             -e GITHUB_RUN_ID -e GITHUB_REPOSITORY -e GITHUB_ACTOR \
@@ -271,11 +335,24 @@ jobs:
       # Always, including after a cancel or timeout: kill the containers first (a cancelled `docker run`
       # client leaves its container running), then delete the agents' copy. The coder can chmod
       # directories to make them undeletable, so restore owner permissions first (chmod -R does not
-      # follow links), and fail loudly if anything is left. Nothing here runs git.
+      # follow links), and fail loudly if anything is left. Nothing here runs git. The proxy's log of
+      # REFUSED destinations is printed first: a run that tried to reach other hosts is worth a look.
       - name: Remove the agents' containers and working tree
         if: always()
         run: |
-          docker rm -f "d3-agents-$GITHUB_RUN_ID" "d3-commit-$GITHUB_RUN_ID" >/dev/null 2>&1 || true
+          if docker logs "d3-proxy-$GITHUB_RUN_ID" >/dev/null 2>&1; then
+            DENIED="$(docker logs "d3-proxy-$GITHUB_RUN_ID" 2>&1 | grep '^deny ' | sort | uniq -c | sort -rn | head -n 20 || true)"
+            if [ -n "$DENIED" ]; then
+              echo "Egress proxy refused these destinations (count, request), names as the agents sent them:"
+              printf '%s\n' "$DENIED" | sed 's/^/    | /'
+            else
+              echo "Egress proxy refused nothing."
+            fi
+          fi
+          docker rm -f "d3-agents-$GITHUB_RUN_ID" "d3-commit-$GITHUB_RUN_ID" "d3-proxy-$GITHUB_RUN_ID" "d3-dnscheck-$GITHUB_RUN_ID" >/dev/null 2>&1 || true
+          docker network rm "d3-egress-$GITHUB_RUN_ID" >/dev/null 2>&1 || true
+          sudo iptables -D INPUT -i d3egress0 -j DROP 2>/dev/null || true
+          sudo ip6tables -D INPUT -i d3egress0 -j DROP 2>/dev/null || true
           AGENT_REPO="$RUNNER_TEMP/d3-agent-repo"
           if [ -e "$AGENT_REPO" ]; then
             chmod -R u+rwX "$AGENT_REPO" 2>/dev/null || true
@@ -286,12 +363,10 @@ jobs:
             exit 1
           fi
 
-  # KNOWN FOLLOW-UP: PRs opened with the default GITHUB_TOKEN do not trigger other
-  # workflows, so ci.yml will NOT run on a factory PR (claude-review.yml does run once
-  # a human marks it ready, because that is a user event). Fixing CI needs a PAT or
-  # GitHub App token here, or `ready_for_review` in ci.yml's pull_request types. Not wired.
-  # The repo setting "Allow GitHub Actions to create and approve pull requests" is
-  # needed for `gh pr create` either way.
+  # CI on factory PRs: PRs opened with GITHUB_TOKEN start no workflows, so ci.yml lists
+  # `ready_for_review` and runs when a person marks the draft ready (proven on run 37407703521).
+  # The repo setting "Allow GitHub Actions to create and approve pull requests" is needed for
+  # `gh pr create`.
   publish:
     needs: [prepare, pipeline] # skipped if the pipeline failed, so a failed run opens no PR
     runs-on: ubuntu-latest
