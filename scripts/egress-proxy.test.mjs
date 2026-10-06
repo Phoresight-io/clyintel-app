@@ -32,7 +32,10 @@ test("logSafe: agent-supplied names are short and limited to a safe character se
 
 // A proxy on an ephemeral port whose "upstream" is a local echo server; records every upstream dial.
 async function harness({ upstreamFails = false } = {}) {
-  const echo = net.createServer((s) => s.pipe(s));
+  // The stand-in upstream. Its sockets get an error handler: when a test closes its side, the proxy
+  // tears the tunnel down and the echo socket can see ECONNRESET. Unhandled, that error crashes the
+  // whole test file, but only when the reset lands at the wrong moment (it did on hosted runners).
+  const echo = net.createServer((s) => { s.on("error", () => {}); s.pipe(s); });
   await new Promise((r) => echo.listen(0, "127.0.0.1", r));
   const dials = [];
   const lines = [];
@@ -62,7 +65,7 @@ function talk(port, data, { until, after } = {}) {
       if (until && until.test(buf)) { clearTimeout(t); s.destroy(); resolve(buf); }
     });
     s.on("close", () => { clearTimeout(t); resolve(buf); });
-    s.on("error", reject);
+    s.on("error", (e) => (buf ? resolve(buf) : reject(e))); // a reset after the answer arrived is not a failure
     s.write(data);
   });
 }

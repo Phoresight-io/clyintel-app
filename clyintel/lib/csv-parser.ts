@@ -32,7 +32,7 @@ function splitLines(text: string): string[] {
     const ch = text[i];
     if (ch === '"') {
       if (inQuotes && text[i + 1] === '"') {
-        current += '"';
+        current += '""';
         i++;
       } else {
         inQuotes = !inQuotes;
