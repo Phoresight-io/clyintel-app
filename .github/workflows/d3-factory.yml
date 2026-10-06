@@ -297,8 +297,9 @@ jobs:
       contents: write
       pull-requests: write
     outputs:
-      # "true" once this run's validated record was sent to the Sheet, so notify-failure does not
-      # add a second row if a later step fails.
+      # "true" once this run's validated record was sent to the Sheet, which happens only after
+      # publish succeeded (PR opened, or the "no code changes" exit). Otherwise notify-failure
+      # adds its own "run failed" row.
       sheet_logged: ${{ steps.push.outputs.sheet_logged }}
     steps:
       # Trusted checkout of the base commit (develop, as resolved by the prepare job) only.
@@ -388,6 +389,7 @@ jobs:
           # exactly what run-log.mjs writes: one line of JSON, small, only the known keys, and only
           # short scalar values. `git show ref:path` prints the plain blob (no filters run).
           REC="$(git show "refs/heads/$BRANCH:.factory/runs/run-${{ github.run_id }}.json" 2>/dev/null || true)"
+          REC_OK=""
           if [ -n "$REC" ]; then
             if [ "$(printf '%s\n' "$REC" | wc -l)" -ne 1 ] || [ "$(printf %s "$REC" | wc -c)" -gt 2048 ] \
                || ! printf %s "$REC" | jq -e '
@@ -397,17 +399,24 @@ jobs:
               echo "Run record has unexpected content; refusing to push." >&2
               exit 1
             fi
-            # The record is now known to be exactly what run-log.mjs writes: send it to the run-log
-            # Sheet (best effort, never fails the run). This used to happen in the agent job, which
-            # meant the webhook URL sat where the agents could read it.
-            if [ -n "$RUN_LOG_SHEET_WEBHOOK" ]; then
+            REC_OK=1
+          fi
+          # The record is now known to be exactly what run-log.mjs writes. It goes to the run-log
+          # Sheet (best effort, never fails the run) only once publish has really succeeded: after
+          # the PR is opened, or at the "no code changes" exit. Sending it any earlier would log a
+          # run that a later step refuses (symlinks, the push, `gh pr create`) as the agents' own
+          # PASS/APPROVE, and sheet_logged=true would then stop notify-failure adding its "run
+          # failed" row. This used to happen in the agent job, which meant the webhook URL sat
+          # where the agents could read it.
+          log_run_record() {
+            if [ -n "$REC_OK" ] && [ -n "$RUN_LOG_SHEET_WEBHOOK" ]; then
               if curl -s -f -m 10 -X POST -H "Content-Type: application/json" --data-binary "$REC" "$RUN_LOG_SHEET_WEBHOOK" >/dev/null; then
                 echo "sheet_logged=true" >> "$GITHUB_OUTPUT"
               else
                 echo "Run-log Sheet webhook did not accept the record (continuing)."
               fi
             fi
-          fi
+          }
           # Symlinks (120000) and submodules/gitlinks (160000) are refused outright: a feature
           # never needs one, and a symlink under e.g. clyintel/public/ pointing outside the repo
           # would be resolved by the Vercel preview build. Only the NEW mode is checked, so
@@ -428,6 +437,7 @@ jobs:
                        --arg t "ℹ️ Factory run ${{ github.run_id }} finished with no code changes; no PR opened." \
                        '{channel:$c, text:$t}')" || true
             fi
+            log_run_record
             exit 0
           fi
           echo "What this run will push (each line prefixed with \"| \" so none can read as a workflow command):"
@@ -492,6 +502,7 @@ jobs:
 
           Review the diff, then merge to develop (Vercel deploys develop to develop.clyintel). Promote develop to main for production.")"
           echo "Opened $PR_URL"
+          log_run_record
           # Best-effort Slack notice with the real PR link (never fails the run).
           if [ -n "$SLACK_BOT_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
             curl -s -X POST https://slack.com/api/chat.postMessage \

@@ -679,6 +679,56 @@ test("publish: a refused record, or a refused push, never reaches the Sheet", ()
   }
 });
 
+// The record must reach the Sheet only once publish has really succeeded. A row sent before a later
+// refusal would log the agents' own PASS/APPROVE for a run that never opened a PR, and
+// sheet_logged=true would also stop notify-failure adding its "run failed" row.
+test("publish: a run refused AFTER the record check (symlink, or gh pr create failing) never reaches the Sheet", () => {
+  // symlink/submodule refusal comes after the record's content check
+  const ws = world({
+    log: writeRunLogRecord(),
+    edit: ({ j1, put }) => { put("clyintel/public/.keep"); symlinkSync("/proc/self/environ", join(j1, "clyintel/public/env.txt")); },
+  });
+  try {
+    assert.throws(() => publish(ws, { RUN_LOG_SHEET_WEBHOOK: HOOK }), /symlinks or submodules/);
+    assert.equal(sheetCalls(ws.root).length, 0, "a symlink-refused run was logged to the Sheet");
+    assert.ok(!existsSync(join(ws.root, "gh_output")) || !/sheet_logged/.test(readFileSync(join(ws.root, "gh_output"), "utf8")));
+  } finally { cleanup(ws); }
+
+  // gh pr create fails (after the push)
+  const wg = world({ log: writeRunLogRecord() });
+  try {
+    writeFileSync(join(wg.bin, "gh"), `#!/bin/bash\necho "gh: could not create pull request" >&2\nexit 1\n`);
+    assert.throws(() => publish(wg, { RUN_LOG_SHEET_WEBHOOK: HOOK }));
+    assert.equal(sheetCalls(wg.root).length, 0, "a run whose PR was never opened was logged to the Sheet");
+    assert.ok(!existsSync(join(wg.root, "gh_output")) || !/sheet_logged/.test(readFileSync(join(wg.root, "gh_output"), "utf8")));
+  } finally { cleanup(wg); }
+});
+
+test("publish: the Sheet row is sent only after the PR was opened", () => {
+  const w = world({ log: writeRunLogRecord() });
+  try {
+    // gh and curl append to one shared order file
+    writeFileSync(join(w.bin, "gh"), `#!/bin/bash\nprintf '%s\\0' "$@" > "${w.root}/gh.args"; echo gh >> "${w.root}/order"; echo https://github.com/x/y/pull/9\n`);
+    writeFileSync(join(w.bin, "curl"), `#!/bin/bash\nprintf '%s\\0' "$@" >> "${w.root}/curl.calls"; echo >> "${w.root}/curl.calls"; case "$*" in *sheet.example*) echo sheet >> "${w.root}/order";; esac\n`);
+    publish(w, { RUN_LOG_SHEET_WEBHOOK: HOOK });
+    assert.deepEqual(readFileSync(join(w.root, "order"), "utf8").trim().split("\n"), ["gh", "sheet"]);
+    assert.match(readFileSync(join(w.root, "gh_output"), "utf8"), /^sheet_logged=true$/m);
+  } finally { cleanup(w); }
+});
+
+test("publish: a run that changed no code (no PR, a successful exit) is still logged to the Sheet", () => {
+  const rec = writeRunLogRecord();
+  const w = world({ log: rec, edit: ({ j1 }) => rmSync(join(j1, "feat.txt")) });
+  try {
+    publish(w, { RUN_LOG_SHEET_WEBHOOK: HOOK });
+    assert.ok(!existsSync(join(w.root, "gh.args")), "opened a PR for a record-only run");
+    const calls = sheetCalls(w.root);
+    assert.equal(calls.length, 1);
+    assert.equal(dataOf(calls[0]), rec);
+    assert.match(readFileSync(join(w.root, "gh_output"), "utf8"), /^sheet_logged=true$/m);
+  } finally { cleanup(w); }
+});
+
 test("publish: a Sheet that rejects the record does not fail the run, and is not marked as logged", () => {
   const w = world({ log: writeRunLogRecord() });
   try {
