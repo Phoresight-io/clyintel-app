@@ -13,7 +13,6 @@ test("a plan-error FAIL goes to the planner first, then the coder, then the test
   assert.ok(at("planner agent") > -1 && at("coder agent") > at("planner agent") && at("tester agent") > at("coder agent"), "order planner → coder → tester");
   assert.match(p, /VERIFY each claimed error/);
   assert.match(p, /exactly as written in the corrected plan/);
-  assert.match(step.slack, /error in the plan/);
 });
 
 test("every other FAIL (test failure, could not run, no reason, no report) goes to the coder as before", () => {

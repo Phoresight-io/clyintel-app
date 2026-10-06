@@ -6,13 +6,21 @@
 // can deny it, so the policy below holds even if an agent is prompt-injected.
 //
 // Pure functions, no dependencies, so the policy can be unit tested offline
-// (see role-guard.test.mjs).
+// (see role-guard.test.mjs). The read-scope check (path-scope.mjs) looks at the filesystem to
+// resolve symlinks, but never writes or executes anything.
+
+import { SCOPED_TOOLS, scopeViolation } from "./path-scope.mjs";
 
 export const SUBAGENTS = ["planner", "coder", "tester", "reviewer"];
 
 // The top-level session must delegate: it can read and hand work to subagents,
 // but it cannot code, run shell commands, or edit files itself.
 const MAIN_THREAD_TOOLS = new Set(["Agent", "Task", "Read"]);
+
+// Roles whose Read/Grep/Glob are kept inside the repository (and out of .git/), see path-scope.mjs.
+// "main" is the top-level session. The coder and tester are not listed: they have Bash, so a path
+// rule on their read tools would stop nothing; the agent container is their boundary.
+export const READ_SCOPED_ROLES = new Set(["main", "planner", "reviewer"]);
 
 // The SDK's built-in channel a subagent uses to hand its result back to the session that
 // delegated to it. It reads and writes nothing, so every subagent needs it; without it the
@@ -232,6 +240,8 @@ export function decide(input, repoRoot) {
     if ((tool === "Agent" || tool === "Task") && !SUBAGENTS.includes(args.subagent_type)) {
       return deny(`Unknown subagent_type "${args.subagent_type}"; use one of: ${SUBAGENTS.join(", ")}.`);
     }
+    const scope = scopeViolation(tool, args, repoRoot);
+    if (scope) return deny(`Top-level session: ${scope}`);
     return {};
   }
 
@@ -241,6 +251,11 @@ export function decide(input, repoRoot) {
   }
   if (!ROLE_TOOLS[agentType].has(tool)) {
     return deny(`${agentType} may not use ${tool}.`);
+  }
+
+  if (READ_SCOPED_ROLES.has(agentType) && SCOPED_TOOLS.has(tool)) {
+    const scope = scopeViolation(tool, args, repoRoot);
+    if (scope) return deny(`${agentType}: ${scope}`);
   }
 
   if (agentType === "coder" && (tool === "Write" || tool === "Edit")) {

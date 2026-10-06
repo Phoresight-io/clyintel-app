@@ -1,14 +1,44 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { chdir } from "node:process";
-import { postSlack } from "./slack.mjs";
-import { writeRunLog, pushRunLogToSheet, parseTestResult } from "./run-log.mjs";
+import { writeRunLog, parseTestResult } from "./run-log.mjs";
+import { agentEnv, unexpectedCredentials, inSandbox, SANDBOX_MARKER, strayPids, isContainerInit } from "./agent-env.mjs";
+import { escapingSymlinks } from "./path-scope.mjs";
 import { makeGuardHook } from "./role-guard.mjs";
 import { baseCommit, snapshot, tamperedPaths } from "./instruction-guard.mjs";
 import { logLine, createTracer, seconds, money } from "./factory-log.mjs";
 import { fixStep } from "./fix-loop.mjs";
+
+// ISOLATION. This process and every agent session it starts run inside the agent container
+// (d3-factory.yml, "Run pipeline in the agent container"): only the repo is mounted, and the only
+// secret in its environment is D3_FACTORY_ANTHROPIC_API_KEY. It posts nothing to Slack and nothing
+// to the run-log Sheet: those credentials live in the notify-start, publish and notify-failure
+// jobs, which never execute agent code. So refuse to start anywhere else.
+const strayCredentials = unexpectedCredentials();
+if (strayCredentials.length) {
+  console.error(`Refusing to run: credential-like variables reached the agent container: ${strayCredentials.join(", ")}. ` +
+    `The agent job must hold exactly one secret, D3_FACTORY_ANTHROPIC_API_KEY.`);
+  process.exit(1);
+}
+// The dedicated key is mandatory (no fallback to the shared ANTHROPIC_API_KEY): stop here, before
+// any paid session, if it is missing.
+let sessionEnv;
+try {
+  sessionEnv = agentEnv();
+} catch (err) {
+  console.error(err.message);
+  process.exit(1);
+}
+
+const pid1 = (() => {
+  try { return readFileSync("/proc/1/comm", "utf8"); } catch { return ""; }
+})();
+if (!inSandbox() || !isContainerInit(pid1)) {
+  console.error(`Refusing to run outside the agent container (${SANDBOX_MARKER} is not "container", or pid 1 is not the container's init).`);
+  process.exit(1);
+}
 
 // This script lives in scripts/ but the factory operates on the repo root
 // (.factory/, git, the app code). Anchor the working directory at the repo root
@@ -22,7 +52,6 @@ chdir(repoRoot);
 const startCommit = baseCommit(repoRoot);
 const instructionBaseline = snapshot(repoRoot);
 
-const channel = process.env.SLACK_CHANNEL; // undefined when run outside Slack
 // The workflow always sets BRIEF (to "" when neither the dispatch payload nor the input has
 // one), so `??` would never fall back: refuse an empty brief before any paid agent run.
 const brief = (process.env.BRIEF ?? "").trim();
@@ -118,6 +147,22 @@ class PipelineError extends Error {}
 // result message). Any non-success result (error_max_turns, error_during_execution,
 // ...) throws, so a failed run can never be mistaken for a successful one.
 async function run(prompt) {
+  // Nothing an earlier session started may still be running when the next one begins (a background
+  // process could swap files under the reviewer between the role guard's check and the Read). In the
+  // agent container the only legitimate processes are init (pid 1) and this one.
+  for (const pid of strayPids(readdirSync("/proc"), new Set([1, process.pid]))) {
+    try {
+      process.kill(pid, "SIGKILL");
+      log(`killed leftover process ${pid} before the next session`);
+    } catch {}
+  }
+  // The planner, reviewer and top-level session may only read inside the repo (path-scope.mjs),
+  // and their tools follow paths the hook never sees when they walk a directory. A symlink an
+  // earlier agent left that points out of the repo (or into .git) stops the run here.
+  const links = escapingSymlinks(repoRoot);
+  if (links.length) {
+    throw new PipelineError(`agent left symlinks that point outside the repository or into .git: ${links.slice(0, 5).join(", ")}`);
+  }
   // Every run() starts a new session that loads project settings and CLAUDE.md. If an
   // earlier agent planted or edited any (hooks in .claude/settings.json, a steering
   // CLAUDE.md), refuse to start the next session.
@@ -134,19 +179,14 @@ async function run(prompt) {
       allowedTools,
       hooks,
       maxTurns: MAX_TURNS,
+      // Explicit: the read-scope rules resolve relative paths, and Grep/Glob's default search
+      // directory, against the repo root.
+      cwd: repoRoot,
       // Explicit, so CLAUDE.md (schema + billing rules) is always loaded and never
       // depends on the SDK default; excludes user/local settings on the runner.
       settingSources: ["project"],
-      // Least privilege, NOT a boundary: the agents get only what they need (not SLACK_BOT_TOKEN,
-      // RUN_LOG_SHEET_WEBHOOK or GITHUB_*), but the coder's Bash runs as the same uid as the
-      // Actions runner, which can read every job secret via /proc. Assume an injected agent can
-      // reach them; real isolation needs a separate user or container. The Anthropic key must
-      // reach the agents, so use the dedicated spend-capped key, and a chat:write-only Slack token.
-      env: Object.fromEntries(
-        ["PATH", "HOME", "ANTHROPIC_API_KEY", "LANG", "TMPDIR", "CI", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"]
-          .filter((k) => process.env[k] !== undefined)
-          .map((k) => [k, process.env[k]])
-      ),
+      // Only the dedicated key (as ANTHROPIC_API_KEY) and a few harmless variables; see agent-env.mjs.
+      env: sessionEnv,
     },
   });
   let final = null;
@@ -185,7 +225,6 @@ async function pipeline() {
     throw new PipelineError("the app's dependencies are not installed (clyintel/node_modules/.bin/vitest is missing); the tester could not run the suite");
   }
   log(`pipeline start (guard denials are logged as "role-guard DENIED")`);
-  await postSlack(channel, `▶️ Design → build → test → review: ${brief}`);
 
   // Design + build + test, in one delegated run.
   await run(`Run the Clyintel pipeline for this brief:
@@ -205,7 +244,6 @@ Report the tester's PASS/FAIL result. Do not review or deploy yet.`);
   if (!testPassed()) {
     const step = fixStep(existsSync(".factory/test-report.md") ? readFileSync(".factory/test-report.md", "utf8") : "");
     log(`test gate: not passed, fix route "${step.kind}"`);
-    await postSlack(channel, step.slack);
     await run(step.prompt);
   }
 
@@ -223,20 +261,10 @@ followed by paths.) Tell the reviewer to use that form.`);
 
   const stillFailing = !testPassed();
 
-  // Durable run log: one record per run (in-repo JSONL, + optional Sheet row).
+  // Durable run log: one record per run, committed with the branch. The publish job validates it
+  // and is the one that sends it to the Sheet and tells Slack (this container holds neither credential).
   const record = writeRunLog({ brief, reviewSummary: verdict, usage });
-  await pushRunLogToSheet(record);
-
-  // Deploy is not offered here: a human reviews the factory PR (opened by the
-  // workflow right after this script) and merges to develop (Vercel deploys develop to
-  // develop.clyintel); develop is promoted to main for production.
-  await postSlack(
-    channel,
-    `🔎 Factory reviewer verdict: ${record.review_verdict} (full review stays in the workflow logs).\n\n${stillFailing ? "❌ Tests did not pass (or no test report) — fix before merging. " : record.review_verdict === "APPROVE" ? "✅ Build + test + review complete (self-reported; a human still reviews the PR). " : "⚠️ Tests passed but the factory reviewer did not approve — review carefully. "}` +
-      `A pull request for branch \`${process.env.BRANCH ?? "(unknown)"}\` is being opened for human review; ` +
-      `merging it to develop deploys to dev (develop.clyintel); promote develop to main for production.\n` +
-      `📋 Logged: *${record.plan_title}* — tests ${record.test_result}, review ${record.review_verdict}.`
-  );
+  log(`pipeline done: tests ${record.test_result}${stillFailing ? " (not passed)" : ""}, reviewer ${record.review_verdict}, ${money(usage.cost)}`);
 }
 
 try {
@@ -244,11 +272,8 @@ try {
 } catch (err) {
   console.error(err);
   const reason = err instanceof PipelineError ? err.message : "unexpected error (see workflow logs)";
-  // Note: exiting non-zero skips the workflow's commit/PR steps, so this record is
-  // NOT committed. A failed run is only kept by the Sheet webhook (if configured)
-  // and the workflow logs.
-  const record = writeRunLog({ brief, reviewSummary: `pipeline failed: ${reason}`, usage });
-  await pushRunLogToSheet(record);
-  await postSlack(channel, `❌ D3 pipeline failed: ${reason}. No PR will be opened.`);
+  // Exiting non-zero fails the agent job, so nothing is bundled or published. notify-failure (which
+  // holds the Slack token and the Sheet webhook; this container holds neither) reports the failure.
+  log(`pipeline failed: ${reason}; ${usage.turns} turns, ${money(usage.cost)}`);
   process.exit(1); // fail the workflow so the commit/PR steps are skipped
 }
