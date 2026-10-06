@@ -29,13 +29,11 @@ export function fixStep(reportText) {
   if (reason === "plan error") {
     return {
       kind: "plan-error",
-      slack: "⚠️ Tests did not pass because of an error in the plan — sending it back to the planner, then the coder and tester once.",
       prompt: PLAN_ERROR_PROMPT,
     };
   }
   return {
     kind: "fix",
-    slack: "⚠️ Tests did not pass — sending back to the coder once.",
     prompt: TEST_FAILURE_PROMPT,
   };
 }
