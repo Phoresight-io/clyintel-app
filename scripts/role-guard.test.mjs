@@ -1,12 +1,19 @@
 // Run with: node --test scripts/role-guard.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { decide, makeGuardHook, repoRelative, isReadOnlyGit, stagingViolation } from "./role-guard.mjs";
 
-const ROOT = "/work/repo";
+// A real directory: the read-scope check resolves symlinks on disk (path-scope.mjs), and a root that
+// does not exist fails closed.
+const ROOT = realpathSync(mkdtempSync(join(tmpdir(), "guard-")));
+mkdirSync(join(ROOT, "clyintel/lib"), { recursive: true });
+mkdirSync(join(ROOT, ".git"));
+writeFileSync(join(ROOT, "clyintel/lib/a.ts"), "");
+symlinkSync("/proc/self/environ", join(ROOT, "clyintel/lib/env"));
 const denied = (r) => r?.hookSpecificOutput?.permissionDecision === "deny";
 const call = (tool_name, tool_input, who = {}) =>
   decide({ hook_event_name: "PreToolUse", tool_name, tool_input, ...who }, ROOT);
@@ -273,4 +280,56 @@ test("every subagent may hand its result back (SubagentHandback); the main threa
   for (const role of ["planner", "coder", "tester", "reviewer"]) {
     assert.ok(denied(call("WebFetch", { url: "https://example.com" }, as(role))), `${role} may use WebFetch`);
   }
+});
+
+test("read scope: planner, reviewer and the top-level session cannot read outside the repo or into .git", () => {
+  const outside = [
+    ["Read", { file_path: "/proc/self/environ" }],
+    ["Read", { file_path: "/proc/1/environ" }],
+    ["Read", { file_path: "/etc/passwd" }],
+    ["Read", { file_path: "../outside.txt" }],
+    ["Read", { file_path: "~/.npmrc" }],
+    ["Read", { file_path: ".git/config" }],
+    ["Read", { file_path: `${ROOT}/.git/HEAD` }],
+    ["Read", { file_path: "clyintel/lib/env" }], // a symlink the coder left behind
+    ["Grep", { pattern: "ANTHROPIC", path: "/proc" }],
+    ["Grep", { pattern: "x", path: ".git" }],
+    ["Grep", { pattern: "x", glob: "/proc/**" }],
+    ["Glob", { pattern: "/proc/*/environ" }],
+    ["Glob", { pattern: "**/*", path: "/" }],
+    ["Glob", { pattern: ".git/**" }],
+  ];
+  const inside = [
+    ["Read", { file_path: "clyintel/lib/a.ts" }],
+    ["Read", { file_path: `${ROOT}/clyintel/lib/a.ts` }],
+    ["Read", { file_path: ".factory/plan.md" }], // not written yet: judged by its parent
+    ["Grep", { pattern: "TODO" }],
+    ["Grep", { pattern: "TODO", path: "clyintel", glob: "*.ts" }],
+    ["Glob", { pattern: "**/*.ts" }],
+  ];
+  for (const who of [{}, as("planner"), as("reviewer")]) {
+    const role = who.agent_type ?? "main";
+    for (const [tool, args] of outside) {
+      if (role === "main" && tool !== "Read") continue; // main may not use Grep/Glob at all
+      const r = call(tool, args, who);
+      assert.ok(denied(r), `${role} ${tool} ${JSON.stringify(args)} was allowed`);
+      assert.match(r.hookSpecificOutput.permissionDecisionReason, /outside the repository|inside \.git/);
+    }
+    for (const [tool, args] of inside) {
+      if (role === "main" && tool !== "Read") continue;
+      assert.ok(!denied(call(tool, args, who)), `${role} ${tool} ${JSON.stringify(args)} was denied`);
+    }
+  }
+  // main still may not Grep/Glob at all, scoped or not
+  assert.ok(denied(call("Grep", { pattern: "x" })));
+  assert.ok(denied(call("Glob", { pattern: "*" })));
+});
+
+test("read scope: the hook fails closed when the repo root cannot be resolved", () => {
+  const r = decide({ tool_name: "Read", tool_input: { file_path: "a.ts" }, agent_id: "a", agent_type: "reviewer" }, "/no/such/repo/root");
+  assert.ok(denied(r));
+});
+
+test("read scope: coder and tester read tools are not path-scoped (they have Bash; the container is their boundary)", () => {
+  for (const role of ["coder", "tester"]) assert.ok(!denied(call("Read", { file_path: "/tmp/vitest-output.txt" }, as(role))), role);
 });
