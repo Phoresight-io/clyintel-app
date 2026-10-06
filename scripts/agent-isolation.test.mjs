@@ -473,3 +473,23 @@ function commitScript() {
   for (let k = r + 1; k < lines.length && (lines[k].trim() === "" || lines[k].match(/^\s*/)[0].length > indent); k++) body.push(lines[k].slice(indent + 2));
   return body.join("\n").trim() + "\n";
 }
+
+// Vercel would otherwise build a preview of every factory/run-* branch: unreviewed agent code, run
+// with the Preview environment's variables. clyintel/vercel.json turns those deployments off, and
+// publish refuses any run that edits vercel.json, so an agent cannot turn them back on.
+test("vercel.json: Git deployments are off for factory branches, and publish protects vercel.json", () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const vercel = JSON.parse(readFileSync(join(root, "clyintel/vercel.json"), "utf8"));
+  assert.equal(vercel.git?.deploymentEnabled?.["factory/**"], false);
+  // no other rule may re-enable a factory branch (Vercel deploys if ANY matching rule is true)
+  for (const [pattern, on] of Object.entries(vercel.git.deploymentEnabled)) {
+    const couldMatchFactory = pattern.startsWith("factory") || pattern === "**" || pattern === "*";
+    if (pattern !== "factory/**") assert.ok(!(on && couldMatchFactory), `rule ${pattern} could re-enable factory previews`);
+  }
+  // the branch the workflow pushes is under factory/
+  assert.match(WORKFLOW, /BRANCH: factory\/run-\$\{\{ github\.run_id \}\}/);
+  // publish's PROTECTED list covers vercel.json
+  const protectedLine = WORKFLOW.split("\n").find((l) => l.trim().startsWith("PROTECTED="));
+  const re = new RegExp(protectedLine.trim().replace(/^PROTECTED='/, "").replace(/'$/, ""), "i");
+  assert.ok(re.test("clyintel/vercel.json"), "publish must refuse a change to clyintel/vercel.json");
+});
