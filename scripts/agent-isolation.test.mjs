@@ -132,7 +132,7 @@ test("workflow: the agents work on a copy outside the checkout, so the checkout'
 
 // Runs a step script with a stub `docker` (and a stub `id` that reports the hosted runner's uid 1001).
 // The stub writes its argv and, for every `-e NAME` (no value), what the container would receive.
-function withStubDocker(script, env, { bundle = "file", dnsResolves = false } = {}) {
+function withStubDocker(script, env, { bundle = "file", dnsExit = 3 } = {}) {
   const root = mkdtempSync(join(tmpdir(), "iso-"));
   const bin = join(root, "bin");
   mkdirSync(bin);
@@ -146,7 +146,7 @@ function withStubDocker(script, env, { bundle = "file", dnsResolves = false } = 
     `#!/bin/bash
 printf '%s\\0' "$@" >> "${root}/docker.calls"; echo >> "${root}/docker.calls"
 case "$1" in rm|network) exit 0;; logs) echo "egress proxy listening on 8888; allowed: api.anthropic.com:443"; exit 0;; esac
-case "$*" in *d3-dnscheck-*) exit ${dnsResolves ? 0 : 1};; esac
+case "$*" in *d3-dnscheck-*) exit ${dnsExit};; esac
 case "\${@: -1}" in
   /etc/passwd) printf 'root:x:0:0:root:/root:/bin/bash\\nnode:x:1000:1000::/home/node:/bin/bash\\n'; exit 0;;
   /etc/group) printf 'root:x:0:\\nnode:x:1000:\\n'; exit 0;;
@@ -368,11 +368,20 @@ test("egress step: fails closed if the internal network resolves outside names (
     assert.deepEqual(flagValues(check.slice(0, check.indexOf("img@sha256:abc")), "-e"), [], "the DNS check gets no environment");
     assert.ok(check.includes("--read-only") && flagValues(check, "--cap-drop")[0] === "ALL");
   } finally { ok.done(); }
-  const leak = withStubDocker(stepScript(EGRESS_STEP), { ...RUN_ENV }, { dnsResolves: true });
+  const leak = withStubDocker(stepScript(EGRESS_STEP), { ...RUN_ENV }, { dnsExit: 0 });
   try {
     assert.notEqual(leak.code, 0, "the step went on although outside DNS resolves");
     assert.match(leak.stderr, /Outside DNS resolves/);
   } finally { leak.done(); }
+  // only positive proof (exit 3) lets the run go on: a probe that never ran, crashed, or failed for
+  // another reason is not a check
+  for (const rc of [1, 4, 125, 126, 127, 137]) {
+    const r = withStubDocker(stepScript(EGRESS_STEP), { ...RUN_ENV }, { dnsExit: rc });
+    try {
+      assert.notEqual(r.code, 0, `the step went on after a DNS check that exited ${rc}`);
+      assert.match(r.stderr, new RegExp(`did not run cleanly \\(exit ${rc}\\)`));
+    } finally { r.done(); }
+  }
 });
 
 test("egress: the proxy script is copied from the checkout in the Copy step, before any agent runs, outside the agents' copy", () => {

@@ -228,11 +228,20 @@ jobs:
           fi
           # Fail closed if the internal network resolves outside names. Docker engines before 26
           # forwarded those lookups to the host's resolver, which would leave DNS (<data>.attacker.example)
-          # as a way out past the proxy. A lookup that SUCCEEDS stops the run before any agent starts.
-          if docker run --rm --name "d3-dnscheck-$GITHUB_RUN_ID" --network "$EGRESS_NET" \
-               --user "$(id -u):$(id -g)" --cap-drop ALL --security-opt no-new-privileges --read-only \
-               "$AGENT_IMAGE" node -e 'require("dns").promises.lookup("example.com").then(() => process.exit(0), () => process.exit(1))'; then
+          # as a way out past the proxy. The run goes on ONLY on positive proof that the lookup was
+          # refused (the probe's exit 3, for a resolver error). A lookup that succeeds (0), a probe that
+          # never ran (docker's 125/126/127) or anything else stops it before any agent starts.
+          set +e
+          docker run --rm --name "d3-dnscheck-$GITHUB_RUN_ID" --network "$EGRESS_NET" \
+            --user "$(id -u):$(id -g)" --cap-drop ALL --security-opt no-new-privileges --read-only \
+            "$AGENT_IMAGE" node -e 'require("dns").promises.lookup("example.com").then(() => process.exit(0), (e) => process.exit(["ENOTFOUND", "EAI_AGAIN", "ESERVFAIL", "ECONNREFUSED", "ETIMEOUT"].includes(e.code) ? 3 : 4))'
+          DNS_RC=$?
+          set -e
+          if [ "$DNS_RC" -eq 0 ]; then
             echo "Outside DNS resolves on the agents' internal network; refusing to run the agents." >&2
+            exit 1
+          elif [ "$DNS_RC" -ne 3 ]; then
+            echo "The DNS check did not run cleanly (exit $DNS_RC), so outside DNS is not known to be blocked; refusing to run the agents." >&2
             exit 1
           fi
 
