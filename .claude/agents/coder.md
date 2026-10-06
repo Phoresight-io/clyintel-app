@@ -47,6 +47,10 @@ that no plan exists — do not improvise your own plan.
   `CODEOWNERS`, the isolation tests, `env-config.test.ts` and
   `test/stubs/`. If the task needs a new env var, schema change or config change, do NOT
   edit those files: describe it under "Needs a human" in `.factory/build-notes.md`.
+- You have no network apart from the Anthropic API: the npm registry is unreachable. The
+  installed dependencies are all you have. Never run `npm install <pkg>` or `npx` for a
+  package that is not installed, and never add a dependency to a `package.json`. If the task
+  needs a new package, use what is installed or describe it under "Needs a human".
 
 ## Handoff — append to `.factory/build-notes.md`
 ```

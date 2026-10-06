@@ -12,8 +12,10 @@
 
 export const FACTORY_KEY = "D3_FACTORY_ANTHROPIC_API_KEY";
 
-// Never secrets. HOME/TMPDIR point into the container's tmpfs.
-const PASSTHROUGH = ["PATH", "HOME", "LANG", "TMPDIR", "CI", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"];
+// Never secrets. HOME/TMPDIR point into the container's tmpfs. The proxy variables point at the
+// egress proxy (the container's only way out), and CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC stops
+// the CLI trying telemetry, error-report and update hosts the proxy would refuse anyway.
+const PASSTHROUGH = ["PATH", "HOME", "LANG", "TMPDIR", "CI", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"];
 
 export class MissingKeyError extends Error {}
 
