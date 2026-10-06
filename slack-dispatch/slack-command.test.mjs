@@ -4,8 +4,10 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { Readable } from "node:stream";
-import handler from "./api/slack-command.js";
+import { readFileSync } from "node:fs";
+import { matchesGlob } from "node:path";
+import { Readable, PassThrough } from "node:stream";
+import handler, { readRaw } from "./api/slack-command.js";
 
 const SECRET = "test-signing-secret";
 const ALLOWED = "U012ABC";
@@ -196,4 +198,42 @@ test("a successful dispatch sends d3-run with brief, channel and user, and the r
   assert.match(res.body.text, /starting/i);
   assert.ok(!res.body.text.includes(brief), "the reply must not echo the brief");
   assert.ok(!res.body.text.includes("INV-1042"));
+});
+
+test("a body stream that never ends times out instead of hanging (400, no run)", async () => {
+  const stalled = new PassThrough(); // emits nothing, never ends
+  await assert.rejects(readRaw(stalled, 50), /timed out/);
+
+  const req = new PassThrough();
+  req.method = "POST";
+  req.headers = {};
+  req.write("text=x"); // a partial body, then silence
+  const res = makeRes();
+  const started = Date.now();
+  await handler(req, res);
+  assert.equal(res.statusCode, 400);
+  assert.ok(Date.now() - started < 2500, "must answer inside Slack's 3-second window");
+  assert.equal(fetchCalls.length, 0);
+});
+
+test("an already-consumed body stream is refused at once (400, no run)", async () => {
+  const req = Readable.from([Buffer.from(form())]);
+  for await (const _ of req); // someone else read it first
+  req.method = "POST";
+  req.headers = {};
+  const res = makeRes();
+  await handler(req, res);
+  assert.equal(res.statusCode, 400);
+  assert.equal(fetchCalls.length, 0);
+});
+
+test("vercel.json: this project deploys only main; previews of every other branch are off", () => {
+  const vercel = JSON.parse(readFileSync(new URL("./vercel.json", import.meta.url), "utf8"));
+  assert.equal(vercel.crons, undefined, "no crons: the app's QBO and settlement crons live elsewhere");
+  const rules = vercel.git.deploymentEnabled;
+  // Vercel deploys a branch if ANY matching rule is true.
+  const deploys = (branch) => Object.entries(rules).some(([glob, on]) => on === true && matchesGlob(branch, glob));
+  assert.equal(deploys("main"), true);
+  for (const b of ["develop", "fix/x", "feature/a-b", "factory/run-1", "dependabot/npm_and_yarn/x", "release/1.0", "mainline"])
+    assert.equal(deploys(b), false, b);
 });

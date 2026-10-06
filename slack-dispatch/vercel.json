@@ -1,7 +1,9 @@
 {
   "git": {
     "deploymentEnabled": {
-      "factory/**": false
+      "factory/**": false,
+      "**": false,
+      "main": true
     }
   }
 }
