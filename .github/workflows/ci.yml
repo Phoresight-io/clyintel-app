@@ -79,5 +79,21 @@ jobs:
 
       # GITHUB_RUN_ID is unset because run-log.mjs names the record after it, and the run-log
       # tests expect the local name (run-local.json), as when they run on a laptop.
+      # A copy of the results goes to a TAP file, and every failing test becomes an error annotation
+      # (name plus the first lines of its error), so a failure is readable from the PR's checks
+      # without opening the full log. Test names come from this repo's own test files.
       - name: Test
-        run: env -u GITHUB_RUN_ID node --test ./*.test.mjs
+        run: |
+          set +e
+          env -u GITHUB_RUN_ID node --test --test-reporter=tap --test-reporter-destination=stdout \
+            --test-reporter=tap --test-reporter-destination="$RUNNER_TEMP/factory.tap" ./*.test.mjs
+          RC=$?
+          set -e
+          if [ "$RC" -ne 0 ]; then
+            awk '
+              /^ *not ok / { if (msg) print msg; sub(/^ *not ok [0-9]+ - /, ""); msg = "::error title=factory test failed::" $0; n = 0; next }
+              msg && n < 8 && /^ +(error|code|expected|actual|failureType):/ { gsub(/^ +/, ""); msg = msg "%0A" $0; n++ }
+              END { if (msg) print msg }
+            ' "$RUNNER_TEMP/factory.tap" || true
+          fi
+          exit "$RC"
