@@ -205,7 +205,9 @@ jobs:
           EGRESS_IF=d3egress0 # also named in the cleanup step
           docker network create --internal -o "com.docker.network.bridge.name=$EGRESS_IF" "$EGRESS_NET" >/dev/null
           sudo iptables -I INPUT -i "$EGRESS_IF" -j DROP
-          sudo ip6tables -I INPUT -i "$EGRESS_IF" -j DROP 2>/dev/null || true
+          # IPv6 too, wherever the kernel has it. Fails the run if the rule cannot be added, rather than
+          # carrying on with half a lockdown; skipped only where IPv6 does not exist at all.
+          if [ -e /proc/net/if_inet6 ]; then sudo ip6tables -I INPUT -i "$EGRESS_IF" -j DROP; fi
           docker run -d --init --name "d3-proxy-$GITHUB_RUN_ID" \
             --user "$(id -u):$(id -g)" \
             --cap-drop ALL --security-opt no-new-privileges \

@@ -59,8 +59,10 @@ export function createProxy({ connect = net.connect, log = (line) => console.log
     log(`allow CONNECT ${target.host}:${target.port}`);
     const upstream = connect({ host: target.host, port: target.port });
     const fail = () => {
-      if (client.writable && !client.destroyed && !upstream.established) client.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
-      client.destroy();
+      // Let the 502 reach the client (end() closes the socket once it is flushed); a tunnel that was
+      // already open just gets torn down.
+      if (!upstream.established && client.writable && !client.destroyed) client.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
+      else client.destroy();
       upstream.destroy();
     };
     upstream.setTimeout(CONNECT_TIMEOUT_MS, () => { if (!upstream.established) fail(); });
