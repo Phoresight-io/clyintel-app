@@ -50,6 +50,9 @@ architectural decisions.
 
 ## Out of scope
 - <what this deliberately does NOT do>
+
+## Slack update
+<At most 300 characters of plain text for the person who started this run: what you did or found, in one or two sentences. No links, no @-mentions, no markdown. If you need that person (a decision, access, a missing input), make the FIRST line "Needs you: <what and why>"; otherwise do not write that line. This section is posted to Slack by the workflow, which also does the tagging: never write a name or an @.>
 ```
 
 ## Revising the plan after a tester "plan error"

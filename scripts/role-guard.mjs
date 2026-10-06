@@ -9,7 +9,9 @@
 // (see role-guard.test.mjs). The read-scope check (path-scope.mjs) looks at the filesystem to
 // resolve symlinks, but never writes or executes anything.
 
+import { posix } from "node:path";
 import { SCOPED_TOOLS, scopeViolation } from "./path-scope.mjs";
+import { NOTES_DIR } from "./factory-notes.mjs";
 
 export const SUBAGENTS = ["planner", "coder", "tester", "reviewer"];
 
@@ -141,6 +143,21 @@ export function stagingViolation(command) {
   return null;
 }
 
+// The notes mount (/notes, outside the repo) is written by the orchestrator only. Write/Edit are
+// refused by path for every role. Bash is best-effort like every Bash rule here: a command that names
+// the directory is refused, but `cd /; echo x > notes/f` would not be, which is why notify-agents
+// treats the notes file as untrusted and re-validates all of it.
+const NOTES_WORD = new RegExp(`(^|[\\s"'=:;|&(<>])${NOTES_DIR}(?![\\w.-])`);
+export function touchesNotes(tool, args) {
+  if (tool === "Write" || tool === "Edit" || tool === "NotebookEdit") {
+    const p = args.file_path ?? args.notebook_path;
+    if (typeof p !== "string") return false;
+    const n = posix.normalize(p.replace(/\\/g, "/"));
+    return n === NOTES_DIR || n.startsWith(NOTES_DIR + "/");
+  }
+  return tool === "Bash" && typeof args.command === "string" && NOTES_WORD.test(args.command);
+}
+
 const deny = (reason) => ({
   hookSpecificOutput: {
     hookEventName: "PreToolUse",
@@ -251,6 +268,10 @@ export function decide(input, repoRoot) {
   }
   if (!ROLE_TOOLS[agentType].has(tool)) {
     return deny(`${agentType} may not use ${tool}.`);
+  }
+
+  if (touchesNotes(tool, args)) {
+    return deny(`${agentType} may not write to ${NOTES_DIR}: that directory belongs to the orchestrator.`);
   }
 
   if (READ_SCOPED_ROLES.has(agentType) && SCOPED_TOOLS.has(tool)) {

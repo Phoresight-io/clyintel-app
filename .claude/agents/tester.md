@@ -74,6 +74,9 @@ plan — by writing and running tests, not by trusting the build notes.
 - <file> — <what it checks>
 ## Not covered / untestable
 - <criterion that couldn't be tested and why> (or "none")
+
+## Slack update
+<At most 300 characters of plain text for the person who started this run: what you did or found, in one or two sentences. No links, no @-mentions, no markdown. If you need that person (a decision, access, a missing input), make the FIRST line "Needs you: <what and why>"; otherwise do not write that line. This section is posted to Slack by the workflow, which also does the tagging: never write a name or an @.>
 ```
 Then return a short summary as your final message: PASS/FAIL and the one-line
 reason. The Reviewer reads your report; keep it factual.

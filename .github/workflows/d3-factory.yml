@@ -32,8 +32,17 @@ on:
 #     run in a container that sees only the repo checkout and that key. The commit/bundle step,
 #     which runs git on the tree the agents controlled, runs in a second container with no secret
 #     and no network.
-#   - notify-start, publish and notify-failure hold the Slack token and the run-log Sheet webhook
-#     (and publish the write token). None of them executes anything the agents wrote.
+#   - notify-start, notify-agents, publish and notify-failure hold the Slack token (publish and
+#     notify-failure also the run-log Sheet webhook, publish the write token). None of them executes
+#     anything the agents wrote. notify-agents holds ONLY the Slack token: it posts each agent's short
+#     "Slack update" note as a reply in the run's thread, and treats the notes file as untrusted data
+#     (jq only: allowed agent names, verdict enum, size and length caps, escaping).
+#   - Every Slack post is built entirely by jq and sent with `curl --data @-`, so no text reaches a
+#     shell string or a curl argument, and carries unfurl_links:false and unfurl_media:false: a bare
+#     URL in agent text would otherwise be fetched by Slack's servers, past the egress lock.
+#   - Tags (<@USER>) are added by these jobs, never by agents, and only for a user id that matches
+#     ^[UW][A-Z0-9]{2,}$. Actions-tab runs have no channel or user: they post to the repository
+#     variable D3_DEFAULT_CHANNEL (no tag) when it is set, and post nothing when it is not.
 # The key the agents get is spend-capped and dedicated; there is no fallback to the shared
 # ANTHROPIC_API_KEY that PR review uses.
 jobs:
@@ -73,11 +82,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
+    outputs:
+      # The start message's Slack timestamp. Every later post of this run replies in its thread.
+      thread_ts: ${{ steps.start.outputs.thread_ts }}
     steps:
       - name: Tell Slack the run started
+        id: start
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
+          SLACK_CHANNEL: ${{ github.event.client_payload.channel || vars.D3_DEFAULT_CHANNEL }}
           BRIEF: ${{ github.event.client_payload.brief || inputs.brief }}
         run: |
           if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_CHANNEL" ]; then
@@ -85,12 +98,19 @@ jobs:
             exit 0
           fi
           # The brief is user text: escape Slack's control characters so it cannot render
-          # <!channel> pings or <url|label> links.
-          curl -s -X POST https://slack.com/api/chat.postMessage \
-            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-            -H "Content-Type: application/json; charset=utf-8" \
-            -d "$(jq -n --arg c "$SLACK_CHANNEL" --arg b "$BRIEF" \
-                   '{channel:$c, text:("▶️ Design → build → test → review: " + ($b | gsub("&";"&amp;") | gsub("<";"&lt;") | gsub(">";"&gt;")))}')" || true
+          # <!channel> pings or <url|label> links, and turn link previews off. The payload is built
+          # by jq and read by curl from stdin, so the brief never becomes part of a command line.
+          RESP="$(jq -n --arg c "$SLACK_CHANNEL" --arg b "$BRIEF" \
+                    '{channel:$c, text:("▶️ Design → build → test → review: " + ($b | gsub("&";"&amp;") | gsub("<";"&lt;") | gsub(">";"&gt;"))), unfurl_links:false, unfurl_media:false}' \
+                  | curl -s -m 15 -X POST https://slack.com/api/chat.postMessage \
+                      -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+                      -H "Content-Type: application/json; charset=utf-8" \
+                      --data @- || true)"
+          # Keep the message's ts (only if it looks like one) so later posts can reply in its thread.
+          TS="$(printf '%s' "$RESP" | jq -r 'if .ok == true and (.ts | type) == "string" then .ts else empty end' 2>/dev/null || true)"
+          if [[ "$TS" =~ ^[0-9]{1,12}\.[0-9]{1,8}$ ]] && [ -n "${GITHUB_OUTPUT:-}" ]; then
+            echo "thread_ts=$TS" >> "$GITHUB_OUTPUT"
+          fi
 
   pipeline:
     needs: prepare
@@ -287,6 +307,9 @@ jobs:
             echo "D3_FACTORY_ANTHROPIC_API_KEY is not set. The factory only runs on its dedicated, spend-capped key (there is no fallback to ANTHROPIC_API_KEY)." >&2
             exit 1
           fi
+          # Where the orchestrator leaves the agents' notes (factory-notes.json): a host directory
+          # outside the repo copy, so `git add -A` can never commit it.
+          mkdir -p "$RUNNER_TEMP/d3-notes"
           docker run --rm --init --name "d3-agents-$GITHUB_RUN_ID" \
             --user "$(id -u):$(id -g)" \
             --cap-drop ALL --security-opt no-new-privileges \
@@ -294,6 +317,7 @@ jobs:
             --pids-limit 4096 \
             --network "d3-egress-$GITHUB_RUN_ID" \
             -v "$RUNNER_TEMP/d3-agent-repo:/work/repo" \
+            -v "$RUNNER_TEMP/d3-notes:/notes" \
             -v "$RUNNER_TEMP/d3-etc/passwd:/etc/passwd:ro" -v "$RUNNER_TEMP/d3-etc/group:/etc/group:ro" \
             --workdir /work/repo/scripts \
             -e D3_FACTORY_SANDBOX=container \
@@ -304,6 +328,31 @@ jobs:
             -e BRIEF -e SLACK_USER -e BRANCH \
             -e GITHUB_RUN_ID -e GITHUB_REPOSITORY -e GITHUB_ACTOR \
             "$AGENT_IMAGE" node d3-orchestrator.mjs
+
+      # The agents' notes. The orchestrator writes factory-notes.json after each stage into a directory
+      # mounted from the host, so a failed run keeps the notes of the stages that finished: these two
+      # steps run even after a failed or cancelled agent step. An agent's Bash can reach the same
+      # mount, so the file is taken like the bundle: only as a regular file (never through a link),
+      # only if small, copied to a path the container never saw. notify-agents re-validates it anyway.
+      - name: Collect the agents' notes (a regular file of at most 8 KB, or nothing)
+        if: always()
+        run: |
+          IN="$RUNNER_TEMP/d3-notes/factory-notes.json"
+          OUT="$RUNNER_TEMP/notes-up"
+          rm -rf "$OUT" && mkdir -p "$OUT"
+          if [ -f "$IN" ] && [ ! -L "$IN" ] && [ "$(wc -c < "$IN")" -le 8192 ]; then
+            cp -- "$IN" "$OUT/factory-notes.json"
+          else
+            echo "No usable notes file; nothing to upload."
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: factory-notes
+          path: ${{ runner.temp }}/notes-up/factory-notes.json
+          if-no-files-found: ignore
+          retention-days: 3
 
       # git runs on the tree the agents controlled, and git config/attributes there can make git run
       # programs (fsmonitor, clean filters). So this runs in a container too, with NO secret and NO
@@ -379,12 +428,92 @@ jobs:
             exit 1
           fi
 
+  # Posts each agent's short note as a reply in the run's Slack thread. It holds the Slack token and
+  # nothing else, runs no agent code and checks nothing out. The notes file was written inside the
+  # agent container, so it is UNTRUSTED DATA: parsed and rebuilt by jq only, never evaluated, and no
+  # text from it reaches a shell string or a curl argument (each payload is one jq program's output,
+  # piped to curl on stdin). A Slack failure here must never block the PR: publish still runs when
+  # this job fails or is skipped.
+  notify-agents:
+    needs: [pipeline, notify-start]
+    # Also after a failed agent job (the notes of the stages that finished are the point), but not
+    # when the pipeline never ran.
+    if: ${{ always() && needs.pipeline.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: factory-notes
+          path: ${{ runner.temp }}/notes
+
+      - name: Post the agents' notes in the run's thread
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ github.event.client_payload.channel || vars.D3_DEFAULT_CHANNEL }}
+          SLACK_USER: ${{ github.event.client_payload.user }} # a Slack user id; empty for Actions-tab runs
+          THREAD_TS: ${{ needs.notify-start.outputs.thread_ts }}
+          NOTES_FILE: ${{ runner.temp }}/notes/factory-notes.json
+        run: |
+          if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_CHANNEL" ]; then
+            echo "No Slack token/channel configured; nothing to notify."
+            exit 0
+          fi
+          # Size first (cheap), then shape. Anything off and nothing is posted.
+          if [ ! -f "$NOTES_FILE" ] || [ -L "$NOTES_FILE" ] || [ "$(wc -c < "$NOTES_FILE")" -gt 8192 ]; then
+            echo "No usable notes file (missing, a link, or over 8 KB); nothing to post."
+            exit 0
+          fi
+          if ! jq -s -e '
+               length == 1 and (.[0] | type == "object")
+               and ((.[0].notes // []) | type == "array")
+               and (.[0].verdict == null or (.[0].verdict | IN("APPROVE", "REQUEST CHANGES", "BLOCK")))
+             ' "$NOTES_FILE" >/dev/null 2>&1; then
+            echo "Notes file rejected (not one JSON object, or a verdict outside the enum); nothing posted."
+            exit 0
+          fi
+          # The tag target and the thread ts must look like what Slack issues; otherwise post without them.
+          # (bash's [[ =~ ]] anchors on the whole string, so a value with a newline in it fails.)
+          TAG_USER=""
+          if [[ "$SLACK_USER" =~ ^[UW][A-Z0-9]{2,}$ ]]; then TAG_USER="$SLACK_USER"; fi
+          THREAD=""
+          if [[ "$THREAD_TS" =~ ^[0-9]{1,12}\.[0-9]{1,8}$ ]]; then THREAD="$THREAD_TS"; fi
+          # One payload per allowed agent, in a fixed order; only the last note per agent counts. The text is
+          # capped at 300 characters FIRST and escaped after (escaping makes it longer). needs_you counts
+          # only as the boolean true. The tag goes on a needs_you note, and on the reviewer's note when
+          # the verdict is REQUEST CHANGES or BLOCK. Every payload turns link previews off.
+          jq -c --arg c "$SLACK_CHANNEL" --arg tag "$TAG_USER" --arg thread "$THREAD" '
+            def esc: gsub("&";"&amp;") | gsub("<";"&lt;") | gsub(">";"&gt;");
+            def heading: {planner:"🧭 Planner", coder:"🔨 Coder", tester:"🧪 Tester", reviewer:"🔍 Reviewer"}[.];
+            . as $doc
+            | ["planner","coder","tester","reviewer"][] as $agent
+            | ([($doc.notes // [])[] | select(type == "object" and .agent == $agent and (.text | type) == "string")] | last) as $n
+            | select($n != null)
+            | (($n.needs_you == true) or ($agent == "reviewer" and ($doc.verdict | IN("REQUEST CHANGES","BLOCK")))) as $ping
+            | ($n.text | .[0:300] | esc) as $body
+            | {channel: $c,
+               text: (($agent | heading) + ": " + (if $ping and $tag != "" then "<@" + $tag + "> " else "" end) + $body),
+               unfurl_links: false, unfurl_media: false}
+              + (if $thread != "" then {thread_ts: $thread} else {} end)
+          ' "$NOTES_FILE" | while IFS= read -r PAYLOAD; do
+            printf '%s' "$PAYLOAD" | curl -s -m 15 -X POST https://slack.com/api/chat.postMessage \
+              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+              -H "Content-Type: application/json; charset=utf-8" \
+              --data @- >/dev/null || true
+          done
+
   # CI on factory PRs: PRs opened with GITHUB_TOKEN start no workflows, so ci.yml lists
   # `ready_for_review` and runs when a person marks the draft ready (proven on run 37407703521).
   # The repo setting "Allow GitHub Actions to create and approve pull requests" is needed for
   # `gh pr create`.
   publish:
-    needs: [prepare, pipeline] # skipped if the pipeline failed, so a failed run opens no PR
+    # Waits for the notes (so the thread reads start, notes, PR) but never depends on them: the explicit
+    # `if` replaces the implicit success() over every need, so a failed or skipped notify-start or
+    # notify-agents (a Slack outage) cannot block a PR. A failed pipeline still opens none.
+    needs: [prepare, pipeline, notify-start, notify-agents]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.pipeline.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -413,12 +542,28 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
+          SLACK_CHANNEL: ${{ github.event.client_payload.channel || vars.D3_DEFAULT_CHANNEL }}
+          SLACK_USER: ${{ github.event.client_payload.user }} # a Slack user id; empty for Actions-tab runs
+          THREAD_TS: ${{ needs.notify-start.outputs.thread_ts }}
           RUN_LOG_SHEET_WEBHOOK: ${{ secrets.RUN_LOG_SHEET_WEBHOOK }}
           BRIEF: ${{ github.event.client_payload.brief || inputs.brief }}
           BRANCH: factory/run-${{ github.run_id }}
           BASE_SHA: ${{ needs.prepare.outputs.base_sha }} # develop; set by the prepare job, never by an agent
         run: |
+          # Slack posts: the payload is built by jq and read by curl from stdin (nothing becomes a curl
+          # argument), previews are off, and it replies in the run's thread when there is one.
+          THREAD=""
+          if [[ "$THREAD_TS" =~ ^[0-9]{1,12}\.[0-9]{1,8}$ ]]; then THREAD="$THREAD_TS"; fi
+          TAG=""
+          if [[ "$SLACK_USER" =~ ^[UW][A-Z0-9]{2,}$ ]]; then TAG="<@$SLACK_USER> "; fi
+          slack_post() {
+            jq -n --arg c "$SLACK_CHANNEL" --arg t "$1" --arg ts "$THREAD" \
+              '{channel:$c, text:$t, unfurl_links:false, unfurl_media:false} + (if $ts != "" then {thread_ts:$ts} else {} end)' \
+              | curl -s -m 15 -X POST https://slack.com/api/chat.postMessage \
+                  -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+                  -H "Content-Type: application/json; charset=utf-8" \
+                  --data @- >/dev/null || true
+          }
           BUNDLE="$RUNNER_TEMP/bundle/factory.bundle"
           git bundle verify "$BUNDLE"
           # The bundle is untrusted: accept exactly one ref, our branch.
@@ -534,12 +679,7 @@ jobs:
           if [ -z "$(CHANGED_FILES | tr '\0' '\n' | { grep -vE '^\.factory/runs/' || true; })" ]; then
             echo "Run changed no files outside .factory/runs/; not pushing and not opening a PR."
             if [ -n "$SLACK_BOT_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
-              curl -s -X POST https://slack.com/api/chat.postMessage \
-                -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-                -H "Content-Type: application/json; charset=utf-8" \
-                -d "$(jq -n --arg c "$SLACK_CHANNEL" \
-                       --arg t "ℹ️ Factory run ${{ github.run_id }} finished with no code changes; no PR opened." \
-                       '{channel:$c, text:$t}')" || true
+              slack_post "ℹ️ Factory run ${{ github.run_id }} finished with no code changes; no PR opened."
             fi
             log_run_record
             exit 0
@@ -609,19 +749,16 @@ jobs:
           log_run_record
           # Best-effort Slack notice with the real PR link (never fails the run).
           if [ -n "$SLACK_BOT_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
-            curl -s -X POST https://slack.com/api/chat.postMessage \
-              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-              -H "Content-Type: application/json; charset=utf-8" \
-              -d "$(jq -n --arg c "$SLACK_CHANNEL" \
-                     --arg t "🔀 PR opened for review: $PR_URL (DRAFT; self-reported tests: $TEST_RESULT, reviewer: $VERDICT) — merge it to develop to deploy to dev (develop.clyintel); promote develop to main for production." \
-                     '{channel:$c, text:$t}')" || true
+            slack_post "${TAG}🔀 PR opened for review: $PR_URL (DRAFT; self-reported tests: $TEST_RESULT, reviewer: $VERDICT) — merge it to develop to deploy to dev (develop.clyintel); promote develop to main for production."
           fi
 
   # If either job fails (e.g. publish REFUSES a push because commits touch protected paths),
   # the person who ran /d3 was already told "a pull request is being opened". Say that it
   # failed. Fixed message only: it never includes the brief or the offending paths.
   notify-failure:
-    needs: [prepare, pipeline, publish]
+    # notify-start is a need only for its thread_ts output. The `if` below names prepare, pipeline and
+    # publish only, so a notify-start (or notify-agents) failure, a Slack outage, never raises an alarm.
+    needs: [prepare, pipeline, publish, notify-start]
     if: ${{ always() && (needs.prepare.result == 'failure' || needs.pipeline.result == 'failure' || needs.publish.result == 'failure' || needs.pipeline.result == 'skipped' || needs.pipeline.result == 'cancelled' || needs.publish.result == 'cancelled') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -630,7 +767,9 @@ jobs:
       - name: Tell Slack the run failed
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_CHANNEL: ${{ github.event.client_payload.channel }}
+          SLACK_CHANNEL: ${{ github.event.client_payload.channel || vars.D3_DEFAULT_CHANNEL }}
+          SLACK_USER: ${{ github.event.client_payload.user }} # a Slack user id; empty for Actions-tab runs
+          THREAD_TS: ${{ needs.notify-start.outputs.thread_ts }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           PREPARE_RESULT: ${{ needs.prepare.result }}
           PIPELINE_RESULT: ${{ needs.pipeline.result }}
@@ -675,7 +814,15 @@ jobs:
           else
             MSG="❌ D3 Factory run failed in the agent job. See $RUN_URL"
           fi
-          curl -s -X POST https://slack.com/api/chat.postMessage \
-            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-            -H "Content-Type: application/json; charset=utf-8" \
-            -d "$(jq -n --arg c "$SLACK_CHANNEL" --arg t "$MSG" '{channel:$c, text:$t}')" || true
+          # Reply in the run's thread when there is one, with previews off, and tag the person who started
+          # the run (only a valid Slack user id; an Actions-tab run has none).
+          THREAD=""
+          if [[ "$THREAD_TS" =~ ^[0-9]{1,12}\.[0-9]{1,8}$ ]]; then THREAD="$THREAD_TS"; fi
+          TAG=""
+          if [[ "$SLACK_USER" =~ ^[UW][A-Z0-9]{2,}$ ]]; then TAG="<@$SLACK_USER> "; fi
+          jq -n --arg c "$SLACK_CHANNEL" --arg t "${TAG}${MSG}" --arg ts "$THREAD" \
+            '{channel:$c, text:$t, unfurl_links:false, unfurl_media:false} + (if $ts != "" then {thread_ts:$ts} else {} end)' \
+            | curl -s -m 15 -X POST https://slack.com/api/chat.postMessage \
+                -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+                -H "Content-Type: application/json; charset=utf-8" \
+                --data @- >/dev/null || true
