@@ -479,17 +479,21 @@ function commitScript() {
 // publish refuses any run that edits vercel.json, so an agent cannot turn them back on.
 test("vercel.json: Git deployments are off for factory branches, and publish protects vercel.json", () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-  const vercel = JSON.parse(readFileSync(join(root, "clyintel/vercel.json"), "utf8"));
-  assert.equal(vercel.git?.deploymentEnabled?.["factory/**"], false);
-  // no other rule may re-enable a factory branch (Vercel deploys if ANY matching rule is true)
-  for (const [pattern, on] of Object.entries(vercel.git.deploymentEnabled)) {
-    const couldMatchFactory = pattern.startsWith("factory") || pattern === "**" || pattern === "*";
-    if (pattern !== "factory/**") assert.ok(!(on && couldMatchFactory), `rule ${pattern} could re-enable factory previews`);
+  // Both Vercel projects build from clyintel/ (their Root Directory). The repo-root vercel.json is
+  // not used today but carries the same rule, so a project pointed at the repo root is covered too.
+  for (const rel of ["clyintel/vercel.json", "vercel.json"]) {
+    const vercel = JSON.parse(readFileSync(join(root, rel), "utf8"));
+    assert.equal(vercel.git?.deploymentEnabled?.["factory/**"], false, rel);
+    // no other rule may re-enable a factory branch (Vercel deploys if ANY matching rule is true)
+    for (const [pattern, on] of Object.entries(vercel.git.deploymentEnabled)) {
+      const couldMatchFactory = pattern.startsWith("factory") || pattern === "**" || pattern === "*";
+      if (pattern !== "factory/**") assert.ok(!(on && couldMatchFactory), `${rel}: rule ${pattern} could re-enable factory previews`);
+    }
   }
   // the branch the workflow pushes is under factory/
   assert.match(WORKFLOW, /BRANCH: factory\/run-\$\{\{ github\.run_id \}\}/);
   // publish's PROTECTED list covers vercel.json
   const protectedLine = WORKFLOW.split("\n").find((l) => l.trim().startsWith("PROTECTED="));
   const re = new RegExp(protectedLine.trim().replace(/^PROTECTED='/, "").replace(/'$/, ""), "i");
-  assert.ok(re.test("clyintel/vercel.json"), "publish must refuse a change to clyintel/vercel.json");
+  for (const rel of ["clyintel/vercel.json", "vercel.json"]) assert.ok(re.test(rel), `publish must refuse a change to ${rel}`);
 });

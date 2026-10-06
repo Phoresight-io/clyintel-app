@@ -99,9 +99,10 @@ jobs:
     # Actions -> Variables). With it unset, a run is skipped (publish is skipped too, as it
     # needs this job) and notify-failure tells Slack so.
     # Vercel previews: pushing factory/run-* would make Vercel build a preview of unreviewed
-    # agent code with the Preview environment's variables. clyintel/vercel.json turns Git
-    # deployments off for factory/** (git.deploymentEnabled), and publish's PROTECTED list
-    # refuses any run that changes vercel.json, so an agent cannot switch them back on.
+    # agent code with the Preview environment's variables. clyintel/vercel.json (the projects'
+    # Root Directory; the repo-root vercel.json carries the same rule) turns Git deployments
+    # off for factory/** (git.deploymentEnabled), and publish's PROTECTED list refuses any run
+    # that changes a vercel.json, so an agent cannot switch them back on.
     if: ${{ vars.D3_FACTORY_ENABLED == 'true' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     # A stuck run must not burn API spend for GitHub's 6h default, and /d3 calls
