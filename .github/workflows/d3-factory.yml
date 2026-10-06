@@ -231,10 +231,16 @@ jobs:
           # as a way out past the proxy. The run goes on ONLY on positive proof that the lookup was
           # refused (the probe's exit 3, for a resolver error). A lookup that succeeds (0), a probe that
           # never ran (docker's 125/126/127) or anything else stops it before any agent starts.
+          # The probe looks up three times, a second apart, and counts it as refused only if EVERY
+          # attempt fails with a resolver error. EAI_AGAIN is what Docker's resolver answers on an
+          # --internal network, but it is also what a forwarding resolver gives on a passing hiccup;
+          # a hiccup does not repeat three times. (ENOTFOUND and EAI_AGAIN are the only resolver
+          # errors dns.lookup returns.)
+          DNS_PROBE='const dns = require("dns").promises; (async () => { for (let i = 0; i < 3; i++) { try { await dns.lookup("example.com"); process.exit(0); } catch (e) { if (!["ENOTFOUND", "EAI_AGAIN"].includes(e.code)) process.exit(4); } await new Promise((r) => setTimeout(r, 1000)); } process.exit(3); })()'
           set +e
           docker run --rm --name "d3-dnscheck-$GITHUB_RUN_ID" --network "$EGRESS_NET" \
             --user "$(id -u):$(id -g)" --cap-drop ALL --security-opt no-new-privileges --read-only \
-            "$AGENT_IMAGE" node -e 'require("dns").promises.lookup("example.com").then(() => process.exit(0), (e) => process.exit(["ENOTFOUND", "EAI_AGAIN", "ESERVFAIL", "ECONNREFUSED", "ETIMEOUT"].includes(e.code) ? 3 : 4))'
+            "$AGENT_IMAGE" node -e "$DNS_PROBE"
           DNS_RC=$?
           set -e
           if [ "$DNS_RC" -eq 0 ]; then

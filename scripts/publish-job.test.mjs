@@ -16,7 +16,17 @@ import { writeRunLog } from "./run-log.mjs";
 import { createHash } from "node:crypto";
 
 const WORKFLOW = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../.github/workflows/d3-factory.yml"), "utf8");
-const GIT_ENV = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+// No background housekeeping: on hosted runners a fetch or push can leave `git maintenance` / auto-gc
+// running detached, still writing into .git/objects while a test deletes its temp repos (ENOTEMPTY).
+const GIT_ENV = {
+  GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t",
+  GIT_CONFIG_COUNT: "3",
+  GIT_CONFIG_KEY_0: "gc.auto", GIT_CONFIG_VALUE_0: "0",
+  GIT_CONFIG_KEY_1: "maintenance.auto", GIT_CONFIG_VALUE_1: "false",
+  GIT_CONFIG_KEY_2: "gc.autoDetach", GIT_CONFIG_VALUE_2: "false",
+};
+// Deleting a temp tree retries briefly, in case anything still holds it.
+const RM = { recursive: true, force: true, maxRetries: 5, retryDelay: 200 };
 
 // The `run: |` script of the step named `name`, with workflow expressions filled in.
 function stepScript(name, subs) {
@@ -133,7 +143,7 @@ function publish(w, env = {}) {
 }
 const ghArgs = (w) => readFileSync(join(w.root, "gh.args"), "utf8").split("\0").slice(0, -1);
 const remoteHas = (w, ref) => { try { sh(w.remote, "git", ["rev-parse", "-q", "--verify", ref]); return true; } catch { return false; } };
-const cleanup = (w) => rmSync(w.root, { recursive: true, force: true });
+const cleanup = (w) => rmSync(w.root, RM);
 
 test("publish: pushes the branch, then opens a DRAFT PR with the right arguments", () => {
   const w = world({ log: '{"test_result":"PASS","review_verdict":"APPROVE"}' });
@@ -184,7 +194,7 @@ test("publish: the record run-log.mjs actually writes (every current key) passes
     process.chdir(dir);
     writeRunLog({ brief: "add a one-line comment", reviewSummary: "VERDICT: APPROVE", usage: { turns: 12, cost: 0.4321, denials: 1 } });
     line = readFileSync(join(dir, ".factory/runs/run-local.json"), "utf8").trim();
-  } finally { process.chdir(prev); rmSync(dir, { recursive: true, force: true }); }
+  } finally { process.chdir(prev); rmSync(dir, RM); }
   const rec = JSON.parse(line);
   assert.deepEqual([rec.num_turns, rec.total_cost_usd, rec.guard_denials], [12, 0.4321, 1]);
   const w = world({ log: line });
@@ -560,7 +570,7 @@ test("notify-failure: fixed message, only with a token and channel, never the br
         env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, RUN_URL: "https://github.com/x/y/actions/runs/1", ...env }, stdio: "pipe",
       });
       return existsSync(join(root, "payload")) ? JSON.parse(readFileSync(join(root, "payload"), "utf8")) : null;
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally { rmSync(root, RM); }
   };
   assert.equal(run({ SLACK_BOT_TOKEN: "", SLACK_CHANNEL: "C1", PIPELINE_RESULT: "success" }), null);
   assert.equal(run({ SLACK_BOT_TOKEN: "x", SLACK_CHANNEL: "", PIPELINE_RESULT: "success" }), null);
@@ -622,7 +632,7 @@ test("prepare: resolves develop's head to a 40-hex commit and refuses anything e
     writeFileSync(out2, "");
     assert.throws(() => sh(empty, "bash", ["-e", "-c", stepScript("Resolve the base commit", {})], { GITHUB_OUTPUT: out2, GIT_CEILING_DIRECTORIES: root }));
     assert.equal(readFileSync(out2, "utf8"), "");
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally { rmSync(root, RM); }
 });
 
 test("workflow: notify-failure runs on either job failing and holds no permissions", () => {
@@ -787,7 +797,7 @@ function writeRunLogRecord() {
   } finally {
     process.chdir(cwd);
     for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, RM);
   }
 }
 
@@ -804,7 +814,7 @@ function runNotifyFailure(env) {
       stdio: "pipe",
     });
     return sheetCalls(root).map((a) => JSON.parse(dataOf(a)));
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally { rmSync(root, RM); }
 }
 
 test("notify-failure: a failed run gets a Sheet row built only from workflow values (same keys as run-log.mjs)", () => {
@@ -848,7 +858,7 @@ test("notify-start: posts the start message with the brief escaped for Slack, on
     try {
       execFileSync("bash", ["-e", "-c", stepScript("Tell Slack the run started", {})], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env }, stdio: "pipe" });
       return existsSync(join(root, "payload")) ? JSON.parse(readFileSync(join(root, "payload"), "utf8")) : null;
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally { rmSync(root, RM); }
   };
   assert.equal(run({ SLACK_BOT_TOKEN: "", SLACK_CHANNEL: "C1", BRIEF: "x" }), null);
   assert.equal(run({ SLACK_BOT_TOKEN: "xoxb", SLACK_CHANNEL: "", BRIEF: "x" }), null);
