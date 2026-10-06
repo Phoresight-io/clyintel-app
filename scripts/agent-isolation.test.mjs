@@ -332,6 +332,9 @@ test("egress step: internal network, host firewall rule BEFORE the proxy starts,
     assert.deepEqual(r.calls[net], ["network", "create", "--internal", "-o", "com.docker.network.bridge.name=d3egress0", "d3-egress-9"]);
     // the firewall rule drops what the internal network sends to the runner itself (its gateway)
     assert.deepEqual(r.sudoCalls[0], ["iptables", "-I", "INPUT", "-i", "d3egress0", "-j", "DROP"]);
+    // the IPv6 rule is not optional where IPv6 exists: no `|| true` hiding a failure
+    assert.match(stepScript(EGRESS_STEP), /if \[ -e \/proc\/net\/if_inet6 \]; then sudo ip6tables -I INPUT -i "\$EGRESS_IF" -j DROP; fi/);
+    assert.doesNotMatch(stepScript(EGRESS_STEP), /ip6tables -I[^\n]*\|\| true/);
     // the proxy container: no secret, no privileges, read-only, the TRUSTED script read-only, pinned image
     const run = r.calls.find((c) => c[0] === "run");
     assert.ok(run, "proxy not started");
