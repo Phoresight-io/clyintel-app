@@ -122,3 +122,17 @@ test("scopeViolation: Read refuses hard-linked files (a hard link to .git/config
     assert.equal(scopeViolation("Read", { file_path: "clyintel/not-yet.md" }, f.root), null);
   } finally { f.done(); }
 });
+
+test("scopeViolation: Grep pointed at a hard-linked file is refused too; directories and ordinary files are not", () => {
+  const f = fixture();
+  try {
+    linkSync(join(f.root, ".git/config"), join(f.root, "clyintel/cfg"));
+    assert.match(scopeViolation("Grep", { pattern: "url", path: "clyintel/cfg" }, f.root), /hard link/);
+    assert.match(scopeViolation("Grep", { pattern: "url", path: join(f.root, "clyintel/cfg") }, f.root), /hard link/);
+    // a directory is not a hard-linked file (the documented limit: Grep over it still sees the link)
+    assert.equal(scopeViolation("Grep", { pattern: "url", path: "clyintel" }, f.root), null);
+    assert.equal(scopeViolation("Grep", { pattern: "url" }, f.root), null);
+    assert.equal(scopeViolation("Grep", { pattern: "x", path: "clyintel/lib/a.ts" }, f.root), null);
+    assert.equal(scopeViolation("Grep", { pattern: "x", path: "clyintel/not-yet.ts" }, f.root), null);
+  } finally { f.done(); }
+});
