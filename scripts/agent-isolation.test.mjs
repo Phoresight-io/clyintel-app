@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 const WORKFLOW = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../.github/workflows/d3-factory.yml"), "utf8");
 const AGENT_STEP = "Run pipeline in the agent container (Planner → Coder → Tester → Reviewer)";
 const COMMIT_STEP = "Commit and bundle the agents' work (container, no secrets, no network)";
+const NOTES_STEP = "Collect the agents' notes (a regular file of at most 8 KB, or nothing)";
 const CLEANUP_STEP = "Remove the agents' containers and working tree";
 const COPY_STEP = "Copy the repo for the agents";
 const USER_STEP = "Prepare the agent container's user entry";
@@ -27,7 +28,7 @@ const KEY = "D3_FACTORY_ANTHROPIC_API_KEY";
 
 // ---- workflow structure
 
-const JOBS = ["prepare", "notify-start", "pipeline", "publish", "notify-failure"];
+const JOBS = ["prepare", "notify-start", "pipeline", "notify-agents", "publish", "notify-failure"];
 function job(name) {
   const i = WORKFLOW.indexOf(`\n  ${name}:\n`);
   assert.ok(i >= 0, `job ${name} not found`);
@@ -79,7 +80,7 @@ test("workflow: there is no fallback to the shared ANTHROPIC_API_KEY anywhere in
 });
 
 test("workflow: Slack and the Sheet webhook live only in jobs that never execute agent code", () => {
-  const holders = { "notify-start": ["SLACK_BOT_TOKEN"], publish: ["SLACK_BOT_TOKEN", "RUN_LOG_SHEET_WEBHOOK"], "notify-failure": ["SLACK_BOT_TOKEN", "RUN_LOG_SHEET_WEBHOOK"] };
+  const holders = { "notify-start": ["SLACK_BOT_TOKEN"], "notify-agents": ["SLACK_BOT_TOKEN"], publish: ["SLACK_BOT_TOKEN", "RUN_LOG_SHEET_WEBHOOK"], "notify-failure": ["SLACK_BOT_TOKEN", "RUN_LOG_SHEET_WEBHOOK"] };
   for (const name of JOBS) {
     const secrets = secretsOf(codeOnly(job(name)));
     for (const s of ["SLACK_BOT_TOKEN", "RUN_LOG_SHEET_WEBHOOK"]) {
@@ -96,15 +97,17 @@ test("workflow: Slack and the Sheet webhook live only in jobs that never execute
   }
   assert.match(job("notify-start"), /permissions: \{\}/);
   assert.match(job("notify-failure"), /permissions: \{\}/);
+  assert.match(job("notify-agents"), /permissions: \{\}/);
 });
 
 test("workflow: the sandbox image is pinned by digest, and every step after the agents ran is containerised or cannot run agent code", () => {
   assert.match(job("pipeline"), /AGENT_IMAGE: node:22-bookworm@sha256:[0-9a-f]{64}\n/);
   const pipeline = codeOnly(job("pipeline"));
   const after = pipeline.slice(pipeline.indexOf(`- name: ${AGENT_STEP}`));
-  // the steps after the agents: the agent container, the commit container, the upload, the cleanup
+  // the steps after the agents: the agent container, the notes collection and upload (no agent code, no
+  // git), the commit container, the bundle upload, the cleanup
   const names = [...after.matchAll(/- (?:name: (.+)|uses: (.+))/g)].map((m) => (m[1] ?? m[2]).trim());
-  assert.deepEqual(names, [AGENT_STEP, COMMIT_STEP, "actions/upload-artifact@v4", CLEANUP_STEP]);
+  assert.deepEqual(names, [AGENT_STEP, NOTES_STEP, "actions/upload-artifact@v4", COMMIT_STEP, "actions/upload-artifact@v4", CLEANUP_STEP]);
   assert.match(after, /path: \$\{\{ runner\.temp \}\}\/factory\.bundle/);
   // no host step runs git (or anything else) in the workspace once agents have run
   const hostRuns = [stepScript(AGENT_STEP), stepScript(COMMIT_STEP), stepScript(CLEANUP_STEP)].join("\n").split("\n")
@@ -124,7 +127,7 @@ test("workflow: the agents work on a copy outside the checkout, so the checkout'
   for (const st of steps) {
     if (/^uses: actions\/upload-artifact/.test(st)) continue;
     // a run step either cds into / works in the agents' copy, or touches no repo files at all
-    assert.ok(/d3-agent-repo|docker run --rm --network none|bundle-out|d3-etc|d3-proxy/.test(st), `step does not say where it works:\n${st.slice(0, 200)}`);
+    assert.ok(/d3-agent-repo|docker run --rm --network none|bundle-out|d3-etc|d3-proxy|d3-notes/.test(st), `step does not say where it works:\n${st.slice(0, 200)}`);
   }
 });
 
@@ -228,7 +231,7 @@ test("agent container: only the repo is mounted, no privileges, and the environm
     assert.ok(!argv.some((a) => a.includes("sk-d3-REAL")));
     assert.ok(flagValues(argv, "-e").includes(KEY));
     // mounts: the agents' copy (NOT the checkout) at /work/repo, and read-only passwd/group
-    assert.deepEqual(flagValues(argv, "-v"), [`${r.rt}/d3-agent-repo:/work/repo`, `${r.rt}/d3-etc/passwd:/etc/passwd:ro`, `${r.rt}/d3-etc/group:/etc/group:ro`]);
+    assert.deepEqual(flagValues(argv, "-v"), [`${r.rt}/d3-agent-repo:/work/repo`, `${r.rt}/d3-notes:/notes`, `${r.rt}/d3-etc/passwd:/etc/passwd:ro`, `${r.rt}/d3-etc/group:/etc/group:ro`]);
     assert.ok(!argv.some((a) => a.includes(r.ws)), "the checkout is mounted");
     assert.deepEqual(flagValues(argv, "--name"), ["d3-agents-9"]);
     assert.ok(!argv.some((a) => a.startsWith("--mount") || a.startsWith("--volume")));

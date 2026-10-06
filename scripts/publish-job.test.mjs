@@ -128,9 +128,10 @@ function world({ log, mutateBundle, fromBranch, baseFiles = {}, baseLink, edit }
   mkdirSync(bin);
   const stub = (name, body) => { writeFileSync(join(bin, name), `#!/bin/bash\n${body}\n`); chmodSync(join(bin, name), 0o755); };
   stub("gh", `printf '%s\\0' "$@" > "${root}/gh.args"; echo https://github.com/x/y/pull/9`);
-  // Slack calls (the payload goes in -d) are kept in slack.payload; every call's arguments are also
-  // appended to curl.calls (one call per line, arguments NUL-separated) so Sheet posts can be checked.
-  stub("curl", `printf '%s\\0' "$@" >> "${root}/curl.calls"; echo >> "${root}/curl.calls"; case "$*" in *slack.com*) for a in "$@"; do case "$a" in \\{*) printf '%s' "$a" > "${root}/slack.payload";; esac; done;; esac`);
+  // Slack calls send their payload on stdin (curl --data @-): each is kept as slack.<n>.json, the last also as
+  // slack.payload; every call's arguments are also appended to curl.calls (one call per line, arguments
+  // NUL-separated) so Sheet posts can be checked.
+  stub("curl", `printf '%s\\0' "$@" >> "${root}/curl.calls"; echo >> "${root}/curl.calls"; case "$*" in *slack.com*) n=$(( $(cat "${root}/n" 2>/dev/null || echo 0) + 1 )); echo $n > "${root}/n"; cat > "${root}/slack.$n.json"; cp "${root}/slack.$n.json" "${root}/slack.payload";; esac`);
   return { root, j2: join(root, "job2"), rt2, bin, remote: join(root, "remote.git") };
 }
 
@@ -241,6 +242,87 @@ test("publish: Slack notice is sent only when a token and channel are set", () =
     assert.equal(payload.channel, "C1");
     assert.match(payload.text, /DRAFT; self-reported tests: FAIL, reviewer: BLOCK/);
     assert.match(payload.text, /pull\/9/);
+  } finally { cleanup(w); }
+});
+
+const slackPosts = (w) => {
+  const n = existsSync(join(w.root, "n")) ? Number(readFileSync(join(w.root, "n"), "utf8")) : 0;
+  return Array.from({ length: n }, (_, i) => JSON.parse(readFileSync(join(w.root, `slack.${i + 1}.json`), "utf8")));
+};
+const SLACK_ENV = { SLACK_BOT_TOKEN: "xoxb", SLACK_CHANNEL: "C0CHAN", SLACK_USER: "U0ABC123", THREAD_TS: "1700000000.000100" };
+const PR_LOG = '{"test_result":"PASS","review_verdict":"APPROVE"}';
+
+test("publish: the PR message replies in the run's thread, tags the person who started the run, and has previews off", () => {
+  const w = world({ log: PR_LOG });
+  try {
+    publish(w, SLACK_ENV);
+    const [p, ...more] = slackPosts(w);
+    assert.equal(more.length, 0);
+    assert.equal(p.channel, "C0CHAN");
+    assert.equal(p.thread_ts, "1700000000.000100");
+    assert.equal(p.unfurl_links, false);
+    assert.equal(p.unfurl_media, false);
+    assert.match(p.text, /^<@U0ABC123> 🔀 PR opened for review: https:\/\/github\.com\/x\/y\/pull\/9 \(DRAFT; self-reported tests: PASS, reviewer: APPROVE\)/);
+    // the payload travels on stdin: nothing of the message is a curl argument
+    const slackCall = curlCalls(w.root).find((a) => a.includes("https://slack.com/api/chat.postMessage"));
+    assert.equal(slackCall[slackCall.indexOf("--data") + 1], "@-");
+    assert.ok(!slackCall.some((a) => a.includes("PR opened") || a.includes("U0ABC123")));
+  } finally { cleanup(w); }
+});
+
+test("publish: no thread (or a bad ts) posts top-level; a bad or missing user id posts without a tag", () => {
+  for (const ts of ["", "nope", "1700000000.000100\n<!channel>"]) {
+    const w = world({ log: PR_LOG });
+    try {
+      publish(w, { ...SLACK_ENV, THREAD_TS: ts });
+      const [p] = slackPosts(w);
+      assert.ok(!("thread_ts" in p), JSON.stringify(ts));
+      assert.equal(p.unfurl_links, false);
+    } finally { cleanup(w); }
+  }
+  for (const user of ["", "U1", "u0abc123", "U0ABC123\n<!channel>", "<!channel>", "$(id)"]) {
+    const w = world({ log: PR_LOG });
+    try {
+      publish(w, { ...SLACK_ENV, SLACK_USER: user });
+      assert.ok(remoteHas(w, "refs/heads/factory/run-1"), "the PR still opened");
+      const [p] = slackPosts(w);
+      assert.match(p.text, /^🔀 PR opened for review:/, JSON.stringify(user));
+      assert.ok(!p.text.includes("<@") && !p.text.includes("<!"), JSON.stringify(user));
+    } finally { cleanup(w); }
+  }
+});
+
+test("publish: an Actions-tab run (no user) still posts in the default channel's thread, with no tag", () => {
+  const w = world({ log: PR_LOG });
+  try {
+    publish(w, { ...SLACK_ENV, SLACK_CHANNEL: "C0DEFAULT", SLACK_USER: "" });
+    const [p] = slackPosts(w);
+    assert.equal(p.channel, "C0DEFAULT");
+    assert.equal(p.thread_ts, "1700000000.000100");
+    assert.ok(!p.text.includes("<@"));
+  } finally { cleanup(w); }
+});
+
+test("publish: the no-code-changes notice is a thread reply with previews off, and carries no tag", () => {
+  const w = world({ log: '{"test_result":"none","review_verdict":"unknown"}', edit: ({ j1 }) => rmSync(join(j1, "feat.txt")) });
+  try {
+    publish(w, SLACK_ENV);
+    const [p, ...more] = slackPosts(w);
+    assert.equal(more.length, 0);
+    assert.equal(p.text, "ℹ️ Factory run 1 finished with no code changes; no PR opened.");
+    assert.equal(p.thread_ts, "1700000000.000100");
+    assert.equal(p.unfurl_links, false);
+    assert.equal(p.unfurl_media, false);
+  } finally { cleanup(w); }
+});
+
+test("publish: a Slack failure (curl exits non-zero) never blocks the PR", () => {
+  const w = world({ log: PR_LOG });
+  try {
+    writeFileSync(join(w.bin, "curl"), `#!/bin/bash\ncat > /dev/null\nexit 7\n`);
+    publish(w, SLACK_ENV); // throws if the step fails
+    assert.ok(remoteHas(w, "refs/heads/factory/run-1"));
+    assert.ok(ghArgs(w).includes("--draft"), "the PR was opened");
   } finally { cleanup(w); }
 });
 
@@ -566,7 +648,7 @@ test("notify-failure: fixed message, only with a token and channel, never the br
     const root = mkdtempSync(join(tmpdir(), "nf-"));
     const bin = join(root, "bin");
     mkdirSync(bin);
-    writeFileSync(join(bin, "curl"), `#!/bin/bash\nfor a in "$@"; do case "$a" in \\{*) printf '%s' "$a" > "${root}/payload";; esac; done\n`);
+    writeFileSync(join(bin, "curl"), `#!/bin/bash\ncat > "${root}/payload"\n`);
     chmodSync(join(bin, "curl"), 0o755);
     try {
       execFileSync("bash", ["-e", "-c", stepScript("Tell Slack the run failed", {})], {
@@ -604,7 +686,7 @@ test("workflow: the factory builds on develop, resolved once by a job that runs 
   assert.doesNotMatch(prepare, /d3-orchestrator|npm |secrets\./);
   // the agent job and the publish job both use that commit, and publish only trusts the job output
   assert.match(WORKFLOW, /\n  pipeline:\n\s+needs: prepare/);
-  assert.match(WORKFLOW, /\n  publish:\n\s+needs: \[prepare, pipeline\]/);
+  assert.match(WORKFLOW, /\n  publish:\n(\s+#.*\n)*\s+needs: \[prepare, pipeline, notify-start, notify-agents\]/);
   assert.equal(WORKFLOW.split("ref: ${{ needs.prepare.outputs.base_sha }}").length - 1, 2, "pipeline and publish must both check out the prepare job's commit");
   assert.match(WORKFLOW, /BASE_SHA: \$\{\{ needs\.prepare\.outputs\.base_sha \}\}/);
   // the bundle excludes the base, and the base it excludes is the prepare job's commit
@@ -639,7 +721,7 @@ test("prepare: resolves develop's head to a 40-hex commit and refuses anything e
 });
 
 test("workflow: notify-failure runs on either job failing and holds no permissions", () => {
-  assert.match(WORKFLOW, /notify-failure:\n\s+needs: \[prepare, pipeline, publish\]\n\s+if: \$\{\{ always\(\) && \(needs\.prepare\.result == 'failure' \|\| needs\.pipeline\.result == 'failure' \|\| needs\.publish\.result == 'failure' \|\| needs\.pipeline\.result == 'skipped' \|\| needs\.pipeline\.result == 'cancelled' \|\| needs\.publish\.result == 'cancelled'\) \}\}/);
+  assert.match(WORKFLOW, /notify-failure:\n(\s+#.*\n)*\s+needs: \[prepare, pipeline, publish, notify-start\]\n\s+if: \$\{\{ always\(\) && \(needs\.prepare\.result == 'failure' \|\| needs\.pipeline\.result == 'failure' \|\| needs\.publish\.result == 'failure' \|\| needs\.pipeline\.result == 'skipped' \|\| needs\.pipeline\.result == 'cancelled' \|\| needs\.publish\.result == 'cancelled'\) \}\}/);
   assert.match(WORKFLOW, /notify-failure:[\s\S]*?permissions: \{\}/);
   // kill switch: the agent job only runs when the repo variable is exactly 'true'
   assert.match(WORKFLOW, /\n  pipeline:\n\s+needs: prepare\n\s+(#.*\n\s+)*if: \$\{\{ vars\.D3_FACTORY_ENABLED == 'true' && github\.ref == 'refs\/heads\/main' \}\}/);
@@ -856,7 +938,7 @@ test("notify-start: posts the start message with the brief escaped for Slack, on
     const root = mkdtempSync(join(tmpdir(), "ns-"));
     const bin = join(root, "bin");
     mkdirSync(bin);
-    writeFileSync(join(bin, "curl"), `#!/bin/bash\nfor a in "$@"; do case "$a" in \\{*) printf '%s' "$a" > "${root}/payload";; esac; done\n`);
+    writeFileSync(join(bin, "curl"), `#!/bin/bash\ncat > "${root}/payload"\n`);
     chmodSync(join(bin, "curl"), 0o755);
     try {
       execFileSync("bash", ["-e", "-c", stepScript("Tell Slack the run started", {})], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env }, stdio: "pipe" });
