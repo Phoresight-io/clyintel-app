@@ -132,7 +132,7 @@ test("workflow: the agents work on a copy outside the checkout, so the checkout'
 
 // Runs a step script with a stub `docker` (and a stub `id` that reports the hosted runner's uid 1001).
 // The stub writes its argv and, for every `-e NAME` (no value), what the container would receive.
-function withStubDocker(script, env, { bundle = "file" } = {}) {
+function withStubDocker(script, env, { bundle = "file", dnsResolves = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "iso-"));
   const bin = join(root, "bin");
   mkdirSync(bin);
@@ -146,6 +146,7 @@ function withStubDocker(script, env, { bundle = "file" } = {}) {
     `#!/bin/bash
 printf '%s\\0' "$@" >> "${root}/docker.calls"; echo >> "${root}/docker.calls"
 case "$1" in rm|network) exit 0;; logs) echo "egress proxy listening on 8888; allowed: api.anthropic.com:443"; exit 0;; esac
+case "$*" in *d3-dnscheck-*) exit ${dnsResolves ? 0 : 1};; esac
 case "\${@: -1}" in
   /etc/passwd) printf 'root:x:0:0:root:/root:/bin/bash\\nnode:x:1000:1000::/home/node:/bin/bash\\n'; exit 0;;
   /etc/group) printf 'root:x:0:\\nnode:x:1000:\\n'; exit 0;;
@@ -312,7 +313,7 @@ test("cleanup: kills both containers, then removes the agents' copy even if the 
     assert.ok(!existsSync(repo), "the agents' copy is still there");
     assert.equal(readFileSync(join(keep, "precious"), "utf8"), "x");
     const calls = readFileSync(join(r.root, "docker.calls"), "utf8").split("\0\n").filter(Boolean).map((l) => l.split("\0"));
-    assert.deepEqual(calls.find((c) => c[0] === "rm"), ["rm", "-f", "d3-agents-9", "d3-commit-9", "d3-proxy-9"]);
+    assert.deepEqual(calls.find((c) => c[0] === "rm"), ["rm", "-f", "d3-agents-9", "d3-commit-9", "d3-proxy-9", "d3-dnscheck-9"]);
     assert.ok(calls.some((c) => c.join(" ") === "network rm d3-egress-9"), "the internal network is not removed");
     const sudo = readFileSync(join(r.root, "sudo.calls"), "utf8");
     assert.match(sudo, /iptables\0-D\0INPUT\0-i\0d3egress0\0-j\0DROP/, "the firewall rule is not removed");
@@ -351,6 +352,24 @@ test("egress step: internal network, host firewall rule BEFORE the proxy starts,
     const script = stepScript(EGRESS_STEP);
     assert.ok(script.indexOf("network create") < script.indexOf("iptables -I") && script.indexOf("iptables -I") < script.indexOf("docker run"), "firewall rule must be in place before anything runs on the network");
   } finally { r.done(); }
+});
+
+test("egress step: fails closed if the internal network resolves outside names (DNS would be a way out)", () => {
+  const ok = withStubDocker(stepScript(EGRESS_STEP), { ...RUN_ENV });
+  try {
+    assert.equal(ok.code, 0, ok.stderr);
+    const check = ok.calls.find((c) => c[0] === "run" && c.includes("d3-dnscheck-9"));
+    assert.ok(check, "no DNS check");
+    assert.deepEqual(flagValues(check, "--network"), ["d3-egress-9"]);
+    // docker's own flags are the ones before the image (`node -e` after it is the probe's script)
+    assert.deepEqual(flagValues(check.slice(0, check.indexOf("img@sha256:abc")), "-e"), [], "the DNS check gets no environment");
+    assert.ok(check.includes("--read-only") && flagValues(check, "--cap-drop")[0] === "ALL");
+  } finally { ok.done(); }
+  const leak = withStubDocker(stepScript(EGRESS_STEP), { ...RUN_ENV }, { dnsResolves: true });
+  try {
+    assert.notEqual(leak.code, 0, "the step went on although outside DNS resolves");
+    assert.match(leak.stderr, /Outside DNS resolves/);
+  } finally { leak.done(); }
 });
 
 test("egress: the proxy script is copied from the checkout in the Copy step, before any agent runs, outside the agents' copy", () => {
@@ -449,7 +468,7 @@ function realEgressUp(rt, bin) {
   });
 }
 function realEgressDown() {
-  spawnSync("docker", ["rm", "-f", "d3-proxy-9", "d3-agents-9", "d3-probe-host-9"], { stdio: "ignore" });
+  spawnSync("docker", ["rm", "-f", "d3-proxy-9", "d3-agents-9", "d3-dnscheck-9"], { stdio: "ignore" });
   spawnSync("docker", ["network", "rm", "d3-egress-9"], { stdio: "ignore" });
   spawnSync("sudo", ["-n", "iptables", "-D", "INPUT", "-i", "d3egress0", "-j", "DROP"], { stdio: "ignore" });
 }

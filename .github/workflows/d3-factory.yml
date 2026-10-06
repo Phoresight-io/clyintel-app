@@ -214,13 +214,25 @@ jobs:
             -v "$RUNNER_TEMP/d3-proxy/egress-proxy.mjs:/proxy/egress-proxy.mjs:ro" \
             "$AGENT_IMAGE" node /proxy/egress-proxy.mjs >/dev/null
           docker network connect --alias proxy "$EGRESS_NET" "d3-proxy-$GITHUB_RUN_ID"
+          READY=""
           for _ in $(seq 1 30); do
-            if docker logs "d3-proxy-$GITHUB_RUN_ID" 2>&1 | grep -q "egress proxy listening"; then exit 0; fi
+            if docker logs "d3-proxy-$GITHUB_RUN_ID" 2>&1 | grep -q "egress proxy listening"; then READY=1; break; fi
             sleep 1
           done
-          echo "The egress proxy did not start." >&2
-          docker logs "d3-proxy-$GITHUB_RUN_ID" 2>&1 | sed 's/^/    | /' >&2
-          exit 1
+          if [ -z "$READY" ]; then
+            echo "The egress proxy did not start." >&2
+            docker logs "d3-proxy-$GITHUB_RUN_ID" 2>&1 | sed 's/^/    | /' >&2
+            exit 1
+          fi
+          # Fail closed if the internal network resolves outside names. Docker engines before 26
+          # forwarded those lookups to the host's resolver, which would leave DNS (<data>.attacker.example)
+          # as a way out past the proxy. A lookup that SUCCEEDS stops the run before any agent starts.
+          if docker run --rm --name "d3-dnscheck-$GITHUB_RUN_ID" --network "$EGRESS_NET" \
+               --user "$(id -u):$(id -g)" --cap-drop ALL --security-opt no-new-privileges --read-only \
+               "$AGENT_IMAGE" node -e 'require("dns").promises.lookup("example.com").then(() => process.exit(0), () => process.exit(1))'; then
+            echo "Outside DNS resolves on the agents' internal network; refusing to run the agents." >&2
+            exit 1
+          fi
 
       # THE AGENT CONTAINER. The orchestrator and every agent session it starts run here, never on
       # the runner itself. What the agents can reach:
@@ -237,7 +249,9 @@ jobs:
       #   - network: only the egress proxy (see the step above). The container sits on the internal
       #     network d3-egress-<run id>, whose sole way out is CONNECT api.anthropic.com:443 through
       #     http://proxy:8888. Non-essential CLI traffic (telemetry, error reports, update checks) is
-      #     switched off, as those hosts are not allowed. What is left: an injected agent can still
+      #     switched off, as those hosts are not allowed. The npm registry is not reachable either:
+      #     the agents work with the dependencies installed above, and a new dependency needs a human
+      #     (coder.md says so). What is left: an injected agent can still
       #     call the Anthropic API, with this key or one of its own, so the key stays spend-capped.
       # The orchestrator refuses to start without D3_FACTORY_SANDBOX=container, or if any other
       # credential-like variable is set (agent-env.mjs), so moving this step back onto the runner fails.
@@ -333,7 +347,7 @@ jobs:
               echo "Egress proxy refused nothing."
             fi
           fi
-          docker rm -f "d3-agents-$GITHUB_RUN_ID" "d3-commit-$GITHUB_RUN_ID" "d3-proxy-$GITHUB_RUN_ID" >/dev/null 2>&1 || true
+          docker rm -f "d3-agents-$GITHUB_RUN_ID" "d3-commit-$GITHUB_RUN_ID" "d3-proxy-$GITHUB_RUN_ID" "d3-dnscheck-$GITHUB_RUN_ID" >/dev/null 2>&1 || true
           docker network rm "d3-egress-$GITHUB_RUN_ID" >/dev/null 2>&1 || true
           sudo iptables -D INPUT -i d3egress0 -j DROP 2>/dev/null || true
           sudo ip6tables -D INPUT -i d3egress0 -j DROP 2>/dev/null || true
