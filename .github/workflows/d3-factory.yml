@@ -469,9 +469,8 @@ jobs:
           if ! jq -s -e '
                length == 1 and (.[0] | type == "object")
                and ((.[0].notes // []) | type == "array")
-               and (.[0].verdict == null or (.[0].verdict | IN("APPROVE", "REQUEST CHANGES", "BLOCK")))
              ' "$NOTES_FILE" >/dev/null 2>&1; then
-            echo "Notes file rejected (not one JSON object, or a verdict outside the enum); nothing posted."
+            echo "Notes file rejected (not one JSON object, or notes is not an array); nothing posted."
             exit 0
           fi
           # The tag target and the thread ts must look like what Slack issues; otherwise post without them.
@@ -482,16 +481,19 @@ jobs:
           if [[ "$THREAD_TS" =~ ^[0-9]{1,12}\.[0-9]{1,8}$ ]]; then THREAD="$THREAD_TS"; fi
           # One payload per allowed agent, in a fixed order; only the last note per agent counts. The text is
           # capped at 300 characters FIRST and escaped after (escaping makes it longer). needs_you counts
-          # only as the boolean true. The tag goes on a needs_you note, and on the reviewer's note when
-          # the verdict is REQUEST CHANGES or BLOCK. Every payload turns link previews off.
+          # only as the boolean true. The verdict counts only if it is exactly one of APPROVE, REQUEST CHANGES
+          # or BLOCK; anything else is null (no tag), and the notes still post. The tag goes on a needs_you
+          # note, and on the reviewer's note when the verdict is REQUEST CHANGES or BLOCK. Every payload
+          # turns link previews off.
           jq -c --arg c "$SLACK_CHANNEL" --arg tag "$TAG_USER" --arg thread "$THREAD" '
             def esc: gsub("&";"&amp;") | gsub("<";"&lt;") | gsub(">";"&gt;");
             def heading: {planner:"🧭 Planner", coder:"🔨 Coder", tester:"🧪 Tester", reviewer:"🔍 Reviewer"}[.];
             . as $doc
+            | (if ($doc.verdict | type) == "string" and ($doc.verdict | IN("APPROVE","REQUEST CHANGES","BLOCK")) then $doc.verdict else null end) as $verdict
             | ["planner","coder","tester","reviewer"][] as $agent
             | ([($doc.notes // [])[] | select(type == "object" and .agent == $agent and (.text | type) == "string")] | last) as $n
             | select($n != null)
-            | (($n.needs_you == true) or ($agent == "reviewer" and ($doc.verdict | IN("REQUEST CHANGES","BLOCK")))) as $ping
+            | (($n.needs_you == true) or ($agent == "reviewer" and ($verdict | IN("REQUEST CHANGES","BLOCK")))) as $ping
             | ($n.text | .[0:300] | esc) as $body
             | {channel: $c,
                text: (($agent | heading) + ": " + (if $ping and $tag != "" then "<@" + $tag + "> " else "" end) + $body),

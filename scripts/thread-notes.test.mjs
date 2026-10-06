@@ -206,10 +206,23 @@ test("notify-agents: unknown agent names are dropped, whatever their text", () =
   });
 });
 
-test("notify-agents: a verdict outside the enum rejects the whole file", () => {
-  for (const verdict of ["approve", "APPROVED", "Request Changes", "BLOCK ", "MERGE", "", 1, true, ["BLOCK"], { v: "BLOCK" }, "APPROVE\nBLOCK"]) {
-    nothingPosted({ notes: { notes: FOUR, verdict } }, `verdict ${JSON.stringify(verdict)}`);
+test("notify-agents: a verdict outside the enum counts as null: the four notes still post, and no tag is added", () => {
+  const bad = ["approve", "APPROVED", "Request Changes", "BLOCK ", " BLOCK", "MERGE", "", 1, true, ["BLOCK"], { v: "BLOCK" }, "APPROVE\nBLOCK", "BLOCK\n<!channel>", "<@U0EVIL999>"];
+  for (const verdict of bad) {
+    // the reviewer's note carries needs_you:false, so the only possible tag source is the verdict
+    withRun({ notes: { notes: FOUR, verdict } }, (r) => {
+      const what = `verdict ${JSON.stringify(verdict)}`;
+      assert.equal(r.code, 0, `${what}: ${r.stderr}`);
+      assert.deepEqual(r.posts.map((p) => p.text), ["🧭 Planner: Planned.", "🔨 Coder: Built.", "🧪 Tester: Tested.", "🔍 Reviewer: Reviewed."], what);
+      assert.ok(r.posts.every((p) => !p.text.includes("<")), `${what}: a tag or markup appeared`);
+      assert.ok(r.posts.every((p) => p.thread_ts === "1700000000.000100" && p.unfurl_links === false && p.unfurl_media === false), what);
+    });
   }
+  // a bad verdict does not suppress a tag that has its own reason (needs_you is true)
+  withRun({ notes: { notes: [note("coder", "Needs you: x", { needs_you: true }), FOUR[3]], verdict: "MERGE" } }, (r) => {
+    assert.deepEqual(r.posts.map((p) => p.text), ["🔨 Coder: <@U0ABC123> Needs you: x", "🔍 Reviewer: Reviewed."]);
+  });
+  // the enum values themselves behave as before
   for (const verdict of ["APPROVE", "REQUEST CHANGES", "BLOCK", null]) {
     withRun({ notes: { notes: FOUR, verdict } }, (r) => assert.equal(r.posts.length, 4, String(verdict)));
   }
