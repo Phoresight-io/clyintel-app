@@ -148,11 +148,13 @@ export function stagingViolation(command) {
 // the directory is refused, but `cd /; echo x > notes/f` would not be, which is why notify-agents
 // treats the notes file as untrusted and re-validates all of it.
 const NOTES_WORD = new RegExp(`(^|[\\s"'=:;|&(<>])${NOTES_DIR}(?![\\w.-])`);
-export function touchesNotes(tool, args) {
+export function touchesNotes(tool, args, repoRoot = "/") {
   if (tool === "Write" || tool === "Edit" || tool === "NotebookEdit") {
     const p = args.file_path ?? args.notebook_path;
     if (typeof p !== "string") return false;
-    const n = posix.normalize(p.replace(/\\/g, "/"));
+    // A relative path is relative to the repo root (the orchestrator's working directory), so resolve it
+    // there first: "../../notes/x" from /work/repo is /notes/x.
+    const n = posix.resolve(repoRoot.replace(/\\/g, "/"), p.replace(/\\/g, "/"));
     return n === NOTES_DIR || n.startsWith(NOTES_DIR + "/");
   }
   return tool === "Bash" && typeof args.command === "string" && NOTES_WORD.test(args.command);
@@ -270,7 +272,7 @@ export function decide(input, repoRoot) {
     return deny(`${agentType} may not use ${tool}.`);
   }
 
-  if (touchesNotes(tool, args)) {
+  if (touchesNotes(tool, args, repoRoot)) {
     return deny(`${agentType} may not write to ${NOTES_DIR}: that directory belongs to the orchestrator.`);
   }
 

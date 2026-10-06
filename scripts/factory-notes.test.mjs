@@ -158,7 +158,9 @@ const denied = (out) => out?.hookSpecificOutput?.permissionDecision === "deny";
 test("role guard: no agent may Write or Edit under /notes, however the path is spelled", () => {
   for (const agent of ["planner", "coder", "tester"]) {
     for (const tool of ["Write", "Edit"]) {
-      for (const p of ["/notes/factory-notes.json", "/notes", "/notes/../notes/x", "//notes/x", "/work/repo/../../notes/factory-notes.json", "/notes/./factory-notes.json"]) {
+      for (const p of ["/notes/factory-notes.json", "/notes", "/notes/../notes/x", "//notes/x", "/work/repo/../../notes/factory-notes.json", "/notes/./factory-notes.json",
+        // relative paths resolve against the repo root (/work/repo): the orchestrator's working directory
+        "../../notes/factory-notes.json", "../../notes", "./../../notes/x", "clyintel/../../../notes/x"]) {
         if (agent === "planner" && tool === "Edit") continue; // the planner has no Edit at all (denied for that reason)
         assert.ok(denied(DECIDE(agent, tool, { file_path: p })), `${agent} ${tool} ${p}`);
       }
@@ -177,6 +179,12 @@ test("role guard: coder and tester Bash that names /notes is refused; ordinary p
       assert.ok(!denied(DECIDE(agent, "Bash", { command: cmd })), `${agent}: ${cmd}`);
   }
   assert.ok(!denied(DECIDE("coder", "Write", { file_path: "/work/repo/clyintel/app/notes/page.tsx" })));
+  assert.ok(!denied(DECIDE("coder", "Write", { file_path: "clyintel/app/notes/page.tsx" })), "a relative path inside the repo is fine");
+  assert.ok(!denied(DECIDE("coder", "Write", { file_path: "notes/page.tsx" })), "a repo-level notes/ directory is not /notes");
+  // the guard itself, not just the role rules around it: relative paths resolve against the root it is given
+  assert.equal(touchesNotes("Write", { file_path: "../../notes/f" }, "/work/repo"), true);
+  assert.equal(touchesNotes("Edit", { file_path: "../notes/f" }, "/work/repo"), false, "/work/notes is not /notes");
+  assert.equal(touchesNotes("Write", { file_path: "notes/f" }, "/work/repo"), false);
   assert.equal(touchesNotes("Read", { file_path: "/notes/x" }), false); // reading is not writing
 });
 
