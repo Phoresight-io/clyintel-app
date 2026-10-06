@@ -22,6 +22,7 @@ const COMMIT_STEP = "Commit and bundle the agents' work (container, no secrets, 
 const CLEANUP_STEP = "Remove the agents' containers and working tree";
 const COPY_STEP = "Copy the repo for the agents";
 const USER_STEP = "Prepare the agent container's user entry";
+const EGRESS_STEP = "Start the agents' internal network and egress proxy";
 const KEY = "D3_FACTORY_ANTHROPIC_API_KEY";
 
 // ---- workflow structure
@@ -123,7 +124,7 @@ test("workflow: the agents work on a copy outside the checkout, so the checkout'
   for (const st of steps) {
     if (/^uses: actions\/upload-artifact/.test(st)) continue;
     // a run step either cds into / works in the agents' copy, or touches no repo files at all
-    assert.ok(/d3-agent-repo|docker run --rm --network none|bundle-out|d3-etc/.test(st), `step does not say where it works:\n${st.slice(0, 200)}`);
+    assert.ok(/d3-agent-repo|docker run --rm --network none|bundle-out|d3-etc|d3-proxy/.test(st), `step does not say where it works:\n${st.slice(0, 200)}`);
   }
 });
 
@@ -144,7 +145,7 @@ function withStubDocker(script, env, { bundle = "file" } = {}) {
     join(bin, "docker"),
     `#!/bin/bash
 printf '%s\\0' "$@" >> "${root}/docker.calls"; echo >> "${root}/docker.calls"
-case "$1" in rm) exit 0;; esac
+case "$1" in rm|network) exit 0;; logs) echo "egress proxy listening on 8888; allowed: api.anthropic.com:443"; exit 0;; esac
 case "\${@: -1}" in
   /etc/passwd) printf 'root:x:0:0:root:/root:/bin/bash\\nnode:x:1000:1000::/home/node:/bin/bash\\n'; exit 0;;
   /etc/group) printf 'root:x:0:\\nnode:x:1000:\\n'; exit 0;;
@@ -173,8 +174,11 @@ for a in "$@"; do
 done
 `
   );
+  // sudo only ever runs iptables here; record it, never touch the real firewall
+  writeFileSync(join(bin, "sudo"), `#!/bin/bash\nprintf '%s\\0' "$@" >> "${root}/sudo.calls"; echo >> "${root}/sudo.calls"\n`);
   chmodSync(join(bin, "id"), 0o755);
   chmodSync(join(bin, "docker"), 0o755);
+  chmodSync(join(bin, "sudo"), 0o755);
   const r = spawnSync("bash", ["-e", "-c", script], {
     env: { PATH: `${bin}:${process.env.PATH}`, GITHUB_WORKSPACE: ws, RUNNER_TEMP: rt, ...env },
     encoding: "utf8",
@@ -184,7 +188,8 @@ done
     ? Object.fromEntries(readFileSync(join(root, "docker.env"), "utf8").split("\0").slice(0, -1).map((kv) => [kv.slice(0, kv.indexOf("=")), kv.slice(kv.indexOf("=") + 1)]))
     : null;
   const calls = existsSync(join(root, "docker.calls")) ? readFileSync(join(root, "docker.calls"), "utf8").split("\0\n").filter(Boolean).map((l) => l.split("\0")) : [];
-  return { code: r.status, stderr: r.stderr, argv, cenv, calls, ws, rt, root, done: () => rmSync(root, { recursive: true, force: true }) };
+  const sudoCalls = existsSync(join(root, "sudo.calls")) ? readFileSync(join(root, "sudo.calls"), "utf8").split("\0\n").filter(Boolean).map((l) => l.split("\0")) : [];
+  return { code: r.status, stderr: r.stderr, argv, cenv, calls, sudoCalls, ws, rt, root, done: () => rmSync(root, { recursive: true, force: true }) };
 }
 
 const flagValues = (argv, flag) => argv.flatMap((a, i) => (argv[i - 1] === flag ? [a] : []));
@@ -208,9 +213,14 @@ test("agent container: only the repo is mounted, no privileges, and the environm
     assert.equal(argv[0], "run");
     // exactly these variables reach the container; the key is the only secret
     assert.deepEqual(Object.keys(cenv).sort(), [
-      "BRANCH", "BRIEF", "CI", KEY, "D3_FACTORY_SANDBOX", "GITHUB_ACTOR", "GITHUB_REPOSITORY", "GITHUB_RUN_ID", "HOME", "LANG", "SLACK_USER", "TMPDIR",
+      "BRANCH", "BRIEF", "CI", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", KEY, "D3_FACTORY_SANDBOX", "GITHUB_ACTOR", "GITHUB_REPOSITORY", "GITHUB_RUN_ID",
+      "HOME", "HTTPS_PROXY", "HTTP_PROXY", "LANG", "NO_PROXY", "SLACK_USER", "TMPDIR",
     ]);
     assert.equal(cenv[KEY], "sk-d3-REAL");
+    // the only way out is the egress proxy
+    assert.equal(cenv.HTTPS_PROXY, "http://proxy:8888");
+    assert.equal(cenv.HTTP_PROXY, "http://proxy:8888");
+    assert.equal(cenv.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, "1");
     assert.equal(cenv.D3_FACTORY_SANDBOX, "container");
     for (const v of Object.values(DECOYS)) assert.ok(!Object.values(cenv).includes(v), `decoy ${v} reached the container`);
     // the key is passed by NAME: its value is never on docker's command line (visible in ps)
@@ -229,7 +239,7 @@ test("agent container: only the repo is mounted, no privileges, and the environm
     assert.ok(argv.includes("--read-only") && argv.includes("--rm") && argv.includes("--init"));
     assert.match(flagValues(argv, "--tmpfs")[0], /^\/tmp:/);
     assert.ok(flagValues(argv, "--pids-limit").length === 1);
-    assert.deepEqual(flagValues(argv, "--network"), ["bridge"]);
+    assert.deepEqual(flagValues(argv, "--network"), ["d3-egress-9"]);
     // nothing that would hand the container the host
     for (const a of argv) {
       assert.doesNotMatch(a, /docker\.sock|^--privileged|^--env-file|^--pid(=|$)|^--ipc|^--uts|^--userns|^--cap-add|^--device|^--group-add|unconfined|^--volumes-from/, a);
@@ -302,9 +312,72 @@ test("cleanup: kills both containers, then removes the agents' copy even if the 
     assert.ok(!existsSync(repo), "the agents' copy is still there");
     assert.equal(readFileSync(join(keep, "precious"), "utf8"), "x");
     const calls = readFileSync(join(r.root, "docker.calls"), "utf8").split("\0\n").filter(Boolean).map((l) => l.split("\0"));
-    assert.deepEqual(calls.find((c) => c[0] === "rm"), ["rm", "-f", "d3-agents-9", "d3-commit-9"]);
+    assert.deepEqual(calls.find((c) => c[0] === "rm"), ["rm", "-f", "d3-agents-9", "d3-commit-9", "d3-proxy-9"]);
+    assert.ok(calls.some((c) => c.join(" ") === "network rm d3-egress-9"), "the internal network is not removed");
+    const sudo = readFileSync(join(r.root, "sudo.calls"), "utf8");
+    assert.match(sudo, /iptables\0-D\0INPUT\0-i\0d3egress0\0-j\0DROP/, "the firewall rule is not removed");
     assert.match(job("pipeline"), new RegExp(`- name: ${CLEANUP_STEP}\\n\\s+if: always\\(\\)`));
   } finally { r.done(); }
+});
+
+// ---- egress: the agent container's only way out is the allowlist proxy
+
+test("egress step: internal network, host firewall rule BEFORE the proxy starts, and a locked-down proxy from the trusted copy", () => {
+  const r = withStubDocker(stepScript(EGRESS_STEP), { ...RUN_ENV });
+  try {
+    assert.equal(r.code, 0, r.stderr);
+    const net = r.calls.findIndex((c) => c[0] === "network" && c[1] === "create");
+    assert.ok(net >= 0, "no network created");
+    assert.deepEqual(r.calls[net], ["network", "create", "--internal", "-o", "com.docker.network.bridge.name=d3egress0", "d3-egress-9"]);
+    // the firewall rule drops what the internal network sends to the runner itself (its gateway)
+    assert.deepEqual(r.sudoCalls[0], ["iptables", "-I", "INPUT", "-i", "d3egress0", "-j", "DROP"]);
+    // the proxy container: no secret, no privileges, read-only, the TRUSTED script read-only, pinned image
+    const run = r.calls.find((c) => c[0] === "run");
+    assert.ok(run, "proxy not started");
+    assert.deepEqual(flagValues(run, "--name"), ["d3-proxy-9"]);
+    assert.deepEqual(flagValues(run, "--user"), ["1001:1001"]);
+    assert.deepEqual(flagValues(run, "--cap-drop"), ["ALL"]);
+    assert.deepEqual(flagValues(run, "--security-opt"), ["no-new-privileges"]);
+    assert.ok(run.includes("--read-only") && run.includes("--init"));
+    assert.deepEqual(flagValues(run, "--network"), ["bridge"]);
+    assert.deepEqual(flagValues(run, "-v"), [`${r.rt}/d3-proxy/egress-proxy.mjs:/proxy/egress-proxy.mjs:ro`]);
+    assert.deepEqual(flagValues(run, "-e"), [], "the proxy gets no environment");
+    assert.ok(!run.some((a) => a.includes("d3-agent-repo") || a.includes(r.ws)), "the proxy runs from the agents' copy or the checkout");
+    assert.deepEqual(run.slice(-3), ["img@sha256:abc", "node", "/proxy/egress-proxy.mjs"]);
+    for (const a of run) assert.doesNotMatch(a, /docker\.sock|^--privileged|^--cap-add|^--pid(=|$)|^--device|^--env-file|^--volumes-from/, a);
+    // ...joined to the internal network as "proxy", which is what HTTPS_PROXY names
+    assert.ok(r.calls.some((c) => c.join(" ") === "network connect --alias proxy d3-egress-9 d3-proxy-9"));
+    // ordering: network, then firewall, then proxy (the sudo stub has no clock, so check the step text)
+    const script = stepScript(EGRESS_STEP);
+    assert.ok(script.indexOf("network create") < script.indexOf("iptables -I") && script.indexOf("iptables -I") < script.indexOf("docker run"), "firewall rule must be in place before anything runs on the network");
+  } finally { r.done(); }
+});
+
+test("egress: the proxy script is copied from the checkout in the Copy step, before any agent runs, outside the agents' copy", () => {
+  const copy = stepScript(COPY_STEP);
+  assert.match(copy, /cp -- "\$GITHUB_WORKSPACE\/scripts\/egress-proxy\.mjs" "\$PROXY_DIR\/egress-proxy\.mjs"/);
+  assert.match(copy, /PROXY_DIR="\$RUNNER_TEMP\/d3-proxy"/);
+  assert.match(copy, /chmod 0444 "\$PROXY_DIR\/egress-proxy\.mjs"/);
+  const pipeline = codeOnly(job("pipeline"));
+  const at = (name) => pipeline.indexOf(`- name: ${name}`);
+  assert.ok(at(COPY_STEP) < at(EGRESS_STEP) && at(EGRESS_STEP) < at(AGENT_STEP), "proxy must be up before the agents start");
+  // the agents never get the proxy's directory
+  assert.doesNotMatch(stepScript(AGENT_STEP), /d3-proxy/);
+  // the egress step itself holds no secret
+  const egressBlock = pipeline.slice(at(EGRESS_STEP), at(AGENT_STEP));
+  assert.doesNotMatch(egressBlock, /secrets\./);
+  // scripts/ (and so the proxy) is protected from factory runs
+  const protectedLine = WORKFLOW.split("\n").find((l) => l.trim().startsWith("PROTECTED="));
+  const re = new RegExp(protectedLine.trim().replace(/^PROTECTED='/, "").replace(/'$/, ""), "i");
+  assert.ok(re.test("scripts/egress-proxy.mjs"), "publish must refuse a factory change to the proxy");
+});
+
+test("egress: the agents' environment forwards the proxy and the no-telemetry switch, and nothing new that is secret", async () => {
+  const { agentEnv } = await import("./agent-env.mjs");
+  const env = agentEnv({ [KEY]: "sk-x", PATH: "/bin", HTTPS_PROXY: "http://proxy:8888", HTTP_PROXY: "http://proxy:8888", NO_PROXY: "localhost", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", SLACK_BOT_TOKEN: "xoxb" });
+  assert.equal(env.HTTPS_PROXY, "http://proxy:8888");
+  assert.equal(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, "1");
+  assert.equal(env.SLACK_BOT_TOKEN, undefined);
 });
 
 test("user entry: the runner's uid gets a passwd/group entry, read-only, built from the pinned image's own files", () => {
@@ -363,6 +436,24 @@ console.log(JSON.stringify({
 }));
 `;
 
+// Brings up the egress step for real (network, firewall rule, proxy) in `rt`, and tears it down.
+// Needs passwordless sudo for iptables, as on a GitHub-hosted runner.
+function realEgressUp(rt, bin) {
+  mkdirSync(join(rt, "d3-proxy"), { recursive: true });
+  writeFileSync(join(rt, "d3-proxy/egress-proxy.mjs"), readFileSync(join(dirname(fileURLToPath(import.meta.url)), "egress-proxy.mjs")));
+  chmodSync(join(rt, "d3-proxy"), 0o755);
+  chmodSync(join(rt, "d3-proxy/egress-proxy.mjs"), 0o444);
+  realEgressDown(); // a leftover from an aborted earlier run would make `network create` fail
+  execFileSync("bash", ["-e", "-c", stepScript(EGRESS_STEP)], {
+    env: { PATH: `${bin}:${process.env.PATH}`, RUNNER_TEMP: rt, GITHUB_RUN_ID: "9", AGENT_IMAGE: IMAGE }, stdio: "pipe", timeout: 60_000,
+  });
+}
+function realEgressDown() {
+  spawnSync("docker", ["rm", "-f", "d3-proxy-9", "d3-agents-9", "d3-probe-host-9"], { stdio: "ignore" });
+  spawnSync("docker", ["network", "rm", "d3-egress-9"], { stdio: "ignore" });
+  spawnSync("sudo", ["-n", "iptables", "-D", "INPUT", "-i", "d3egress0", "-j", "DROP"], { stdio: "ignore" });
+}
+
 real("REAL container: the agents see the repo and the key, and nothing of the runner (env, processes, files, docker)", async () => {
   const root = mkdtempSync(join(tmpdir(), "real-"));
   const rt = join(root, "runner_temp");
@@ -381,6 +472,7 @@ real("REAL container: the agents see the repo and the key, and nothing of the ru
   chmodSync(join(bin, "id"), 0o755);
   try {
     execFileSync("bash", ["-e", "-c", stepScript(USER_STEP)], { env: { PATH: `${bin}:${process.env.PATH}`, RUNNER_TEMP: rt, AGENT_IMAGE: IMAGE }, stdio: "pipe" });
+    realEgressUp(rt, bin);
     const out = execFileSync("bash", ["-e", "-c", stepScript(AGENT_STEP)], {
       env: {
         PATH: `${bin}:${process.env.PATH}`, GITHUB_WORKSPACE: ws, RUNNER_TEMP: rt,
@@ -395,8 +487,8 @@ real("REAL container: the agents see the repo and the key, and nothing of the ru
     assert.equal(seen.key, "sk-d3-REAL"); // the one secret, by design
     // the allowlist, plus what docker and the image add on their own (HOSTNAME, PATH)
     assert.deepEqual(seen.envKeys, [
-      "BRANCH", "BRIEF", "CI", KEY, "D3_FACTORY_SANDBOX", "GITHUB_ACTOR", "GITHUB_REPOSITORY", "GITHUB_RUN_ID",
-      "HOME", "HOSTNAME", "LANG", "PATH", "SLACK_USER", "TMPDIR",
+      "BRANCH", "BRIEF", "CI", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", KEY, "D3_FACTORY_SANDBOX", "GITHUB_ACTOR", "GITHUB_REPOSITORY", "GITHUB_RUN_ID",
+      "HOME", "HOSTNAME", "HTTPS_PROXY", "HTTP_PROXY", "LANG", "NO_PROXY", "PATH", "SLACK_USER", "TMPDIR",
     ].concat(seen.envKeys.includes("NODE_VERSION") ? ["NODE_VERSION"] : []).concat(seen.envKeys.includes("YARN_VERSION") ? ["YARN_VERSION"] : []).sort());
     assert.equal(seen.decoyInAnyProc, false, "a host secret was readable through /proc");
     assert.ok(!seen.comms.includes("sleep"), `host processes are visible: ${seen.comms}`);
@@ -412,6 +504,7 @@ real("REAL container: the agents see the repo and the key, and nothing of the ru
     assert.equal(seen.strayAfter, false, "a leftover process survived the sweep");
   } finally {
     holder.kill();
+    realEgressDown();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -515,4 +608,89 @@ test("vercel.json: Git deployments are off for factory branches, and publish pro
   const protectedLine = WORKFLOW.split("\n").find((l) => l.trim().startsWith("PROTECTED="));
   const re = new RegExp(protectedLine.trim().replace(/^PROTECTED='/, "").replace(/'$/, ""), "i");
   for (const rel of ["clyintel/vercel.json", "vercel.json"]) assert.ok(re.test(rel), `publish must refuse a change to ${rel}`);
+});
+
+// What the agents can reach on the network, reported from inside the real agent container by a
+// stand-in "orchestrator". Direct connections, the runner itself (on the internal network's own
+// gateway, and on the default bridge's), the cloud metadata addresses, outside DNS, and the proxy.
+const EGRESS_PROBE = `
+import net from "node:net";
+import os from "node:os";
+import dns from "node:dns/promises";
+const tcp = (host, port) => new Promise((res) => {
+  const s = net.connect({ host, port, timeout: 3000 });
+  s.on("connect", () => { s.destroy(); res("OPEN"); });
+  s.on("timeout", () => { s.destroy(); res("timeout"); });
+  s.on("error", (e) => res(e.code));
+});
+const viaProxy = (request) => new Promise((res) => {
+  const s = net.connect({ host: "proxy", port: 8888, timeout: 20000 });
+  let buf = "";
+  s.on("connect", () => s.write(request));
+  s.on("data", (d) => { buf += d; if (buf.includes("\\r\\n")) { s.destroy(); res(buf.split("\\r\\n")[0]); } });
+  s.on("timeout", () => { s.destroy(); res("timeout"); });
+  s.on("error", (e) => res(e.code));
+  s.on("close", () => res(buf.split("\\r\\n")[0] || "closed"));
+});
+const addr = Object.values(os.networkInterfaces()).flat().find((i) => i && i.family === "IPv4" && !i.internal).address;
+const ownGateway = addr.split(".").slice(0, 3).concat("1").join(".");
+const HOST_PORT = Number(process.env.PROBE_HOST_PORT || "0");
+const out = { ownGateway, direct: {}, proxy: {} };
+for (const [h, p] of [["1.1.1.1", 443], ["api.anthropic.com", 443], ["169.254.169.254", 80], ["168.63.129.16", 80], ["172.17.0.1", HOST_PORT], [ownGateway, HOST_PORT], [ownGateway, 22]]) {
+  out.direct[h + ":" + p] = await tcp(h, p);
+}
+try { out.dns = (await dns.lookup("example.com")).address; } catch (e) { out.dns = e.code; }
+out.proxy.anthropic = await viaProxy("CONNECT api.anthropic.com:443 HTTP/1.1\\r\\nHost: api.anthropic.com:443\\r\\n\\r\\n");
+out.proxy.example = await viaProxy("CONNECT example.com:443 HTTP/1.1\\r\\nHost: example.com:443\\r\\n\\r\\n");
+out.proxy.metadata = await viaProxy("CONNECT 169.254.169.254:80 HTTP/1.1\\r\\n\\r\\n");
+out.proxy.plainHttp = await viaProxy("GET http://example.com/ HTTP/1.1\\r\\nHost: example.com\\r\\n\\r\\n");
+console.log(JSON.stringify(out));
+`;
+
+real("REAL egress: the agent container reaches only api.anthropic.com:443 through the proxy; not the runner, metadata, DNS or anything else", async () => {
+  const root = mkdtempSync(join(tmpdir(), "reale-"));
+  const rt = join(root, "runner_temp");
+  const ws = join(rt, "d3-agent-repo");
+  mkdirSync(join(ws, "scripts"), { recursive: true });
+  writeFileSync(join(ws, "scripts/d3-orchestrator.mjs"), EGRESS_PROBE);
+  for (const p of [root, rt, ws, join(ws, "scripts")]) chmodSync(p, 0o755);
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "id"), `#!/bin/bash\ncase "$1" in -u|-g) echo 1001;; *) echo "uid=1001";; esac\n`);
+  chmodSync(join(bin, "id"), 0o755);
+  // a service on the runner, listening on every address: what the firewall rule must hide
+  const net = await import("node:net");
+  const hostService = net.createServer((s) => s.end("runner-secret\n"));
+  await new Promise((r) => hostService.listen(0, "0.0.0.0", r));
+  try {
+    execFileSync("bash", ["-e", "-c", stepScript(USER_STEP)], { env: { PATH: `${bin}:${process.env.PATH}`, RUNNER_TEMP: rt, AGENT_IMAGE: IMAGE }, stdio: "pipe" });
+    realEgressUp(rt, bin);
+    const out = execFileSync("bash", ["-e", "-c", stepScript(AGENT_STEP).replace("-e GITHUB_RUN_ID", "-e GITHUB_RUN_ID -e PROBE_HOST_PORT")], {
+      env: { PATH: `${bin}:${process.env.PATH}`, RUNNER_TEMP: rt, ...RUN_ENV, AGENT_IMAGE: IMAGE, PROBE_HOST_PORT: String(hostService.address().port) },
+      encoding: "utf8",
+      timeout: 180_000,
+    });
+    const seen = JSON.parse(out.trim().split("\n").pop());
+    // nothing is reachable directly: not the internet, not the API itself, not the metadata
+    // services, and not the runner (on either bridge's gateway), even with a service listening
+    for (const [target, result] of Object.entries(seen.direct)) assert.notEqual(result, "OPEN", `${target} is reachable directly`);
+    assert.notEqual(seen.dns, undefined);
+    assert.ok(!/^\d+\.\d+\.\d+\.\d+$/.test(String(seen.dns)), `outside DNS resolves: ${seen.dns}`);
+    // through the proxy: everything but the API is refused
+    assert.match(seen.proxy.example, /^HTTP\/1\.1 403/);
+    assert.match(seen.proxy.metadata, /^HTTP\/1\.1 403/);
+    assert.match(seen.proxy.plainHttp, /^HTTP\/1\.1 403/);
+    // and the API is allowed: 200 when this machine can reach it, 502 when it is offline (a sandbox
+    // without internet). D3_EGRESS_TEST_ONLINE=1 requires the 200.
+    if (process.env.D3_EGRESS_TEST_ONLINE === "1") assert.match(seen.proxy.anthropic, /^HTTP\/1\.1 200/);
+    else assert.match(seen.proxy.anthropic, /^HTTP\/1\.1 (200|502)/);
+    // the proxy logged its decisions, which the cleanup step prints
+    const log = execFileSync("docker", ["logs", "d3-proxy-9"], { encoding: "utf8" });
+    assert.match(log, /^allow CONNECT api\.anthropic\.com:443$/m);
+    assert.match(log, /^deny CONNECT example\.com:443$/m);
+  } finally {
+    hostService.close();
+    realEgressDown();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
