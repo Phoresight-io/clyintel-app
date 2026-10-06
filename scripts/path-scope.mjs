@@ -16,7 +16,7 @@
 // Glob patterns and Grep's glob filter are also checked, since a pattern can name a directory.
 //
 // Hard links: a file hard-linked to one in .git (ln .git/config docs/cfg) has a real path inside the
-// repo, so Read also refuses any regular file with more than one link.
+// repo, so Read, and Grep when its path names a file, refuse any regular file with more than one link.
 //
 // Limits (accepted; the container is the boundary, and the coder can read all of this anyway):
 //   - Grep and Glob walk directories themselves, and the hook only sees where they start. Grep
@@ -24,6 +24,9 @@
 //     planted earlier in the SAME session can expose file NAMES outside the repo to Glob (Read of
 //     them is still refused). escapingSymlinks() and the orchestrator's stray-process kill run before
 //     every session, so nothing planted carries over into the next one.
+//   - hard links are caught only where a tool names the file. Grep or Glob over a DIRECTORY still
+//     reads or lists a hard-linked file inside it. Only the coder (Bash) can make one, and it can
+//     already read .git itself.
 //   - check-then-use: a process running in parallel could swap a checked file for a link between
 //     this check and the read. The orchestrator kills leftover processes between sessions.
 // Pure node:fs, no dependencies, never executes anything.
@@ -121,7 +124,9 @@ export function scopeViolation(tool, args = {}, root) {
     checks.push(["file_path", args.file_path, scope ?? hardlinkScope(args.file_path, root)]);
   } else {
     const path = args.path === undefined || args.path === null || args.path === "" ? "." : args.path;
-    checks.push(["path", args.path ?? "(default)", pathScope(path, root)]);
+    const scope = pathScope(path, root);
+    // Grep can be pointed straight at a file; hardlinkScope is null for directories.
+    checks.push(["path", args.path ?? "(default)", scope ?? (tool === "Grep" ? hardlinkScope(path, root) : null)]);
     if (tool === "Glob") checks.push(["pattern", args.pattern, globScope(args.pattern)]);
     if (tool === "Grep") checks.push(["glob", args.glob, globScope(args.glob)]);
   }

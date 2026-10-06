@@ -3,5 +3,10 @@
   "crons": [
     { "path": "/api/qbo/worker", "schedule": "* * * * *" },
     { "path": "/api/settlement/cron", "schedule": "0 9 * * *" }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "factory/**": false
+    }
+  }
 }

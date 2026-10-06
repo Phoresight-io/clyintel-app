@@ -96,10 +96,13 @@ jobs:
     needs: prepare
     # KILL SWITCH: merging this workflow does not arm it. It runs only when the repository
     # variable D3_FACTORY_ENABLED is exactly "true" (Settings -> Secrets and variables ->
-    # Actions -> Variables). Set it only after the Vercel preview question is settled:
-    # pushing factory/run-* makes Vercel build a preview of unreviewed agent code with the
-    # Preview environment's variables. With it unset, a run is skipped (publish is skipped
-    # too, as it needs this job) and notify-failure tells Slack so.
+    # Actions -> Variables). With it unset, a run is skipped (publish is skipped too, as it
+    # needs this job) and notify-failure tells Slack so.
+    # Vercel previews: pushing factory/run-* would make Vercel build a preview of unreviewed
+    # agent code with the Preview environment's variables. clyintel/vercel.json (the projects'
+    # Root Directory; the repo-root vercel.json carries the same rule) turns Git deployments
+    # off for factory/** (git.deploymentEnabled), and publish's PROTECTED list refuses any run
+    # that changes a vercel.json, so an agent cannot switch them back on.
     if: ${{ vars.D3_FACTORY_ENABLED == 'true' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     # A stuck run must not burn API spend for GitHub's 6h default, and /d3 calls
@@ -408,9 +411,19 @@ jobs:
           # PASS/APPROVE, and sheet_logged=true would then stop notify-failure adding its "run
           # failed" row. This used to happen in the agent job, which meant the webhook URL sat
           # where the agents could read it.
+          #
+          # Formula injection: plan_title (and any other string) comes from the agents, and a Sheet
+          # evaluates a cell that starts with = + - @ (or a tab/CR before one) as a formula, e.g.
+          # =HYPERLINK or =IMPORTXML that phones home. The record has already passed the flat-object
+          # check above, so prefixing such strings with ' is enough; a clean record is sent unchanged,
+          # byte for byte. The Apps Script should still write values as plain text.
+          SHEET_REC="$REC"
+          if [ -n "$REC_OK" ] && printf %s "$REC" | jq -e 'any(.[]; type == "string" and test("^[=+\\-@\t\r]"))' >/dev/null 2>&1; then
+            SHEET_REC="$(printf %s "$REC" | jq -c --arg q "'" 'map_values(if type == "string" and test("^[=+\\-@\t\r]") then $q + . else . end)')"
+          fi
           log_run_record() {
             if [ -n "$REC_OK" ] && [ -n "$RUN_LOG_SHEET_WEBHOOK" ]; then
-              if curl -s -f -m 10 -X POST -H "Content-Type: application/json" --data-binary "$REC" "$RUN_LOG_SHEET_WEBHOOK" >/dev/null; then
+              if curl -s -f -m 10 -X POST -H "Content-Type: application/json" --data-binary "$SHEET_REC" "$RUN_LOG_SHEET_WEBHOOK" >/dev/null; then
                 echo "sheet_logged=true" >> "$GITHUB_OUTPUT"
               else
                 echo "Run-log Sheet webhook did not accept the record (continuing)."
@@ -538,8 +551,10 @@ jobs:
         run: |
           # A run that started but did not get a record to the Sheet (the agent job failed or was
           # cancelled, or publish refused it before sending one) still gets a row. Built ONLY from
-          # workflow values, never from anything the agents wrote: the outcome fields are fixed, and
-          # the cost is not known here (it is in the agent job's log). Same keys run-log.mjs writes.
+          # workflow values, never from anything the agents wrote: the outcome fields are fixed. Turns
+          # and cost are NOT known here (the real figure is in the agent job's "pipeline failed: …, $X"
+          # log line), so they are sent as null, not 0: a 0 would under-report spend in the Sheet.
+          # Same keys run-log.mjs writes.
           if [ -n "$RUN_LOG_SHEET_WEBHOOK" ] && [ "$SHEET_LOGGED" != "true" ] \
              && [ "$PREPARE_RESULT" != "failure" ] && [ "$PIPELINE_RESULT" != "skipped" ]; then
             if [ "$PIPELINE_RESULT" = "success" ]; then STAGE="publish $PUBLISH_RESULT"; else STAGE="agent job $PIPELINE_RESULT"; fi
@@ -550,7 +565,7 @@ jobs:
                      '{ts:$ts, run_id:$run, branch:("factory/run-" + $run), actor:$actor, brief_sha256:$sha,
                        brief_chars:($brief | length), plan_title:("(run failed: " + $stage + ")"),
                        test_result:"none", review_verdict:"unknown", repo:$repo,
-                       num_turns:0, total_cost_usd:0, guard_denials:0}')"
+                       num_turns:null, total_cost_usd:null, guard_denials:0}')"
             curl -s -f -m 10 -X POST -H "Content-Type: application/json" --data-binary "$REC" "$RUN_LOG_SHEET_WEBHOOK" >/dev/null \
               || echo "Run-log Sheet webhook did not accept the record (continuing)."
           fi
