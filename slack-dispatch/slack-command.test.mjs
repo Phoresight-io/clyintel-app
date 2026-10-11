@@ -237,3 +237,19 @@ test("vercel.json: this project deploys only main; previews of every other branc
   for (const b of ["develop", "fix/x", "feature/a-b", "factory/run-1", "dependabot/npm_and_yarn/x", "release/1.0", "mainline"])
     assert.equal(deploys(b), false, b);
 });
+
+test("tooling: Node 22 is pinned for the deployed /d3 runtime (engines 22.x) and for dev/CI (.nvmrc + CI)", () => {
+  // Vercel reads engines.node to choose the runtime of the deployed /d3 function. An open range (">=20") moves
+  // to the newest major on its own and makes Vercel warn about it, so it is pinned to the major in .nvmrc.
+  const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
+  assert.equal(pkg.engines.node, "22.x");
+  // The tests need path.matchesGlob (Node 22.5+); .nvmrc and CI carry that requirement instead.
+  const nvmrc = readFileSync(new URL("./.nvmrc", import.meta.url), "utf8").trim();
+  assert.match(nvmrc, /^22(\.\d+){0,2}$/);
+  assert.equal(pkg.engines.node.split(".")[0], nvmrc.split(".")[0], "engines.node and .nvmrc name the same major");
+  assert.equal(typeof matchesGlob, "function");
+  const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const factory = ci.slice(ci.indexOf("\n  factory:"));
+  assert.match(factory, /node-version-file: slack-dispatch\/\.nvmrc/);
+  assert.doesNotMatch(factory, /^\s+node-version: /m, "the factory job must take its Node from .nvmrc, not a second literal");
+});

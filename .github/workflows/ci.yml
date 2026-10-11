@@ -70,7 +70,10 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          # One source for the factory + /d3 handler tests' Node: slack-dispatch/.nvmrc (22; the tests use
+          # path.matchesGlob, Node 22.5+). It is NOT slack-dispatch/package.json "engines", which Vercel
+          # reads to pick the runtime of the deployed /d3 function.
+          node-version-file: slack-dispatch/.nvmrc
           cache: npm
           cache-dependency-path: scripts/package-lock.json
 

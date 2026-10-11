@@ -10,6 +10,7 @@ import { makeGuardHook } from "./role-guard.mjs";
 import { baseCommit, snapshot, tamperedPaths } from "./instruction-guard.mjs";
 import { logLine, createTracer, seconds, money } from "./factory-log.mjs";
 import { fixStep } from "./fix-loop.mjs";
+import { createNotes, setNote, setReview, writeNotes } from "./factory-notes.mjs";
 
 // ISOLATION. This process and every agent session it starts run inside the agent container
 // (d3-factory.yml, "Run pipeline in the agent container"): only the repo is mounted, and the only
@@ -143,6 +144,20 @@ const hooks = {
 
 class PipelineError extends Error {}
 
+// Each agent ends its artifact with a short "## Slack update" section. After every stage the notes are
+// re-read from the artifacts and rewritten to the notes mount (outside the repo copy, so never committed;
+// see factory-notes.mjs), so a run that fails keeps the notes of the stages that finished. Never throws.
+const notes = createNotes();
+const artifact = (path) => (existsSync(path) ? readFileSync(path, "utf8") : "");
+const saveNotes = () => {
+  try {
+    setNote(notes, "planner", artifact(".factory/plan.md"));
+    setNote(notes, "coder", artifact(".factory/build-notes.md"));
+    setNote(notes, "tester", artifact(".factory/test-report.md"));
+    writeNotes(notes);
+  } catch {}
+};
+
 // Runs one delegated step and returns the agent's final text (`result` on the SDK
 // result message). Any non-success result (error_max_turns, error_during_execution,
 // ...) throws, so a failed run can never be mistaken for a successful one.
@@ -238,6 +253,7 @@ In order:
    and write .factory/test-report.md.
 
 Report the tester's PASS/FAIL result. Do not review or deploy yet.`);
+  saveNotes();
 
   // Test gate: one fix loop if tests failed, so a red build doesn't reach review. A "plan error" FAIL
   // goes to the planner first (fix-loop.mjs); anything else goes to the coder.
@@ -245,6 +261,7 @@ Report the tester's PASS/FAIL result. Do not review or deploy yet.`);
     const step = fixStep(existsSync(".factory/test-report.md") ? readFileSync(".factory/test-report.md", "utf8") : "");
     log(`test gate: not passed, fix route "${step.kind}"`);
     await run(step.prompt);
+    saveNotes();
   }
 
   // Review last — reads the diff AND the test report.
@@ -259,6 +276,11 @@ exactly like this (diff/log/show also need the two --no- flags):
 (${startCommit} is the commit this run started from; the trailing "--" is required, optionally
 followed by paths.) Tell the reviewer to use that form.`);
 
+  try {
+    setReview(notes, verdict);
+  } catch {}
+  saveNotes();
+
   const stillFailing = !testPassed();
 
   // Durable run log: one record per run, committed with the branch. The publish job validates it
@@ -271,6 +293,7 @@ try {
   await pipeline();
 } catch (err) {
   console.error(err);
+  saveNotes();
   const reason = err instanceof PipelineError ? err.message : "unexpected error (see workflow logs)";
   // Exiting non-zero fails the agent job, so nothing is bundled or published. notify-failure (which
   // holds the Slack token and the Sheet webhook; this container holds neither) reports the failure.

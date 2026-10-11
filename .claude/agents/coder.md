@@ -65,5 +65,8 @@ that no plan exists — do not improvise your own plan.
 - <new env vars, schema/config changes you were not allowed to make> (or "none")
 ## Blocked (if applicable)
 - <what stopped you and what's needed>
+
+## Slack update
+<At most 300 characters of plain text for the person who started this run: what you did or found, in one or two sentences. No links, no @-mentions, no markdown. If you need that person (a decision, access, a missing input), make the FIRST line "Needs you: <what and why>"; otherwise do not write that line. This section is posted to Slack by the workflow, which also does the tagging: never write a name or an @.>
 ```
 Then return a short summary. Keep it tight.

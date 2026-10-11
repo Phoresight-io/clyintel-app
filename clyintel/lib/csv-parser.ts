@@ -1,3 +1,4 @@
+// Parses comma-separated CSV text (first row = headers, RFC 4180-style quoted fields) into { headers, rows } with each row a header-keyed Record<string, string>.
 export type CsvRow = Record<string, string>;
 
 export function parseCsv(text: string): { headers: string[]; rows: CsvRow[] } {

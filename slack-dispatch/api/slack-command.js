@@ -13,7 +13,7 @@ export const config = { api: { bodyParser: false } };
 
 // Slash-command bodies are tiny; refuse anything big, and don't hang on a bad stream.
 const MAX_BODY_BYTES = 100_000;
-const READ_TIMEOUT_MS = 1500; // leaves room for the GitHub call inside Slack's 3s window
+const READ_TIMEOUT_MS = 1500; // NOT a guarantee: a 1.5s read plus the 2.5s GitHub call can add up to 4s, over Slack's 3s window. Only a slow body AND a slow GitHub together hit it.
 // The brief ends up in the agent prompt, the run log and the PR body (GitHub rejects bodies over 65,536 chars).
 const MAX_BRIEF_CHARS = 4000;
 export const readRaw = (req, timeoutMs = READ_TIMEOUT_MS) =>
