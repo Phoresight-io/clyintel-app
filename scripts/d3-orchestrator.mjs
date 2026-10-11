@@ -10,7 +10,7 @@ import { makeGuardHook } from "./role-guard.mjs";
 import { baseCommit, snapshot, tamperedPaths } from "./instruction-guard.mjs";
 import { logLine, createTracer, seconds, money } from "./factory-log.mjs";
 import { fixStep } from "./fix-loop.mjs";
-import { createNotes, setNote, setReview, writeNotes } from "./factory-notes.mjs";
+import { createNotes, setNote, setReviewSources, reviewSources, readReviewFile, resetReviewSlot, writeNotes } from "./factory-notes.mjs";
 
 // ISOLATION. This process and every agent session it starts run inside the agent container
 // (d3-factory.yml, "Run pipeline in the agent container"): only the repo is mounted, and the only
@@ -100,8 +100,8 @@ const agents = {
   reviewer: {
     description: "Read-only review specialist. LAST. Checks diff + test report vs plan.",
     prompt: load("reviewer"),
-    // No Write/Edit; Bash is limited to read-only git by the role guard below.
-    tools: ["Read", "Grep", "Glob", "Bash"],
+    // Write is limited to .factory/review.md (its review) and Bash to read-only git by the role guard below.
+    tools: ["Read", "Write", "Grep", "Glob", "Bash"],
     model: "sonnet",
     maxTurns: 40,
   },
@@ -264,11 +264,18 @@ Report the tester's PASS/FAIL result. Do not review or deploy yet.`);
     saveNotes();
   }
 
-  // Review last — reads the diff AND the test report.
-  const verdict = await run(`Use the reviewer agent to review the branch against
-.factory/plan.md, .factory/build-notes.md, and .factory/test-report.md. Return
-the review, and end your reply with exactly one final line of the form
-"VERDICT: APPROVE", "VERDICT: REQUEST CHANGES" or "VERDICT: BLOCK". Then STOP.
+  // Review last — reads the diff AND the test report. The reviewer writes its review to
+  // .factory/review.md; nothing an earlier agent left there may count (a coder can write almost
+  // anywhere), so the slot is cleared first: a symlinked .factory is replaced, a planted file removed.
+  const slot = resetReviewSlot();
+  if (slot.dirReplaced || slot.fileRemoved) {
+    log(`review slot cleared before the review (.factory replaced: ${slot.dirReplaced}, stale review.md removed: ${slot.fileRemoved})`);
+  }
+  const reply = await run(`Use the reviewer agent to review the branch against
+.factory/plan.md, .factory/build-notes.md, and .factory/test-report.md. The reviewer
+must write the full review to .factory/review.md (the one file it may write), in the
+format its instructions give. Return the review, and end your reply with exactly one
+final line of the form "VERDICT: APPROVE", "VERDICT: REQUEST CHANGES" or "VERDICT: BLOCK". Then STOP.
 
 The reviewer's only shell access is read-only git, and it is enforced to be written
 exactly like this (diff/log/show also need the two --no- flags):
@@ -276,8 +283,12 @@ exactly like this (diff/log/show also need the two --no- flags):
 (${startCommit} is the commit this run started from; the trailing "--" is required, optionally
 followed by paths.) Tell the reviewer to use that form.`);
 
+  // The note and the verdict come from the reviewer's file; the reply is only the fallback.
+  const reviewFile = readReviewFile();
+  log(reviewFile === null ? "review.md missing or unusable; using the reply" : "review.md read");
+  const review = reviewSources({ file: reviewFile, reply });
   try {
-    setReview(notes, verdict);
+    setReviewSources(notes, { file: reviewFile, reply });
   } catch {}
   saveNotes();
 
@@ -285,7 +296,7 @@ followed by paths.) Tell the reviewer to use that form.`);
 
   // Durable run log: one record per run, committed with the branch. The publish job validates it
   // and is the one that sends it to the Sheet and tells Slack (this container holds neither credential).
-  const record = writeRunLog({ brief, reviewSummary: verdict, usage });
+  const record = writeRunLog({ brief, reviewSummary: review.text, usage });
   log(`pipeline done: tests ${record.test_result}${stillFailing ? " (not passed)" : ""}, reviewer ${record.review_verdict}, ${money(usage.cost)}`);
 }
 

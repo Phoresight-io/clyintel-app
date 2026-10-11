@@ -86,6 +86,32 @@ export function realScope(p, root) {
   return hasGitSegment(rel) ? ".git" : null;
 }
 
+// The real path (every symlink on the way resolved) of `p`, which may not exist yet: its deepest
+// existing ancestor is resolved and the missing tail appended. null when it cannot be resolved (a
+// dangling or looping link, an unreadable directory): callers fail closed. Used to compare a WRITE
+// target against the one file an agent may write, so a link that points there from elsewhere, or a
+// directory link in front of it, does not pass on its path string alone.
+export function realPathOf(p, root) {
+  if (typeof p !== "string" || p === "") return null;
+  let cur = isAbsolute(p) ? resolve(p) : resolve(root, p);
+  const rest = [];
+  for (;;) {
+    try {
+      lstatSync(cur);
+      break;
+    } catch {}
+    const up = dirname(cur);
+    if (up === cur) return null;
+    rest.unshift(basename(cur));
+    cur = up;
+  }
+  try {
+    return join(realpathSync(cur), ...rest);
+  } catch {
+    return null;
+  }
+}
+
 const pathScope = (p, root) => lexicalScope(p, root) ?? realScope(p, root);
 
 // A glob may only name things relative to the search directory: no "..", no absolute or ~
