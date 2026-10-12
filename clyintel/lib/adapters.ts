@@ -10,8 +10,25 @@ type ClientRow = Database["public"]["Tables"]["clients"]["Row"];
 type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
 type PtrScoreRow = Database["public"]["Tables"]["ptr_scores"]["Row"];
 
-function formatDate(value: string | null): string {
+export function formatDate(value: string | null): string {
   if (!value) return "—";
+  // Date-only values (QBO DueDate, paid dates) are calendar days, not instants:
+  // format the parts directly so the result doesn't shift with the process TZ.
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const day = Number(m[3]);
+    const check = new Date(Date.UTC(y, mo - 1, day));
+    if (
+      check.getUTCFullYear() !== y ||
+      check.getUTCMonth() !== mo - 1 ||
+      check.getUTCDate() !== day
+    ) {
+      return "—";
+    }
+    return `${mo}/${day}/${m[1].slice(2)}`;
+  }
   const d = new Date(value);
   if (isNaN(d.getTime())) return "—";
   return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`;

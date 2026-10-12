@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { toUIClient, toUIInvoice, toUIClientInvoiceSet, deriveStatus } from "./adapters";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { toUIClient, toUIInvoice, toUIClientInvoiceSet, deriveStatus, formatDate } from "./adapters";
 import type { Database } from "@/types/supabase";
 
 type ClientRow = Database["public"]["Tables"]["clients"]["Row"];
@@ -125,5 +125,74 @@ describe("deriveStatus — client status roll-up", () => {
 
   it("toUIClient carries the derived status", () => {
     expect(toUIClient(client, { latest: null, prior: null }, []).status).toBe("no_history");
+  });
+});
+
+const ORIGINAL_TZ = process.env.TZ;
+
+describe.each([
+  { tz: "America/New_York", marchFirstUtcLocalDay: 28, sep: "8/31/26" },
+  { tz: "America/Los_Angeles", marchFirstUtcLocalDay: 28, sep: "8/31/26" },
+  { tz: "UTC", marchFirstUtcLocalDay: 1, sep: "9/1/26" },
+])("date-only formatting in TZ=$tz", ({ tz, marchFirstUtcLocalDay, sep }) => {
+  const origTz = process.env.TZ;
+  beforeEach(() => {
+    process.env.TZ = tz;
+    // Guard: proves the zone took effect so the tests can't pass vacuously.
+    expect(new Date("2026-03-01T00:00:00Z").getDate()).toBe(marchFirstUtcLocalDay);
+  });
+  afterEach(() => {
+    if (origTz === undefined) delete process.env.TZ;
+    else process.env.TZ = origTz;
+  });
+
+  const baseRow = {
+    id: "inv-1",
+    invoice_number: "1001",
+    status: "sent",
+    due_date: "2026-03-01",
+    amount_cents: 10000,
+    amount_outstanding_cents: 10000,
+    last_reminder_at: null,
+  } as unknown as InvoiceRow;
+
+  it("formatDate('2026-03-01') -> 3/1/26", () => {
+    expect(formatDate("2026-03-01")).toBe("3/1/26");
+  });
+
+  it("toUIInvoice dueDate for due_date 2026-03-01 -> 3/1/26", () => {
+    expect(toUIInvoice({ ...baseRow, status: "sent", due_date: "2026-03-01" }).dueDate).toBe("3/1/26");
+  });
+
+  it("toUIInvoice paidDate from the paid map -> 6/3/26", () => {
+    const paidRow = { ...baseRow, status: "paid", due_date: "2026-06-01", amount_outstanding_cents: 0 } as unknown as InvoiceRow;
+    expect(toUIInvoice(paidRow, new Map([["inv-1", "2026-06-03"]])).paidDate).toBe("6/3/26");
+  });
+
+  it("year boundaries and leap day keep the calendar day", () => {
+    expect(formatDate("2026-01-01")).toBe("1/1/26");
+    expect(formatDate("2026-12-31")).toBe("12/31/26");
+    expect(formatDate("2028-02-29")).toBe("2/29/28");
+  });
+
+  it("empty / invalid / impossible dates -> —", () => {
+    expect(formatDate(null)).toBe("—");
+    expect(formatDate("")).toBe("—");
+    expect(formatDate("not-a-date")).toBe("—");
+    expect(formatDate("2026-13-45")).toBe("—");
+    expect(formatDate("2026-02-30")).toBe("—");
+  });
+
+  it("timestamp path unchanged (local-time getters)", () => {
+    const d = new Date("2026-09-01T00:00:00Z");
+    const expected = `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`;
+    expect(formatDate("2026-09-01T00:00:00Z")).toBe(expected);
+    expect(formatDate("2026-09-01T00:00:00Z")).toBe(sep);
+  });
+});
+
+describe("TZ restore", () => {
+  it("process.env.TZ is back to its original value after the TZ blocks", () => {
+    expect(process.env.TZ).toBe(ORIGINAL_TZ);
   });
 });
