@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { toUIClient, toUIInvoice, toUIClientInvoiceSet, deriveStatus } from "./adapters";
 import type { Database } from "@/types/supabase";
 
@@ -93,6 +93,47 @@ describe("Paid-date column — never updated_at", () => {
     const without = toUIClientInvoiceSet([paidRow]);
     expect(without.paid[0].paidDate).toBe("—");
     expect(JSON.stringify([withMap, without])).not.toContain("9/20/26");
+  });
+});
+
+describe("formatDate (via toUIInvoice) — TZ pinned to UTC", () => {
+  const originalTz = process.env.TZ;
+  beforeAll(() => {
+    process.env.TZ = "UTC";
+  });
+  afterAll(() => {
+    if (originalTz === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTz;
+  });
+
+  const row = (p: Record<string, unknown>) =>
+    ({
+      id: "inv-2",
+      invoice_number: "1002",
+      status: "sent",
+      due_date: "2026-06-03",
+      amount_cents: 10000,
+      amount_outstanding_cents: 10000,
+      last_reminder_at: null,
+      updated_at: "2026-09-20T15:00:00Z",
+      ...p,
+    }) as unknown as InvoiceRow;
+
+  it("due_date formats as M/D/YY", () => {
+    expect(toUIInvoice(row({ due_date: "2026-06-03" })).dueDate).toBe("6/3/26");
+    expect(toUIInvoice(row({ due_date: "2026-12-31" })).dueDate).toBe("12/31/26");
+    expect(toUIInvoice(row({ due_date: "2000-01-01" })).dueDate).toBe("1/1/00");
+  });
+
+  it("null or unparseable due_date → em dash", () => {
+    expect(toUIInvoice(row({ due_date: null })).dueDate).toBe("\u2014");
+    expect(toUIInvoice(row({ due_date: "not-a-date" })).dueDate).toBe("\u2014");
+  });
+
+  it("last_reminder_at drives lastActivity", () => {
+    expect(toUIInvoice(row({ last_reminder_at: "2026-09-25T21:00:00Z" })).lastActivity).toBe("9/25/26");
+    expect(toUIInvoice(row({ last_reminder_at: null })).lastActivity).toBe("\u2014");
+    expect(toUIInvoice(row({ last_reminder_at: "garbage" })).lastActivity).toBe("\u2014");
   });
 });
 

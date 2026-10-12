@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { resolvePaidTimings } from "./resolvePaidTimings";
+import { describe, it, expect, afterEach } from "vitest";
+import { resolvePaidTimings, utcDate } from "./resolvePaidTimings";
 
 describe("resolvePaidTimings — precedence", () => {
   it("payments win over balance_events; the LAST succeeded payment's date is used", () => {
@@ -53,5 +53,34 @@ describe("resolvePaidTimings — precedence", () => {
       [{ invoice_id: "b", detected_at: "2026-07-02T00:00:00Z", new_outstanding_cents: 0, evidence: null }],
     );
     expect(out.map((t) => t.invoice_id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("utcDate", () => {
+  const originalTz = process.env.TZ;
+  afterEach(() => {
+    if (originalTz === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTz;
+  });
+
+  it("date-only string passes through; offset timestamps convert to UTC", () => {
+    expect(utcDate("2026-06-03")).toBe("2026-06-03");
+    expect(utcDate("2026-06-03T23:30:00-05:00")).toBe("2026-06-04");
+  });
+
+  it("non-string or empty → null", () => {
+    for (const v of [null, undefined, "", 20260603, {}, new Date()]) {
+      expect(utcDate(v)).toBeNull();
+    }
+  });
+
+  it("unparseable string → null", () => {
+    expect(utcDate("garbage")).toBeNull();
+  });
+
+  it("is timezone independent under America/Los_Angeles", () => {
+    process.env.TZ = "America/Los_Angeles";
+    expect(utcDate("2026-06-03")).toBe("2026-06-03");
+    expect(utcDate("2026-06-03T23:30:00-05:00")).toBe("2026-06-04");
   });
 });

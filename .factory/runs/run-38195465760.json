@@ -1,0 +1,1 @@
+{"ts":"2026-10-12T02:29:25.663Z","run_id":"38195465760","branch":"factory/run-38195465760","actor":"U0BEE4SGX0T","brief_sha256":"fa72161f077d","brief_chars":62,"plan_title":"Unit tests for the date-formatting helpers in clyintel/lib","test_result":"PASS","review_verdict":"APPROVE","repo":"Phoresight-io/clyintel-app","num_turns":15,"total_cost_usd":1.4894,"guard_denials":3}

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   buildCallVariables,
   callVariablesFrom,
@@ -174,5 +174,51 @@ describe("buildCallVariables (reads)", () => {
     const v = await buildCallVariables({ from } as never, { subscriberId: "s", clientId: "c", invoiceId: "i" }, NOW);
     expect(v.contact_name).toBe("there");
     expect(v.amount_due).toBe("");
+  });
+});
+
+describe("formatHumanDate — edge cases", () => {
+  const originalTz = process.env.TZ;
+  afterEach(() => {
+    if (originalTz === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTz;
+  });
+
+  it("strips leading zeros; year end", () => {
+    expect(formatHumanDate("2026-03-09")).toBe("March 9, 2026");
+    expect(formatHumanDate("2026-12-31")).toBe("December 31, 2026");
+  });
+
+  it("out-of-range month → ''", () => {
+    expect(formatHumanDate("2026-00-10")).toBe("");
+    expect(formatHumanDate("2026-13-01")).toBe("");
+  });
+
+  it("empty, undefined and non-ISO → ''", () => {
+    expect(formatHumanDate("")).toBe("");
+    expect(formatHumanDate(undefined as unknown as null)).toBe("");
+    expect(formatHumanDate("06/28/2026")).toBe("");
+  });
+
+  it("is timezone independent (leading YMD wins)", () => {
+    process.env.TZ = "Pacific/Kiritimati";
+    expect(formatHumanDate("2026-01-01")).toBe("January 1, 2026");
+    expect(formatHumanDate("2026-06-28T23:30:00-05:00")).toBe("June 28, 2026");
+  });
+});
+
+describe("daysPastDue — edge cases", () => {
+  it("due today → '0'; due yesterday → '1'", () => {
+    expect(daysPastDue("2026-09-25", NOW)).toBe("0");
+    expect(daysPastDue("2026-09-25", new Date("2026-09-26T00:00:00Z"))).toBe("1");
+  });
+
+  it("invalid or empty due → ''", () => {
+    expect(daysPastDue("garbage", NOW)).toBe("");
+    expect(daysPastDue("", NOW)).toBe("");
+  });
+
+  it("never negative and never '-0'", () => {
+    expect(daysPastDue("2026-09-26", new Date("2026-09-25T23:59:59Z"))).toBe("0");
   });
 });
