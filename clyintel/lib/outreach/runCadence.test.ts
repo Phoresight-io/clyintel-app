@@ -56,6 +56,15 @@ describe("utcToday", () => {
   it("is the UTC calendar date of the injected clock", () => {
     expect(utcToday(new Date("2026-08-24T23:59:59.000Z"))).toBe("2026-08-24");
   });
+  it("midnight UTC", () => {
+    expect(utcToday(new Date("2026-08-24T00:00:00.000Z"))).toBe("2026-08-24");
+  });
+  it("offset instant crosses the UTC seam", () => {
+    expect(utcToday(new Date("2026-08-24T20:00:00-05:00"))).toBe("2026-08-25");
+  });
+  it("year-end last millisecond", () => {
+    expect(utcToday(new Date("2025-12-31T23:59:59.999Z"))).toBe("2025-12-31");
+  });
 });
 
 describe("isTerminated — fail-closed terminus", () => {
@@ -98,6 +107,30 @@ describe("business-day math (UTC, Sat/Sun skipped)", () => {
   it("addBusinessDays walks over a weekend: Fri + 1 → Mon", () => {
     expect(addBusinessDays("2026-08-21", 1)).toBe("2026-08-24");
     expect(addBusinessDays("2026-08-20", 3)).toBe("2026-08-25"); // Thu +3 → Tue
+  });
+  it("nextBusinessDay from Saturday and Sunday → Monday", () => {
+    expect(nextBusinessDay("2026-08-22")).toBe("2026-08-24");
+    expect(nextBusinessDay("2026-08-23")).toBe("2026-08-24");
+  });
+  it("nextBusinessDay across the year boundary", () => {
+    expect(nextBusinessDay("2026-12-31")).toBe("2027-01-01");
+    expect(nextBusinessDay("2027-01-01")).toBe("2027-01-04");
+  });
+  it("nextBusinessDay leap day", () => {
+    expect(nextBusinessDay("2024-02-28")).toBe("2024-02-29");
+  });
+  it("nextBusinessDay ignores a time suffix", () => {
+    expect(nextBusinessDay("2026-08-21T23:00:00Z")).toBe("2026-08-24");
+  });
+  it("nextBusinessDay over the DST weekend", () => {
+    expect(nextBusinessDay("2026-03-06")).toBe("2026-03-09");
+  });
+  it("addBusinessDays spans weekends", () => {
+    expect(addBusinessDays("2026-08-24", 5)).toBe("2026-08-31");
+    expect(addBusinessDays("2026-08-24", 10)).toBe("2026-09-07");
+  });
+  it("addBusinessDays across the year boundary", () => {
+    expect(addBusinessDays("2026-12-31", 2)).toBe("2027-01-04");
   });
 });
 

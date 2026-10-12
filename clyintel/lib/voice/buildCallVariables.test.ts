@@ -57,6 +57,39 @@ describe("formatters", () => {
     expect(daysPastDue("2026-10-15", NOW)).toBe("0");
     expect(daysPastDue(null, NOW)).toBe("");
   });
+  it("formatHumanDate: leap day, year boundaries, no day zero-pad", () => {
+    expect(formatHumanDate("2024-02-29")).toBe("February 29, 2024");
+    expect(formatHumanDate("2026-01-01")).toBe("January 1, 2026");
+    expect(formatHumanDate("2026-12-31")).toBe("December 31, 2026");
+  });
+  it("formatHumanDate reads the digits with no timezone shift", () => {
+    expect(formatHumanDate("2026-06-28T23:30:00-05:00")).toBe("June 28, 2026");
+  });
+  it("formatHumanDate: month out of range → ''", () => {
+    expect(formatHumanDate("2026-13-01")).toBe("");
+    expect(formatHumanDate("2026-00-10")).toBe("");
+  });
+  it("formatHumanDate: empty / non-ISO / leading space → ''", () => {
+    expect(formatHumanDate("")).toBe("");
+    expect(formatHumanDate("06/28/2026")).toBe("");
+    expect(formatHumanDate(" 2026-06-28")).toBe("");
+  });
+  it("daysPastDue: due today 0, yesterday 1", () => {
+    expect(daysPastDue("2026-09-25", NOW)).toBe("0");
+    expect(daysPastDue("2026-09-24", NOW)).toBe("1");
+  });
+  it("daysPastDue: future clamped to '0', never negative or '-0'", () => {
+    const out = daysPastDue("2027-01-01", NOW);
+    expect(out).toBe("0");
+    expect(out.startsWith("-")).toBe(false);
+  });
+  it("daysPastDue: unparseable / empty → ''", () => {
+    expect(daysPastDue("garbage", NOW)).toBe("");
+    expect(daysPastDue("", NOW)).toBe("");
+  });
+  it("daysPastDue: cross-year", () => {
+    expect(daysPastDue("2025-12-31", new Date("2026-01-01T00:00:00Z"))).toBe("1");
+  });
 });
 
 describe("callVariablesFrom", () => {
