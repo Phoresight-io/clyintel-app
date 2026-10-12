@@ -176,3 +176,47 @@ describe("buildCallVariables (reads)", () => {
     expect(v.amount_due).toBe("");
   });
 });
+
+describe("formatHumanDate — edge cases", () => {
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  it.each(months.map((m, i) => [i + 1, m] as const))("month %i → %s", (n, name) => {
+    expect(formatHumanDate(`2026-${String(n).padStart(2, "0")}-01`)).toBe(`${name} 1, 2026`);
+  });
+  it("end of year", () => {
+    expect(formatHumanDate("2026-12-31")).toBe("December 31, 2026");
+  });
+  it("day loses its leading zero", () => {
+    expect(formatHumanDate("2026-03-09")).toBe("March 9, 2026");
+  });
+  it("month out of range → ''", () => {
+    expect(formatHumanDate("2026-13-01")).toBe("");
+    expect(formatHumanDate("2026-00-10")).toBe("");
+  });
+  it("malformed strings → ''", () => {
+    for (const v of ["", "2026-6-28", "06/28/2026", "28 June 2026"]) expect(formatHumanDate(v)).toBe("");
+  });
+  it("no timezone drift: reads the digits, not an instant", () => {
+    expect(formatHumanDate("2026-06-28T23:30:00-07:00")).toBe("June 28, 2026");
+  });
+  it("day is not validated (documents current behavior)", () => {
+    expect(formatHumanDate("2026-02-30")).toBe("February 30, 2026");
+  });
+});
+
+describe("daysPastDue — edge cases", () => {
+  it("not yet due is clamped to '0'; due today → '0'", () => {
+    expect(daysPastDue("2026-12-01", NOW)).toBe("0");
+    expect(daysPastDue("2026-09-25", NOW)).toBe("0");
+  });
+  it("unparseable or empty → ''", () => {
+    expect(daysPastDue("garbage", NOW)).toBe("");
+    expect(daysPastDue("", NOW)).toBe("");
+  });
+  it("digits only; 1 day past due", () => {
+    expect(daysPastDue("2026-06-28", NOW)).toMatch(/^\d+$/);
+    expect(daysPastDue("2026-09-24", new Date("2026-09-25T00:00:01Z"))).toBe("1");
+  });
+});

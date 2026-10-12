@@ -127,3 +127,40 @@ describe("deriveStatus — client status roll-up", () => {
     expect(toUIClient(client, { latest: null, prior: null }, []).status).toBe("no_history");
   });
 });
+
+describe("formatDate via toUIInvoice / toUIClient", () => {
+  // Noon-UTC inputs keep results identical in any host timezone (UTC-11..UTC+11).
+  const row = (p: Record<string, unknown>) =>
+    ({
+      id: "inv-x",
+      invoice_number: "1",
+      status: "sent",
+      due_date: "2026-06-03T12:00:00Z",
+      amount_cents: 1000,
+      amount_outstanding_cents: 1000,
+      last_reminder_at: null,
+      updated_at: "2026-09-20T15:00:00Z",
+      ...p,
+    }) as unknown as InvoiceRow;
+
+  it("null due_date → —", () => {
+    expect(toUIInvoice(row({ due_date: null })).dueDate).toBe("—");
+  });
+  it("unparseable due_date → —", () => {
+    expect(toUIInvoice(row({ due_date: "garbage" })).dueDate).toBe("—");
+  });
+  it("last_reminder_at null → —; set → M/D/YY", () => {
+    expect(toUIInvoice(row({ last_reminder_at: null })).lastActivity).toBe("—");
+    expect(toUIInvoice(row({ last_reminder_at: "2026-06-03T12:00:00Z" })).lastActivity).toBe("6/3/26");
+  });
+  it("no padding on month/day; two-digit year", () => {
+    expect(toUIInvoice(row({ last_reminder_at: "2026-01-05T12:00:00Z" })).lastActivity).toBe("1/5/26");
+    expect(toUIInvoice(row({ last_reminder_at: "2026-12-25T12:00:00Z" })).lastActivity).toBe("12/25/26");
+  });
+  it("toUIClient lastActivity from updated_at", () => {
+    const c = (u: string | null) =>
+      toUIClient({ ...client, updated_at: u } as unknown as ClientRow, { latest: null, prior: null }, []);
+    expect(c("2026-09-01T12:00:00Z").lastActivity).toBe("9/1/26");
+    expect(c(null).lastActivity).toBe("—");
+  });
+});

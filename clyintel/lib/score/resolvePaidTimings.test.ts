@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolvePaidTimings } from "./resolvePaidTimings";
+import { resolvePaidTimings, utcDate } from "./resolvePaidTimings";
 
 describe("resolvePaidTimings — precedence", () => {
   it("payments win over balance_events; the LAST succeeded payment's date is used", () => {
@@ -53,5 +53,27 @@ describe("resolvePaidTimings — precedence", () => {
       [{ invoice_id: "b", detected_at: "2026-07-02T00:00:00Z", new_outstanding_cents: 0, evidence: null }],
     );
     expect(out.map((t) => t.invoice_id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("utcDate", () => {
+  it("date-only and Z timestamps → UTC date", () => {
+    expect(utcDate("2026-06-03")).toBe("2026-06-03");
+    expect(utcDate("2026-06-03T12:00:00Z")).toBe("2026-06-03");
+  });
+  it("converts offsets to UTC", () => {
+    expect(utcDate("2026-06-03T22:00:00-05:00")).toBe("2026-06-04");
+  });
+  it("non-strings → null", () => {
+    for (const v of [null, undefined, 123, new Date(), {}]) expect(utcDate(v)).toBeNull();
+  });
+  it("empty / unparseable string → null", () => {
+    expect(utcDate("")).toBeNull();
+    expect(utcDate("nope")).toBeNull();
+  });
+  it("non-null output is always YYYY-MM-DD", () => {
+    for (const v of ["2026-06-03", "2026-06-03T22:00:00-05:00", "2026-01-05T12:00:00Z"]) {
+      expect(utcDate(v)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    }
   });
 });
