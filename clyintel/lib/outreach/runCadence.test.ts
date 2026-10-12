@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import {
   runCadence,
   isTerminated,
@@ -343,5 +343,37 @@ describe("runCadence — non-email step is an unsupported-channel skip (1c seam)
     expect(summary.unsupportedChannel).toBe(1);
     expect(port.claimStep).not.toHaveBeenCalled();
     expect(port.runSendStep).not.toHaveBeenCalled();
+  });
+});
+
+// Pins process.env.TZ for the enclosing describe and restores it afterwards.
+function useTZ(tz: string) {
+  let original: string | undefined;
+  beforeAll(() => {
+    original = process.env.TZ;
+    process.env.TZ = tz;
+  });
+  afterAll(() => {
+    if (original === undefined) delete process.env.TZ;
+    else process.env.TZ = original;
+  });
+}
+
+describe("date formatting: utcToday", () => {
+  it("returns the UTC date at midnight and for offset input", () => {
+    expect(utcToday(new Date("2026-08-25T00:00:00.000Z"))).toBe("2026-08-25");
+    expect(utcToday(new Date("2026-08-24T20:00:00-05:00"))).toBe("2026-08-25");
+  });
+  it("throws RangeError for an Invalid Date", () => {
+    expect(() => utcToday(new Date("x"))).toThrow(RangeError);
+  });
+  describe("under Pacific/Kiritimati", () => {
+    useTZ("Pacific/Kiritimati");
+    it("host offset switch took effect", () => {
+      expect(new Date("2026-06-03T00:00:00Z").getTimezoneOffset()).not.toBe(0);
+    });
+    it("is timezone independent", () => {
+      expect(utcToday(new Date("2026-08-24T23:59:59.999Z"))).toBe("2026-08-24");
+    });
   });
 });

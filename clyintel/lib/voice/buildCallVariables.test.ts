@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import {
   buildCallVariables,
   callVariablesFrom,
@@ -174,5 +174,76 @@ describe("buildCallVariables (reads)", () => {
     const v = await buildCallVariables({ from } as never, { subscriberId: "s", clientId: "c", invoiceId: "i" }, NOW);
     expect(v.contact_name).toBe("there");
     expect(v.amount_due).toBe("");
+  });
+});
+
+// Pins process.env.TZ for the enclosing describe and restores it afterwards.
+function useTZ(tz: string) {
+  let original: string | undefined;
+  beforeAll(() => {
+    original = process.env.TZ;
+    process.env.TZ = tz;
+  });
+  afterAll(() => {
+    if (original === undefined) delete process.env.TZ;
+    else process.env.TZ = original;
+  });
+}
+
+describe("date formatting: formatHumanDate", () => {
+  it("formats full month names without a leading zero on the day", () => {
+    expect(formatHumanDate("2026-12-01")).toBe("December 1, 2026");
+    expect(formatHumanDate("2026-01-09")).toBe("January 9, 2026");
+  });
+  it.each([
+    ["01", "January"], ["02", "February"], ["03", "March"], ["04", "April"],
+    ["05", "May"], ["06", "June"], ["07", "July"], ["08", "August"],
+    ["09", "September"], ["10", "October"], ["11", "November"], ["12", "December"],
+  ])("month %s → %s", (m, name) => {
+    expect(formatHumanDate(`2026-${m}-15`)).toBe(`${name} 15, 2026`);
+  });
+  it("takes the literal date prefix of an offset timestamp (no TZ conversion)", () => {
+    expect(formatHumanDate("2026-06-28T23:30:00-05:00")).toBe("June 28, 2026");
+  });
+  it("rejects bad months and malformed strings", () => {
+    expect(formatHumanDate("2026-00-10")).toBe("");
+    expect(formatHumanDate("2026-13-10")).toBe("");
+    expect(formatHumanDate("2026-6-28")).toBe("");
+    expect(formatHumanDate(" 2026-06-28")).toBe("");
+  });
+  it("returns empty string for empty and undefined", () => {
+    expect(formatHumanDate("")).toBe("");
+    expect(formatHumanDate(undefined as unknown as string)).toBe("");
+  });
+  describe.each(["America/Los_Angeles", "Pacific/Kiritimati"])("TZ %s", (tz) => {
+    useTZ(tz);
+    it("host offset switch took effect", () => {
+      expect(new Date("2026-06-03T00:00:00Z").getTimezoneOffset()).not.toBe(0);
+    });
+    it("is timezone independent", () => {
+      expect(formatHumanDate("2026-06-28")).toBe("June 28, 2026");
+    });
+  });
+  it.todo("rejects an impossible day such as 2026-02-30 (currently 'February 30, 2026')");
+});
+
+describe("date formatting: daysPastDue", () => {
+  it("due today 0, yesterday 1, tomorrow clamped to 0", () => {
+    expect(daysPastDue("2026-09-25", NOW)).toBe("0");
+    expect(daysPastDue("2026-09-24", NOW)).toBe("1");
+    expect(daysPastDue("2026-09-26", NOW)).toBe("0");
+  });
+  it("crosses the year boundary", () => {
+    expect(daysPastDue("2026-12-31", new Date("2027-01-01T00:00:00Z"))).toBe("1");
+  });
+  it("returns empty string for empty, garbage or invalid now", () => {
+    expect(daysPastDue("", NOW)).toBe("");
+    expect(daysPastDue("garbage", NOW)).toBe("");
+    expect(daysPastDue("2026-09-24", new Date(NaN))).toBe("");
+  });
+  it("always returns a string", () => {
+    expect(typeof daysPastDue("2026-09-24", NOW)).toBe("string");
+    expect(typeof daysPastDue("2026-09-26", NOW)).toBe("string");
+    expect(typeof daysPastDue("", NOW)).toBe("string");
   });
 });
