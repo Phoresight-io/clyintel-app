@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { resolvePaidTimings } from "./resolvePaidTimings";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { resolvePaidTimings, utcDate } from "./resolvePaidTimings";
 
 describe("resolvePaidTimings — precedence", () => {
   it("payments win over balance_events; the LAST succeeded payment's date is used", () => {
@@ -53,5 +53,53 @@ describe("resolvePaidTimings — precedence", () => {
       [{ invoice_id: "b", detected_at: "2026-07-02T00:00:00Z", new_outstanding_cents: 0, evidence: null }],
     );
     expect(out.map((t) => t.invoice_id)).toEqual(["a", "b"]);
+  });
+});
+
+// Pins process.env.TZ for the enclosing describe and restores it afterwards.
+function useTZ(tz: string) {
+  let original: string | undefined;
+  beforeAll(() => {
+    original = process.env.TZ;
+    process.env.TZ = tz;
+  });
+  afterAll(() => {
+    if (original === undefined) delete process.env.TZ;
+    else process.env.TZ = original;
+  });
+}
+
+describe("date formatting: utcDate", () => {
+  it("returns the YMD for date-only and UTC timestamps", () => {
+    expect(utcDate("2026-06-03")).toBe("2026-06-03");
+    expect(utcDate("2026-06-03T00:00:00Z")).toBe("2026-06-03");
+  });
+  it("converts offset timestamps to the UTC date", () => {
+    // Unlike formatHumanDate / daysBetweenUtcDates (which take the literal YMD
+    // prefix), utcDate converts to the UTC instant first.
+    expect(utcDate("2026-06-03T23:30:00-05:00")).toBe("2026-06-04");
+  });
+  it.each([
+    ["null", null],
+    ["undefined", undefined],
+    ["number", 1780000000000],
+    ["Date", new Date("2026-06-03T00:00:00Z")],
+    ["object", {}],
+  ])("non-string (%s) → null", (_n, v) => {
+    expect(utcDate(v)).toBeNull();
+  });
+  it("returns null for empty and unparseable strings", () => {
+    expect(utcDate("")).toBeNull();
+    expect(utcDate("garbage")).toBeNull();
+  });
+  describe.each(["America/Los_Angeles", "Pacific/Kiritimati"])("TZ %s", (tz) => {
+    useTZ(tz);
+    it("host offset switch took effect", () => {
+      expect(new Date("2026-06-03T00:00:00Z").getTimezoneOffset()).not.toBe(0);
+    });
+    it("is timezone independent", () => {
+      expect(utcDate("2026-06-03")).toBe("2026-06-03");
+      expect(utcDate("2026-06-03T23:30:00-05:00")).toBe("2026-06-04");
+    });
   });
 });
