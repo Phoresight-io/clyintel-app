@@ -616,3 +616,114 @@ test("pipeline collect step: the agent container is removed BEFORE the copy, and
     assert.deepEqual(readdirSync(join(w.root, "notes-up")), [], "nothing from the link was kept");
   } finally { rmSync(w.root, RM); }
 });
+
+// ---- Slack failures are reported (one fixed-format line), never fatal, never leaking the body, token or text
+
+const SECRET_BODY = "SECRET-BODY-DO-NOT-PRINT";
+const failedBody = (error) => JSON.stringify({ ok: false, error, detail: SECRET_BODY });
+const FAIL_LINE = /^Slack post failed: ([a-z_]{1,64})$/m;
+const failLines = (out) => out.split("\n").filter((l) => l.startsWith("Slack post failed"));
+
+// Each Slack-posting job's real step, run against a stub curl with the given response / exit status.
+const POSTERS = {
+  "notify-start": (w) => run(w, START_STEP, { SLACK_BOT_TOKEN: "xoxb-secret-token", SLACK_CHANNEL: "C1", BRIEF: "the secret brief", GITHUB_OUTPUT: join(w.root, "gh_output") }),
+  "notify-agents": (w) => {
+    mkdirSync(join(w.root, "notes"));
+    const file = join(w.root, "notes", "factory-notes.json");
+    writeFileSync(file, JSON.stringify({ notes: [note("planner", "the secret note")], verdict: null }));
+    return run(w, AGENTS_STEP, { ...BASE_ENV, SLACK_BOT_TOKEN: "xoxb-secret-token", NOTES_FILE: file });
+  },
+  "notify-failure": (w) => run(w, FAILURE_STEP, { RUN_URL: "https://github.com/x/y/actions/runs/7", GITHUB_RUN_ID: "7", GITHUB_REPOSITORY: "x/y", ACTOR: "someone", ...BASE_ENV, SLACK_BOT_TOKEN: "xoxb-secret-token", PIPELINE_RESULT: "failure" }),
+};
+const posterRun = (name, opts) => {
+  const w = sandbox(opts);
+  try {
+    const r = POSTERS[name](w);
+    return { ...r, posts: postsOf(w.root) };
+  } finally { rmSync(w.root, RM); }
+};
+
+for (const name of Object.keys(POSTERS)) {
+  test(`${name}: {"ok":false,"error":"invalid_auth"} prints "Slack post failed: invalid_auth" and the job still succeeds`, () => {
+    const r = posterRun(name, { response: '{"ok":false,"error":"invalid_auth"}' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(failLines(r.stdout), ["Slack post failed: invalid_auth"]);
+    assert.ok(r.posts.length >= 1, "it did post");
+  });
+
+  test(`${name}: the failure line never carries the response body, the token or the message text`, () => {
+    const r = posterRun(name, { response: failedBody("channel_not_found") });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(failLines(r.stdout), ["Slack post failed: channel_not_found"]);
+    for (const secret of [SECRET_BODY, "xoxb-secret-token", "the secret brief", "the secret note", "detail"]) {
+      assert.ok(!r.stdout.includes(secret) && !r.stderr.includes(secret), `leaked ${secret}`);
+    }
+  });
+
+  test(`${name}: an error that is not [a-z_]{1,64}, or is not a string, or a response that is not JSON, prints "unknown"`, () => {
+    const hostile = [
+      failedBody("Invalid_Auth"), failedBody("bad error"), failedBody("a-b"), failedBody("x".repeat(65)), failedBody(""),
+      failedBody("$(touch pwned)"), failedBody("line1\nline2"), failedBody("abc\n"), failedBody("::set-output name=x::y"),
+      '{"ok":false,"error":{"nested":"invalid_auth"}}', '{"ok":false,"error":42}', '{"ok":false,"error":null}', '{"ok":false}',
+      '{"ok":"true","error":"invalid_auth_but_not_ok_true"}', "<html>502 Bad Gateway SECRET-BODY-DO-NOT-PRINT</html>", "", "[]", "null", "42",
+    ];
+    for (const response of hostile) {
+      const r = posterRun(name, { response });
+      assert.equal(r.status, 0, `${response}: ${r.stderr}`);
+      const lines = failLines(r.stdout);
+      const expected = response === '{"ok":"true","error":"invalid_auth_but_not_ok_true"}' ? ["Slack post failed: invalid_auth_but_not_ok_true"] : ["Slack post failed: unknown"];
+      assert.deepEqual(lines, expected, response);
+      assert.ok(!r.stdout.includes(SECRET_BODY), `${response}: leaked the body`);
+    }
+  });
+
+  test(`${name}: a 64-character error code is kept, and a successful post prints nothing`, () => {
+    const code = "a".repeat(32) + "_" + "b".repeat(31);
+    assert.equal(code.length, 64);
+    assert.deepEqual(failLines(posterRun(name, { response: failedBody(code) }).stdout), [`Slack post failed: ${code}`]);
+    const ok = posterRun(name, { response: '{"ok":true,"ts":"1700000000.000100"}' });
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.deepEqual(failLines(ok.stdout), []);
+  });
+
+  test(`${name}: when curl itself fails it still reports, and the job still succeeds`, () => {
+    const r = posterRun(name, { curlExit: 7, response: "" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(failLines(r.stdout), ["Slack post failed: curl_failed"]);
+    assert.ok(!r.stdout.includes("xoxb-secret-token"));
+  });
+}
+
+test("notify-agents: every note that fails is reported, one line each", () => {
+  const w = sandbox({ response: '{"ok":false,"error":"ratelimited"}' });
+  try {
+    mkdirSync(join(w.root, "notes"));
+    const file = join(w.root, "notes", "factory-notes.json");
+    writeFileSync(file, JSON.stringify({ notes: FOUR, verdict: null }));
+    const r = run(w, AGENTS_STEP, { ...BASE_ENV, NOTES_FILE: file });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(failLines(r.stdout), Array(4).fill("Slack post failed: ratelimited"));
+  } finally { rmSync(w.root, RM); }
+});
+
+test("workflow: every chat.postMessage is followed by slack_report, in a job that defines it identically, with nothing swallowed", () => {
+  const defs = [...WORKFLOW.matchAll(/^( +)slack_report\(\) \{\n([\s\S]*?)\n\1\}\n/gm)].map((m) => m[2].split("\n").map((l) => l.slice(m[1].length)).join("\n"));
+  assert.equal(defs.length, 4, "one definition per Slack-posting job");
+  assert.ok(defs.every((d) => d === defs[0]), "the four definitions are identical");
+  // the helper never prints the body, the token or the text, and never fails the job
+  assert.doesNotMatch(defs[0], /SLACK_BOT_TOKEN|\$2"?\s*$|echo "?\$2|printf '%s\\n'/m);
+  assert.match(defs[0], /echo "Slack post failed: \$err"/);
+  assert.match(defs[0], /\^\[a-z_\]\{1,64\}\$/);
+  assert.equal([...defs[0].matchAll(/\breturn 0\b/g)].length, 3);
+  assert.doesNotMatch(defs[0], /\bexit\b/);
+  for (const j of ["notify-start", "notify-agents", "publish", "notify-failure"]) {
+    const body = codeOnly(job(j));
+    const posts = [...body.matchAll(/chat\.postMessage/g)].length;
+    assert.equal(posts, 1, `${j}: one call site`);
+    assert.match(body, /slack_report\(\) \{/, `${j} defines slack_report`);
+    assert.match(body, /slack_report "\$(CURL_RC|rc)" "\$(RESP|resp)"/, `${j} reports after the post`);
+    assert.match(body, /--data @-\)" && (CURL_RC|rc)=0 \|\| (CURL_RC|rc)=\$\?/, `${j} keeps curl's status`);
+    const near = body.slice(body.indexOf("chat.postMessage"), body.indexOf('slack_report "'));
+    assert.doesNotMatch(near, />\/dev\/null \|\| true/, `${j}: the response is no longer thrown away`);
+  }
+});
