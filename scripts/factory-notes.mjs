@@ -136,21 +136,51 @@ export function reviewSources({ file, reply } = {}) {
   };
 }
 
-// Sets (or, when the artifact has no usable section any more, removes) one agent's note.
+// Sets one agent's note from its artifact. A later extraction that finds nothing (the agent rewrote its
+// file without the section, a fix loop appended an empty one, the file is gone) does NOT remove a note
+// captured earlier: the last good note stays. A later non-null note replaces it.
 export function setNote(state, agent, artifact) {
   if (!AGENTS.includes(agent)) return state;
-  state.notes = state.notes.filter((n) => n.agent !== agent);
   const text = extractNote(artifact);
-  if (text !== null) state.notes.push({ agent, text, needs_you: needsYou(text) });
+  if (text === null) return state;
+  state.notes = state.notes.filter((n) => n.agent !== agent);
+  state.notes.push({ agent, text, needs_you: needsYou(text) });
   state.notes.sort((a, b) => AGENTS.indexOf(a.agent) - AGENTS.indexOf(b.agent));
   return state;
+}
+
+// Posted for an agent that RAN but never produced a note, so the gap is visible in the thread (the
+// workflow adds the agent's label, so Slack reads e.g. "Coder: No update written."). Fixed text.
+export const NO_UPDATE_NOTE = "No update written.";
+
+// Adds the fixed fallback for every agent in `ran` that has no note yet; never touches an existing note
+// (a later real note still replaces the fallback, via setNote). Returns the agents it filled.
+export function fillGaps(state, ran) {
+  const ranSet = new Set(ran ?? []);
+  const filled = [];
+  for (const agent of AGENTS) {
+    if (!ranSet.has(agent) || state.notes.some((n) => n.agent === agent)) continue;
+    state.notes.push({ agent, text: NO_UPDATE_NOTE, needs_you: false });
+    filled.push(agent);
+  }
+  state.notes.sort((a, b) => AGENTS.indexOf(a.agent) - AGENTS.indexOf(b.agent));
+  return filled;
+}
+
+// One save of the file-based agents' notes (planner, coder, tester): keep the last good note of each,
+// then fill the gap for any agent in `ran` (the agents that actually started) that has none.
+export function collectNotes(state, artifacts, ran) {
+  for (const agent of ["planner", "coder", "tester"]) setNote(state, agent, artifacts?.[agent]);
+  return fillGaps(state, ran);
 }
 
 // The reviewer's note and verdict, from its file with the reply as the fallback (reviewSources).
 export function setReviewSources(state, sources) {
   const review = reviewSources(sources);
-  state.notes = state.notes.filter((n) => n.agent !== "reviewer");
-  if (review.note !== null) state.notes.push({ agent: "reviewer", text: review.note, needs_you: needsYou(review.note) });
+  if (review.note !== null) {
+    state.notes = state.notes.filter((n) => n.agent !== "reviewer");
+    state.notes.push({ agent: "reviewer", text: review.note, needs_you: needsYou(review.note) });
+  }
   state.notes.sort((a, b) => AGENTS.indexOf(a.agent) - AGENTS.indexOf(b.agent));
   state.verdict = review.verdict;
   return state;

@@ -10,10 +10,11 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  NOTES_DIR, NOTES_FILE, MAX_NOTE_CHARS, AGENTS, extractNote, needsYou, parseVerdict, createNotes, setNote, setReview, writeNotes,
+  NOTES_DIR, NOTES_FILE, MAX_NOTE_CHARS, AGENTS, extractNote, needsYou, parseVerdict, createNotes, setNote, setReview, writeNotes, collectNotes, fillGaps, NO_UPDATE_NOTE,
   REVIEW_FILE, MAX_REVIEW_BYTES, REVIEW_SLOT_FAILED, reviewSources, setReviewSources, readReviewFile, resetReviewSlot,
 } from "./factory-notes.mjs";
 import { decide, touchesNotes } from "./role-guard.mjs";
+import { createTracer } from "./factory-log.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "..");
@@ -109,7 +110,7 @@ test("parseVerdict: only an explicit VERDICT line in the enum counts; everything
   assert.equal(parseVerdict(null), null);
 });
 
-test("setNote / setReview: one note per known agent, in order, replaced on a re-run, removed when the section is gone", () => {
+test("setNote / setReview: one note per known agent, in order, replaced on a re-run, kept when the section is gone", () => {
   const s = createNotes();
   setNote(s, "tester", section("Tests pass."));
   setNote(s, "planner", section("Plan ready."));
@@ -119,7 +120,8 @@ test("setNote / setReview: one note per known agent, in order, replaced on a re-
   assert.equal(s.notes.length, 2);
   assert.equal(s.notes.find((n) => n.agent === "tester").text, "Tests fail on tenant scoping.");
   setNote(s, "planner", "# Plan without a section");
-  assert.deepEqual(s.notes.map((n) => n.agent), ["tester"]);
+  assert.deepEqual(s.notes.map((n) => n.agent), ["planner", "tester"], "the last good note stays");
+  assert.equal(s.notes[0].text, "Plan ready.");
   assert.equal(s.verdict, null);
   setReview(s, "## Slack update\nBlocked: secret in diff.\nVERDICT: BLOCK");
   assert.equal(s.verdict, "BLOCK");
@@ -460,4 +462,117 @@ test("factory-notes.mjs header: names resetReviewSlot as the one function that t
   const head = readFileSync(join(HERE, "factory-notes.mjs"), "utf8").slice(0, 2200);
   assert.match(head, /non-throwing EXCEPT resetReviewSlot/);
   assert.doesNotMatch(head, /No function here throws/);
+});
+
+// ---- note gaps: keep the last good note; a fixed fallback only for agents that ran and never wrote one
+
+const ALL_RAN = ["planner", "coder", "tester", "reviewer"];
+const noteOf = (state, agent) => state.notes.find((n) => n.agent === agent);
+
+test("setNote: a good note survives a later null extraction (no section, empty section, missing file)", () => {
+  for (const later of ["# Build notes (fix)\n## Done\n- x\n", "## Slack update\n", "## Slack update\n   \n", "", undefined, null]) {
+    const s = createNotes();
+    setNote(s, "coder", section("Built it."));
+    setNote(s, "coder", later);
+    assert.equal(noteOf(s, "coder")?.text, "Built it.", JSON.stringify(later));
+    assert.equal(s.notes.length, 1);
+  }
+});
+
+test("setNote: a later non-null note still replaces the earlier one, including needs_you", () => {
+  const s = createNotes();
+  setNote(s, "coder", section("Built it."));
+  setNote(s, "coder", section("Needs you: pick a tenant column name"));
+  assert.equal(s.notes.length, 1);
+  assert.deepEqual(noteOf(s, "coder"), { agent: "coder", text: "Needs you: pick a tenant column name", needs_you: true });
+});
+
+test("setReview: a reviewer note survives a later review that has none; the verdict still follows the new text", () => {
+  const s = createNotes();
+  setReview(s, "## Slack update\nFirst.\nVERDICT: APPROVE");
+  setReview(s, "no section here\nVERDICT: BLOCK");
+  assert.equal(noteOf(s, "reviewer").text, "First.");
+  assert.equal(s.verdict, "BLOCK");
+});
+
+test("collectNotes: a note captured after the main run survives a fix-loop run that writes no section", () => {
+  const s = createNotes();
+  collectNotes(s, { planner: section("Plan."), coder: section("Built it."), tester: section("Tests fail.") }, ["planner", "coder", "tester"]);
+  const filled = collectNotes(s, { planner: section("Plan."), coder: "# Build notes\n## Done\n- fix\n", tester: section("Tests pass.") }, ["planner", "coder", "tester"]);
+  assert.deepEqual(filled, [], "nothing to fill: the coder already has a note");
+  assert.equal(noteOf(s, "coder").text, "Built it.");
+  assert.equal(noteOf(s, "tester").text, "Tests pass.", "a later real note replaces");
+});
+
+test("fillGaps: the fixed fallback appears only for agents that ran and never wrote a note", () => {
+  const s = createNotes();
+  const filled = collectNotes(s, { planner: section("Plan."), coder: "# Build notes\nno section", tester: "" }, ["planner", "coder", "tester"]);
+  assert.deepEqual(filled, ["coder", "tester"]);
+  assert.deepEqual(noteOf(s, "coder"), { agent: "coder", text: NO_UPDATE_NOTE, needs_you: false });
+  assert.deepEqual(noteOf(s, "tester"), { agent: "tester", text: NO_UPDATE_NOTE, needs_you: false });
+  assert.equal(noteOf(s, "planner").text, "Plan.", "an agent with a note is never given the fallback");
+  // the reviewer: it ran and wrote nothing usable
+  assert.deepEqual(fillGaps(s, ALL_RAN), ["reviewer"]);
+  assert.equal(noteOf(s, "reviewer").text, NO_UPDATE_NOTE);
+  // a second save does not add or duplicate anything
+  assert.deepEqual(fillGaps(s, ALL_RAN), []);
+  assert.equal(s.notes.length, 4);
+  assert.deepEqual(s.notes.map((n) => n.agent), AGENTS, "in the usual order");
+});
+
+test("fillGaps: a real note that arrives later replaces the fallback", () => {
+  const s = createNotes();
+  collectNotes(s, { coder: "" }, ["coder"]);
+  assert.equal(noteOf(s, "coder").text, NO_UPDATE_NOTE);
+  collectNotes(s, { coder: section("Built it after all.") }, ["coder"]);
+  assert.equal(s.notes.length, 1);
+  assert.equal(noteOf(s, "coder").text, "Built it after all.");
+});
+
+test("fillGaps: no fallback for an agent that never ran (a run that fails before the coder)", () => {
+  const nothingRan = createNotes();
+  assert.deepEqual(collectNotes(nothingRan, { planner: "", coder: "", tester: "" }, []), []);
+  assert.deepEqual(nothingRan.notes, []);
+  // only the planner started: it gets the fallback if it wrote nothing; the coder, tester and reviewer get none
+  const plannerOnly = createNotes();
+  assert.deepEqual(collectNotes(plannerOnly, { planner: "", coder: "", tester: "" }, ["planner"]), ["planner"]);
+  assert.deepEqual(plannerOnly.notes.map((n) => n.agent), ["planner"]);
+  // unknown names, undefined and junk in `ran` are ignored
+  const junk = createNotes();
+  assert.deepEqual(fillGaps(junk, ["mallory", undefined, 42, "coder"]), ["coder"]);
+  assert.deepEqual(fillGaps(createNotes(), undefined), []);
+});
+
+test("NO_UPDATE_NOTE: fixed text, the same for every agent, nothing from the artifact in it", () => {
+  assert.equal(NO_UPDATE_NOTE, "No update written.");
+  const s = createNotes();
+  collectNotes(s, { planner: "SECRET planner text", coder: "$(touch pwned) <!channel>", tester: "" }, ["planner", "coder", "tester"]);
+  for (const n of s.notes) {
+    assert.equal(n.text, NO_UPDATE_NOTE);
+    assert.equal(n.needs_you, false);
+  }
+});
+
+test("orchestrator: saves through collectNotes with the agents the tracer saw, and the log line names only the agent", () => {
+  const raw = readFileSync(join(HERE, "d3-orchestrator.mjs"), "utf8");
+  const src = raw.replace(/^\s*\/\/.*$/gm, "");
+  assert.match(src, /const ran = \[\.\.\.tracer\.stats\.values\(\)\]\.map\(\(s\) => s\.type\);/, "ran comes from the subagents that actually started");
+  assert.match(src, /const filled = collectNotes\(notes, \{\n\s+planner: artifact\("\.factory\/plan\.md"\),\n\s+coder: artifact\("\.factory\/build-notes\.md"\),\n\s+tester: artifact\("\.factory\/test-report\.md"\),\n\s+\}, ran\);/);
+  assert.match(src, /for \(const agent of filled\) log\(`\$\{agent\}: no update note written; the fixed fallback is posted`\);/);
+  assert.doesNotMatch(src, /\bsetNote\(/, "no direct setNote left in the orchestrator");
+  // the whole save stays inside the never-throws wrapper, and still ends in writeNotes
+  const body = src.slice(src.indexOf("const saveNotes = () => {"), src.indexOf("// A fix-loop") > 0 ? src.indexOf("// A fix-loop") : src.indexOf("const saveNotes = () => {") + 900);
+  assert.match(body, /try \{[\s\S]*collectNotes[\s\S]*writeNotes\(notes\);\n  \} catch \{\}/);
+  assert.doesNotMatch(src, /slack/i);
+});
+
+test("the tracer's stats name exactly the subagents that started, which is what the orchestrator passes as `ran`", () => {
+  const tr = createTracer(() => {}, { turns: 0, cost: 0, denials: 0 });
+  tr.onGuardDecision({ tool_name: "Read" }, {}); // the main session has no agent_id: not an agent
+  tr.onSubagentStart({ agent_id: "p1", agent_type: "planner" });
+  tr.onSubagentStart({ agent_id: "c1", agent_type: "coder" });
+  const ran = [...tr.stats.values()].map((st) => st.type);
+  assert.deepEqual(ran, ["planner", "coder"]);
+  const s = createNotes();
+  assert.deepEqual(collectNotes(s, {}, ran), ["planner", "coder"], "the tester and reviewer never started: no fallback for them");
 });

@@ -10,7 +10,7 @@ import { makeGuardHook } from "./role-guard.mjs";
 import { baseCommit, snapshot, tamperedPaths } from "./instruction-guard.mjs";
 import { logLine, createTracer, seconds, money } from "./factory-log.mjs";
 import { fixStep } from "./fix-loop.mjs";
-import { createNotes, setNote, setReviewSources, reviewSources, readReviewFile, resetReviewSlot, REVIEW_SLOT_FAILED, writeNotes } from "./factory-notes.mjs";
+import { createNotes, collectNotes, setReviewSources, reviewSources, readReviewFile, resetReviewSlot, REVIEW_SLOT_FAILED, writeNotes } from "./factory-notes.mjs";
 
 // ISOLATION. This process and every agent session it starts run inside the agent container
 // (d3-factory.yml, "Run pipeline in the agent container"): only the repo is mounted, and the only
@@ -149,11 +149,18 @@ class PipelineError extends Error {}
 // see factory-notes.mjs), so a run that fails keeps the notes of the stages that finished. Never throws.
 const notes = createNotes();
 const artifact = (path) => (existsSync(path) ? readFileSync(path, "utf8") : "");
+// A later save that finds no section keeps the agent's last good note; an agent that actually started
+// (the tracer saw it) but never produced a note gets the fixed fallback, so the gap shows in the thread.
+// Agents that never started get nothing, so a run that fails before the coder posts no coder line.
 const saveNotes = () => {
   try {
-    setNote(notes, "planner", artifact(".factory/plan.md"));
-    setNote(notes, "coder", artifact(".factory/build-notes.md"));
-    setNote(notes, "tester", artifact(".factory/test-report.md"));
+    const ran = [...tracer.stats.values()].map((s) => s.type);
+    const filled = collectNotes(notes, {
+      planner: artifact(".factory/plan.md"),
+      coder: artifact(".factory/build-notes.md"),
+      tester: artifact(".factory/test-report.md"),
+    }, ran);
+    for (const agent of filled) log(`${agent}: no update note written; the fixed fallback is posted`);
     writeNotes(notes);
   } catch {}
 };
