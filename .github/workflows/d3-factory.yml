@@ -97,6 +97,19 @@ jobs:
             echo "No Slack token/channel configured; nothing to notify."
             exit 0
           fi
+          # Slack failures are reported, never fatal: $1 is curl's exit status, $2 Slack's response. Prints one
+          # fixed-format line when the post did not succeed, with Slack's .error only if it looks like an error
+          # code ([a-z_], at most 64 characters; anything else is "unknown"). Never prints the response body, the
+          # token or the message text. Always returns 0, so no job fails because of Slack.
+          slack_report() {
+            local err
+            if [ "$1" != "0" ]; then echo "Slack post failed: curl_failed"; return 0; fi
+            if printf '%s' "$2" | jq -e '.ok == true' >/dev/null 2>&1; then return 0; fi
+            err="$(printf '%s' "$2" | jq -r '(.error // empty) | strings | select(length >= 1 and length <= 64 and (explode | all(. == 95 or (. >= 97 and . <= 122))))' 2>/dev/null || true)"
+            if [[ ! "$err" =~ ^[a-z_]{1,64}$ ]]; then err="unknown"; fi
+            echo "Slack post failed: $err"
+            return 0
+          }
           # The brief is user text: escape Slack's control characters so it cannot render
           # <!channel> pings or <url|label> links, and turn link previews off. The payload is built
           # by jq and read by curl from stdin, so the brief never becomes part of a command line.
@@ -105,7 +118,8 @@ jobs:
                   | curl -s -m 15 -X POST https://slack.com/api/chat.postMessage \
                       -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
                       -H "Content-Type: application/json; charset=utf-8" \
-                      --data @- || true)"
+                      --data @-)" && CURL_RC=0 || CURL_RC=$?
+          slack_report "$CURL_RC" "$RESP"
           # Keep the message's ts (only if it looks like one) so later posts can reply in its thread.
           TS="$(printf '%s' "$RESP" | jq -r 'if .ok == true and (.ts | type) == "string" then .ts else empty end' 2>/dev/null || true)"
           if [[ "$TS" =~ ^[0-9]{1,12}\.[0-9]{1,8}$ ]] && [ -n "${GITHUB_OUTPUT:-}" ]; then
@@ -475,6 +489,19 @@ jobs:
             echo "No usable notes file (missing, a link, or over 8 KB); nothing to post."
             exit 0
           fi
+          # Slack failures are reported, never fatal: $1 is curl's exit status, $2 Slack's response. Prints one
+          # fixed-format line when the post did not succeed, with Slack's .error only if it looks like an error
+          # code ([a-z_], at most 64 characters; anything else is "unknown"). Never prints the response body, the
+          # token or the message text. Always returns 0, so no job fails because of Slack.
+          slack_report() {
+            local err
+            if [ "$1" != "0" ]; then echo "Slack post failed: curl_failed"; return 0; fi
+            if printf '%s' "$2" | jq -e '.ok == true' >/dev/null 2>&1; then return 0; fi
+            err="$(printf '%s' "$2" | jq -r '(.error // empty) | strings | select(length >= 1 and length <= 64 and (explode | all(. == 95 or (. >= 97 and . <= 122))))' 2>/dev/null || true)"
+            if [[ ! "$err" =~ ^[a-z_]{1,64}$ ]]; then err="unknown"; fi
+            echo "Slack post failed: $err"
+            return 0
+          }
           if ! jq -s -e '
                length == 1 and (.[0] | type == "object")
                and ((.[0].notes // []) | type == "array")
@@ -509,10 +536,11 @@ jobs:
                unfurl_links: false, unfurl_media: false}
               + (if $thread != "" then {thread_ts: $thread} else {} end)
           ' "$NOTES_FILE" | while IFS= read -r PAYLOAD; do
-            printf '%s' "$PAYLOAD" | curl -s -m 15 -X POST https://slack.com/api/chat.postMessage \
+            RESP="$(printf '%s' "$PAYLOAD" | curl -s -m 15 -X POST https://slack.com/api/chat.postMessage \
               -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
               -H "Content-Type: application/json; charset=utf-8" \
-              --data @- >/dev/null || true
+              --data @-)" && CURL_RC=0 || CURL_RC=$?
+            slack_report "$CURL_RC" "$RESP"
           done
 
   # CI on factory PRs: PRs opened with GITHUB_TOKEN start no workflows, so ci.yml lists
@@ -567,13 +595,28 @@ jobs:
           if [[ "$THREAD_TS" =~ ^[0-9]{1,12}\.[0-9]{1,8}$ ]]; then THREAD="$THREAD_TS"; fi
           TAG=""
           if [[ "$SLACK_USER" =~ ^[UW][A-Z0-9]{2,}$ ]]; then TAG="<@$SLACK_USER> "; fi
+          # Slack failures are reported, never fatal: $1 is curl's exit status, $2 Slack's response. Prints one
+          # fixed-format line when the post did not succeed, with Slack's .error only if it looks like an error
+          # code ([a-z_], at most 64 characters; anything else is "unknown"). Never prints the response body, the
+          # token or the message text. Always returns 0, so no job fails because of Slack.
+          slack_report() {
+            local err
+            if [ "$1" != "0" ]; then echo "Slack post failed: curl_failed"; return 0; fi
+            if printf '%s' "$2" | jq -e '.ok == true' >/dev/null 2>&1; then return 0; fi
+            err="$(printf '%s' "$2" | jq -r '(.error // empty) | strings | select(length >= 1 and length <= 64 and (explode | all(. == 95 or (. >= 97 and . <= 122))))' 2>/dev/null || true)"
+            if [[ ! "$err" =~ ^[a-z_]{1,64}$ ]]; then err="unknown"; fi
+            echo "Slack post failed: $err"
+            return 0
+          }
           slack_post() {
-            jq -n --arg c "$SLACK_CHANNEL" --arg t "$1" --arg ts "$THREAD" \
+            local resp rc
+            resp="$(jq -n --arg c "$SLACK_CHANNEL" --arg t "$1" --arg ts "$THREAD" \
               '{channel:$c, text:$t, unfurl_links:false, unfurl_media:false} + (if $ts != "" then {thread_ts:$ts} else {} end)' \
               | curl -s -m 15 -X POST https://slack.com/api/chat.postMessage \
                   -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
                   -H "Content-Type: application/json; charset=utf-8" \
-                  --data @- >/dev/null || true
+                  --data @-)" && rc=0 || rc=$?
+            slack_report "$rc" "$resp"
           }
           BUNDLE="$RUNNER_TEMP/bundle/factory.bundle"
           git bundle verify "$BUNDLE"
@@ -831,9 +874,23 @@ jobs:
           if [[ "$THREAD_TS" =~ ^[0-9]{1,12}\.[0-9]{1,8}$ ]]; then THREAD="$THREAD_TS"; fi
           TAG=""
           if [[ "$SLACK_USER" =~ ^[UW][A-Z0-9]{2,}$ ]]; then TAG="<@$SLACK_USER> "; fi
-          jq -n --arg c "$SLACK_CHANNEL" --arg t "${TAG}${MSG}" --arg ts "$THREAD" \
+          # Slack failures are reported, never fatal: $1 is curl's exit status, $2 Slack's response. Prints one
+          # fixed-format line when the post did not succeed, with Slack's .error only if it looks like an error
+          # code ([a-z_], at most 64 characters; anything else is "unknown"). Never prints the response body, the
+          # token or the message text. Always returns 0, so no job fails because of Slack.
+          slack_report() {
+            local err
+            if [ "$1" != "0" ]; then echo "Slack post failed: curl_failed"; return 0; fi
+            if printf '%s' "$2" | jq -e '.ok == true' >/dev/null 2>&1; then return 0; fi
+            err="$(printf '%s' "$2" | jq -r '(.error // empty) | strings | select(length >= 1 and length <= 64 and (explode | all(. == 95 or (. >= 97 and . <= 122))))' 2>/dev/null || true)"
+            if [[ ! "$err" =~ ^[a-z_]{1,64}$ ]]; then err="unknown"; fi
+            echo "Slack post failed: $err"
+            return 0
+          }
+          RESP="$(jq -n --arg c "$SLACK_CHANNEL" --arg t "${TAG}${MSG}" --arg ts "$THREAD" \
             '{channel:$c, text:$t, unfurl_links:false, unfurl_media:false} + (if $ts != "" then {thread_ts:$ts} else {} end)' \
             | curl -s -m 15 -X POST https://slack.com/api/chat.postMessage \
                 -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
                 -H "Content-Type: application/json; charset=utf-8" \
-                --data @- >/dev/null || true
+                --data @-)" && CURL_RC=0 || CURL_RC=$?
+          slack_report "$CURL_RC" "$RESP"

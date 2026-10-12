@@ -951,3 +951,40 @@ test("notify-start: posts the start message with the brief escaped for Slack, on
   assert.equal(p.channel, "C1");
   assert.equal(p.text, "▶️ Design → build → test → review: fix &lt;!channel&gt; &amp; &lt;https://evil|here&gt;");
 });
+
+// ---- Slack failures are reported (one fixed-format line), never fatal, never leaking the body, token or text
+
+function publishWithSlack({ response = "", curlExit = 0 } = {}) {
+  const w = world({ log: PR_LOG });
+  try {
+    writeFileSync(join(w.bin, "curl"), `#!/bin/bash\ncat > /dev/null\nprintf '%s' '${response}'\nexit ${curlExit}\n`);
+    const out = publish(w, { ...SLACK_ENV, SLACK_BOT_TOKEN: "xoxb-secret-token" }); // throws if the step fails
+    assert.ok(remoteHas(w, "refs/heads/factory/run-1"), "the branch was pushed");
+    assert.ok(ghArgs(w).includes("--draft"), "the PR was opened");
+    return out;
+  } finally { cleanup(w); }
+}
+const failLinesOf = (out) => out.split("\n").filter((l) => l.startsWith("Slack post failed"));
+
+test("publish: {\"ok\":false,\"error\":\"invalid_auth\"} prints \"Slack post failed: invalid_auth\" and the PR is still opened", () => {
+  const out = publishWithSlack({ response: '{"ok":false,"error":"invalid_auth"}' });
+  assert.deepEqual(failLinesOf(out), ["Slack post failed: invalid_auth"]);
+});
+
+test("publish: the failure line never carries the response body, the token or the message text", () => {
+  const out = publishWithSlack({ response: '{"ok":false,"error":"channel_not_found","detail":"SECRET-BODY-DO-NOT-PRINT"}' });
+  assert.deepEqual(failLinesOf(out), ["Slack post failed: channel_not_found"]);
+  for (const secret of ["SECRET-BODY-DO-NOT-PRINT", "xoxb-secret-token", "PR opened for review", "detail"]) assert.ok(!out.includes(secret), `leaked ${secret}`);
+});
+
+test("publish: an error that is not [a-z_]{1,64}, or a response that is not JSON, prints \"unknown\"", () => {
+  for (const response of ['{"ok":false,"error":"Invalid_Auth"}', '{"ok":false,"error":"a b"}', `{"ok":false,"error":"${"x".repeat(65)}"}`, '{"ok":false,"error":"abc\\n"}',
+    '{"ok":false,"error":{"a":1}}', '{"ok":false}', "<html>502</html>", "", "[]"]) {
+    assert.deepEqual(failLinesOf(publishWithSlack({ response })), ["Slack post failed: unknown"], response);
+  }
+});
+
+test("publish: when curl itself fails it still reports, and a successful post prints nothing", () => {
+  assert.deepEqual(failLinesOf(publishWithSlack({ curlExit: 7 })), ["Slack post failed: curl_failed"]);
+  assert.deepEqual(failLinesOf(publishWithSlack({ response: '{"ok":true,"ts":"1700000000.000100"}' })), []);
+});
