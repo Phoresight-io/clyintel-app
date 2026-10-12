@@ -9,8 +9,9 @@
 // (see role-guard.test.mjs). The read-scope check (path-scope.mjs) looks at the filesystem to
 // resolve symlinks, but never writes or executes anything.
 
-import { posix } from "node:path";
-import { SCOPED_TOOLS, scopeViolation } from "./path-scope.mjs";
+import { realpathSync } from "node:fs";
+import { join, posix } from "node:path";
+import { SCOPED_TOOLS, scopeViolation, realPathOf } from "./path-scope.mjs";
 import { NOTES_DIR } from "./factory-notes.mjs";
 
 export const SUBAGENTS = ["planner", "coder", "tester", "reviewer"];
@@ -35,11 +36,25 @@ const ROLE_TOOLS = {
   planner: new Set(["Read", "Write", "Grep", "Glob", "WebSearch", HANDBACK_TOOL]),
   coder: new Set(["Read", "Write", "Edit", "Grep", "Glob", "Bash", HANDBACK_TOOL]),
   tester: new Set(["Read", "Write", "Edit", "Grep", "Glob", "Bash", HANDBACK_TOOL]),
-  reviewer: new Set(["Read", "Grep", "Glob", "Bash", HANDBACK_TOOL]),
+  reviewer: new Set(["Read", "Write", "Grep", "Glob", "Bash", HANDBACK_TOOL]),
 };
 
 // Planner may write exactly its own artifact.
 const PLANNER_FILE = /^\.factory\/plan\.md$/;
+
+// The reviewer may write exactly one file, its review (note and verdict, read by the orchestrator).
+// The path string must match AND the resolved real path must equal <repo>/.factory/review.md, so a
+// symlinked .factory, or a review.md that is a link, does not pass on its name alone.
+const REVIEWER_FILE = /^\.factory\/review\.md$/;
+export function isReviewFile(filePath, repoRoot) {
+  const rel = repoRelative(filePath, repoRoot);
+  if (rel == null || !REVIEWER_FILE.test(rel)) return false;
+  try {
+    return realPathOf(filePath, repoRoot) === join(realpathSync(repoRoot), ".factory", "review.md");
+  } catch {
+    return false; // fail closed: an unresolvable root or path is not the review file
+  }
+}
 
 // Tester may only create/edit test files and its own report. A directory merely
 // NAMED test/tests is not enough (app/api/test/route.ts is a live route, and
@@ -299,6 +314,13 @@ export function decide(input, repoRoot) {
     if (rel == null || !PLANNER_FILE.test(rel)) {
       return deny(`planner may only write .factory/plan.md. Refusing Write on "${args.file_path}".`);
     }
+  }
+
+  if (agentType === "reviewer" && tool === "Write" && !isReviewFile(args.file_path, repoRoot)) {
+    return deny(
+      `reviewer may only write .factory/review.md (its review, ending with the verdict line), and only as the real file ` +
+        `(not through a link). Refusing Write on "${args.file_path}".`
+    );
   }
 
   if (agentType === "tester" && (tool === "Write" || tool === "Edit")) {
