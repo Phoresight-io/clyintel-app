@@ -13,7 +13,11 @@ import { reviewVerdict } from "./run-log.mjs";
 // same mount, so the notify-agents job re-validates everything (agent names, verdict enum, size,
 // text length, escaping) and never believes this file.
 //
-// Pure stdlib. No function here throws into the pipeline.
+// Pure stdlib. Every function here is non-throwing EXCEPT resetReviewSlot, which throws on purpose: an
+// unwritable or unremovable .factory just before the review is treated as tampering (a coder can write
+// almost anywhere), so the run aborts, fail closed, rather than reviewing against a slot it cannot clear.
+// The orchestrator turns that throw into the fixed REVIEW_SLOT_FAILED text below; nothing from the
+// filesystem error reaches the failure message.
 
 export const NOTES_DIR = "/notes";
 export const NOTES_FILE = "factory-notes.json";
@@ -65,6 +69,7 @@ export const createNotes = () => ({ notes: [], verdict: null });
 // when the file is missing or unusable.
 export const REVIEW_FILE = "review.md";
 export const MAX_REVIEW_BYTES = 64 * 1024;
+export const REVIEW_SLOT_FAILED = "review slot reset failed: .factory not writable (possible tampering)";
 
 const isRealDir = (p) => {
   try {
@@ -80,6 +85,7 @@ const isRealDir = (p) => {
 //   - .factory that is not a real directory (a symlink, a file) is removed and recreated as a directory;
 //   - a review.md that is a file, a link or a directory is removed, so only a file the reviewer writes
 //     now can be read, never a planted "VERDICT: APPROVE".
+// THROWS when it cannot do either (EACCES, EBUSY, ENOTDIR, ...): see the header. Fail closed, by design.
 // A real .factory is kept as is (it holds the plan, the build notes and the test report).
 export function resetReviewSlot(dir = ".factory") {
   const done = { dirReplaced: false, fileRemoved: false };

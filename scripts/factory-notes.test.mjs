@@ -11,7 +11,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   NOTES_DIR, NOTES_FILE, MAX_NOTE_CHARS, AGENTS, extractNote, needsYou, parseVerdict, createNotes, setNote, setReview, writeNotes,
-  REVIEW_FILE, MAX_REVIEW_BYTES, reviewSources, setReviewSources, readReviewFile, resetReviewSlot,
+  REVIEW_FILE, MAX_REVIEW_BYTES, REVIEW_SLOT_FAILED, reviewSources, setReviewSources, readReviewFile, resetReviewSlot,
 } from "./factory-notes.mjs";
 import { decide, touchesNotes } from "./role-guard.mjs";
 
@@ -420,4 +420,44 @@ test("reviewer prompt: Write is listed, the one file is named, and the file ends
   for (const [name, tools] of [["planner", "Read, Write, Grep, Glob, WebSearch"], ["coder", "Read, Write, Edit, Grep, Glob, Bash"], ["tester", "Read, Write, Edit, Grep, Glob, Bash"]]) {
     assert.match(readFileSync(join(REPO, `.claude/agents/${name}.md`), "utf8"), new RegExp(`^tools: ${tools}$`, "m"), name);
   }
+});
+
+// ---- an unwritable .factory before the review aborts the run (fail closed)
+
+test("resetReviewSlot: throws when .factory cannot be cleared (it is not swallowed)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "slot-"));
+  try {
+    writeFileSync(join(dir, "blocker"), "x"); // a FILE where the parent directory should be: ENOTDIR, even as root
+    assert.throws(() => resetReviewSlot(join(dir, "blocker", ".factory")));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("REVIEW_SLOT_FAILED is fixed text: names the cause, carries no path or errno text", () => {
+  assert.equal(REVIEW_SLOT_FAILED, "review slot reset failed: .factory not writable (possible tampering)");
+  assert.doesNotMatch(REVIEW_SLOT_FAILED, /E[A-Z]{3,}|\/|ENOTDIR|EACCES/);
+});
+
+test("orchestrator: a failed slot reset aborts before the reviewer runs, with the fixed error, notes saved, exit 1 so no PR", () => {
+  const src = readFileSync(join(HERE, "d3-orchestrator.mjs"), "utf8").replace(/^\s*\/\/.*$/gm, "");
+  const tryAt = src.indexOf("slot = resetReviewSlot();");
+  const throwAt = src.indexOf("throw new PipelineError(REVIEW_SLOT_FAILED)");
+  const reviewRun = src.indexOf("Use the reviewer agent");
+  assert.ok(tryAt > 0 && tryAt < throwAt && throwAt < reviewRun, "reset in try -> fixed throw -> only then the reviewer run");
+  assert.match(src, /try \{\n    slot = resetReviewSlot\(\);\n  \} catch \(err\) \{/);
+  // the thrown text is the constant, never err.message / String(err)
+  const handler = src.slice(tryAt, reviewRun);
+  assert.doesNotMatch(handler, /err\.message|String\(err\)|\$\{err/);
+  // the failure path: the PipelineError message becomes the reason; notes are saved first; exit 1 skips commit and PR
+  assert.match(src, /catch \(err\) \{\n  console\.error\(err\);\n  saveNotes\(\);\n  const reason = err instanceof PipelineError \? err\.message/);
+  assert.match(src, /process\.exit\(1\)/);
+  // notes of the earlier stages were already saved before the slot is touched
+  assert.ok(src.slice(0, tryAt).split("saveNotes();").length - 1 >= 2, "saveNotes ran after the first run and the fix loop");
+});
+
+test("factory-notes.mjs header: names resetReviewSlot as the one function that throws", () => {
+  const head = readFileSync(join(HERE, "factory-notes.mjs"), "utf8").slice(0, 2200);
+  assert.match(head, /non-throwing EXCEPT resetReviewSlot/);
+  assert.doesNotMatch(head, /No function here throws/);
 });

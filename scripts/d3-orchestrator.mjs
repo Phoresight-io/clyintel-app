@@ -10,7 +10,7 @@ import { makeGuardHook } from "./role-guard.mjs";
 import { baseCommit, snapshot, tamperedPaths } from "./instruction-guard.mjs";
 import { logLine, createTracer, seconds, money } from "./factory-log.mjs";
 import { fixStep } from "./fix-loop.mjs";
-import { createNotes, setNote, setReviewSources, reviewSources, readReviewFile, resetReviewSlot, writeNotes } from "./factory-notes.mjs";
+import { createNotes, setNote, setReviewSources, reviewSources, readReviewFile, resetReviewSlot, REVIEW_SLOT_FAILED, writeNotes } from "./factory-notes.mjs";
 
 // ISOLATION. This process and every agent session it starts run inside the agent container
 // (d3-factory.yml, "Run pipeline in the agent container"): only the repo is mounted, and the only
@@ -267,7 +267,16 @@ Report the tester's PASS/FAIL result. Do not review or deploy yet.`);
   // Review last — reads the diff AND the test report. The reviewer writes its review to
   // .factory/review.md; nothing an earlier agent left there may count (a coder can write almost
   // anywhere), so the slot is cleared first: a symlinked .factory is replaced, a planted file removed.
-  const slot = resetReviewSlot();
+  // If the slot cannot be cleared (an unwritable .factory) the run aborts here, before the reviewer
+  // runs: fail closed, treated as tampering. The message is fixed text; the filesystem error stays in
+  // the container's log only. Notes from the earlier stages are saved by the failure path below.
+  let slot;
+  try {
+    slot = resetReviewSlot();
+  } catch (err) {
+    console.error("review slot reset failed:", err?.code ?? "unknown");
+    throw new PipelineError(REVIEW_SLOT_FAILED);
+  }
   if (slot.dirReplaced || slot.fileRemoved) {
     log(`review slot cleared before the review (.factory replaced: ${slot.dirReplaced}, stale review.md removed: ${slot.fileRemoved})`);
   }
