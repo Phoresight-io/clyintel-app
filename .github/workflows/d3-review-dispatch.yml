@@ -136,6 +136,7 @@ jobs:
           REFUSE: ${{ steps.gate.outputs.refuse }}
           GATE_OK: ${{ steps.gate.outputs.ok }}
           REVIEW_STATUS: ${{ job.status }}
+          THREAD_TS: ${{ github.event.client_payload.thread_ts }} # set by the emoji path; empty for the slash command
         run: |
           if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_CHANNEL" ]; then
             echo "No Slack token/channel configured; nothing to notify."
@@ -157,6 +158,10 @@ jobs:
           # Tag the requester only if the id looks like one Slack issues.
           TAG=""
           if [[ "$SLACK_USER" =~ ^[UW][A-Z0-9]{2,}$ ]]; then TAG="<@$SLACK_USER> "; fi
+          # Reply in the originating thread (emoji path) only when the ts looks like one Slack issues;
+          # the slash command sends none, so this stays empty and the post goes to the channel as before.
+          THREAD=""
+          if [[ "$THREAD_TS" =~ ^[0-9]{1,12}\.[0-9]{1,8}$ ]]; then THREAD="$THREAD_TS"; fi
           if [ "$REFUSE" = "fork" ]; then
             MSG="⛔ /d3-review PR #$PR refused: the PR head is a fork / another repo, so it is not reviewed with secrets in scope."
           elif [ "$REFUSE" = "state" ]; then
@@ -166,8 +171,8 @@ jobs:
           else
             MSG="🔍 /d3-review PR #$PR finished ($REVIEW_STATUS): $PR_URL (see the PR comments for the verdict)."
           fi
-          RESP="$(jq -n --arg c "$SLACK_CHANNEL" --arg t "${TAG}${MSG}" \
-            '{channel:$c, text:$t, unfurl_links:false, unfurl_media:false}' \
+          RESP="$(jq -n --arg c "$SLACK_CHANNEL" --arg t "${TAG}${MSG}" --arg ts "$THREAD" \
+            '{channel:$c, text:$t, unfurl_links:false, unfurl_media:false} + (if $ts != "" then {thread_ts:$ts} else {} end)' \
             | curl -s -m 15 -X POST https://slack.com/api/chat.postMessage \
                 -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
                 -H "Content-Type: application/json; charset=utf-8" \
