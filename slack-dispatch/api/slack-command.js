@@ -98,6 +98,7 @@ export default async function handler(req, res) {
   const brief = (params.get("text") || "").trim(); // e.g. "add invoice reminder"
   const channel = params.get("channel_id");
   const user = params.get("user_id");
+  const command = (params.get("command") || "").trim(); // which slash command: "/d3" or "/d3-review"
 
   // Authorization comes before anything else happens: only allowlisted users can
   // start a run (a run executes agents with shell + repo write access in CI).
@@ -105,6 +106,46 @@ export default async function handler(req, res) {
     console.warn("d3: rejected /d3 from non-allowlisted user", user);
     return ephemeral(res, "⛔ You're not authorized to run /d3.");
   }
+
+  // One endpoint serves both slash commands. The signature check and the allowlist above gate
+  // BOTH (the allowlist is the per-run approval); only the command-specific handling differs.
+  // `/d3-review <PR number>`: fire an on-demand PR review of an existing PR.
+  if (command === "/d3-review") {
+    const pr = brief; // the command text, already trimmed; must be a bare PR number
+    if (!/^\d+$/.test(pr)) return ephemeral(res, "Usage: `/d3-review <PR number>`");
+
+    if (!process.env.GH_DISPATCH_PAT) {
+      console.error("d3: GH_DISPATCH_PAT is not set");
+      return ephemeral(res, "⚠️ D3 isn't fully configured (dispatch token missing). Ask an admin.");
+    }
+
+    try {
+      const r = await fetch("https://api.github.com/repos/Phoresight-io/clyintel-app/dispatches", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.GH_DISPATCH_PAT}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+        body: JSON.stringify({
+          event_type: "d3-review",
+          client_payload: { pr, channel, user },
+        }),
+        signal: AbortSignal.timeout(2500),
+      });
+      if (!r.ok) {
+        console.error("d3: review dispatch rejected by GitHub", r.status);
+        return ephemeral(res, `⚠️ Couldn't start the review (GitHub returned ${r.status}). Check the dispatch token.`);
+      }
+    } catch (err) {
+      console.error("d3: review dispatch failed", err);
+      return ephemeral(res, "⚠️ Couldn't reach GitHub to start the review. Try again.");
+    }
+
+    return ephemeral(res, `🔍 D3 review starting for PR #${pr}. The verdict will be posted in the channel.`);
+  }
+
+  // The existing `/d3 <what to build>` path.
   if (!brief) return ephemeral(res, "Usage: `/d3 <what to build>`");
   if (brief.length > MAX_BRIEF_CHARS) return ephemeral(res, `Brief is too long (max ${MAX_BRIEF_CHARS} characters).`);
 
