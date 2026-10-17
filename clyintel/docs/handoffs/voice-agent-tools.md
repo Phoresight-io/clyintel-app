@@ -176,4 +176,4 @@ The catch can't tell these apart. A `communications` row with status `failed` al
 
 - **`clients.opt_out_email` on the default cadence path:** done in "fix(outreach): apply client-level email opt-out on the default cadence path". `sendEmailStep`'s default port now reads the flag on every send, so an opted-out client gets `channel_denied`.
 - A call-specific email template. Today's is the system-default dunning template, and the send counts toward the cadence cap.
-- `/api/voice/call` takes `subscriberId` from the body (the pre-Beta gap noted in #140).
+- `/api/voice/call` no longer takes `subscriberId` from the body: the subscriber is the session user, and the client and invoice must be theirs (404 otherwise). Fixed in the tenant-check PR; the gap noted in #140 is closed for this route. `/api/outreach/run` still takes `subscriberId` from its body (it is secret-gated, not session-gated).

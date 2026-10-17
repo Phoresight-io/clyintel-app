@@ -1,18 +1,36 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Route: server-built variables are merged under body.variables (caller wins),
-// and a build failure never blocks the call.
+// Route: session auth + tenant ownership gate every call; server-built variables
+// are merged under body.variables (caller wins), and a build failure never blocks
+// the call.
 const inserts: Array<Record<string, unknown>> = [];
+const getUser = vi.fn();
+vi.mock("@/lib/supabase-server", () => ({
+  createSupabaseServer: async () => ({ auth: { getUser } }),
+}));
+// Ownership lookups: which tables return a row, and the filters they were given.
+const owns = { clients: true, invoices: true };
+const lookups: Array<{ table: string; filters: Array<[string, unknown]> }> = [];
 vi.mock("@/lib/supabase", () => ({
   getSupabase: () => ({
-    from: () => {
+    from: (table: string) => {
+      const filters: Array<[string, unknown]> = [];
       const b: Record<string, unknown> = {};
-      for (const m of ["select", "update", "eq"]) b[m] = () => b;
+      for (const m of ["select", "update"]) b[m] = () => b;
+      b.eq = (col: string, val: unknown) => {
+        filters.push([col, val]);
+        return b;
+      };
       b.insert = (row: Record<string, unknown>) => {
         inserts.push(row);
         return b;
       };
       b.single = async () => ({ data: { id: "vc-1" }, error: null });
+      b.maybeSingle = async () => {
+        lookups.push({ table, filters });
+        const ok = table === "clients" ? owns.clients : table === "invoices" ? owns.invoices : false;
+        return { data: ok ? { id: "row" } : null, error: null };
+      };
       b.then = (resolve: (v: unknown) => void) => resolve({ data: null, error: null });
       return b;
     },
@@ -35,13 +53,19 @@ const fetchMock = vi.fn();
 function req(body: Record<string, unknown>) {
   return { json: async () => body } as never;
 }
-const baseBody = { subscriberId: "sub", clientId: "cl", invoiceId: "inv", toNumber: "+15551230000" };
+// The session user is "sub"; subscriberId is no longer part of the request.
+const baseBody = { clientId: "cl", invoiceId: "inv", toNumber: "+15551230000" };
 const sentVariables = () => JSON.parse(fetchMock.mock.calls[0][1].body).assistantOverrides.variableValues;
 
 beforeEach(() => {
   build.mockReset();
   stamp.mockClear();
   inserts.length = 0;
+  lookups.length = 0;
+  owns.clients = true;
+  owns.invoices = true;
+  getUser.mockReset();
+  getUser.mockResolvedValue({ data: { user: { id: "sub" } }, error: null });
   fetchMock.mockReset();
   fetchMock.mockResolvedValue({ ok: true, status: 201, json: async () => ({ id: "vapi-1" }) });
   vi.stubGlobal("fetch", fetchMock);
@@ -81,7 +105,7 @@ describe("voice/call — server-built variables", () => {
   });
 
   it("missing ids → 400, no build, no call (validation unchanged)", async () => {
-    const res = await POST(req({ subscriberId: "sub" }));
+    const res = await POST(req({}));
     expect(res.status).toBe(400);
     expect(build).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
@@ -102,6 +126,71 @@ describe("voice/call — server-built variables", () => {
     const res = await POST(req(baseBody));
     expect(res.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("voice/call — session auth and tenant ownership", () => {
+  const nothingHappened = () => {
+    expect(inserts).toHaveLength(0);
+    expect(build).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(stamp).not.toHaveBeenCalled();
+  };
+
+  it("no session → 401; no lookup, row, variables or call", async () => {
+    getUser.mockResolvedValue({ data: { user: null }, error: null });
+    const res = await POST(req(baseBody));
+    expect(res.status).toBe(401);
+    expect(lookups).toHaveLength(0);
+    nothingHappened();
+  });
+
+  it("auth error → 401 as well", async () => {
+    getUser.mockResolvedValue({ data: { user: null }, error: { message: "jwt expired" } });
+    expect((await POST(req(baseBody))).status).toBe(401);
+    nothingHappened();
+  });
+
+  it("a subscriberId in the body is ignored: the row, the lookups and the variables use the session user", async () => {
+    build.mockResolvedValue({});
+    const res = await POST(req({ ...baseBody, subscriberId: "victim-tenant" }));
+    expect(res.status).toBe(200);
+    expect(inserts[0].subscriber_id).toBe("sub");
+    expect(build).toHaveBeenCalledWith(expect.anything(), { subscriberId: "sub", clientId: "cl", invoiceId: "inv" });
+    for (const l of lookups) expect(l.filters).toContainEqual(["subscriber_id", "sub"]);
+    expect(JSON.stringify(inserts)).not.toContain("victim-tenant");
+  });
+
+  it("looks up the client and the invoice, each scoped to the session subscriber (invoice also to the client)", async () => {
+    build.mockResolvedValue({});
+    await POST(req(baseBody));
+    const client = lookups.find((l) => l.table === "clients");
+    const invoice = lookups.find((l) => l.table === "invoices");
+    expect(client?.filters).toEqual([["id", "cl"], ["subscriber_id", "sub"]]);
+    expect(invoice?.filters).toEqual([["id", "inv"], ["client_id", "cl"], ["subscriber_id", "sub"]]);
+  });
+
+  it("client not owned by the session subscriber → 404 'Not found'; no row, variables or call", async () => {
+    owns.clients = false;
+    const res = await POST(req(baseBody));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Not found" });
+    nothingHappened();
+  });
+
+  it("invoice not owned, or not this client's → the same 404; no row, variables or call", async () => {
+    owns.invoices = false;
+    const res = await POST(req(baseBody));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Not found" });
+    nothingHappened();
+  });
+
+  it("test mode is gated the same way (test: true cannot skip ownership)", async () => {
+    vi.stubEnv("VAPI_ASSISTANT_ID_TEST", "t");
+    owns.clients = false;
+    expect((await POST(req({ ...baseBody, test: true }))).status).toBe(404);
+    nothingHappened();
   });
 });
 

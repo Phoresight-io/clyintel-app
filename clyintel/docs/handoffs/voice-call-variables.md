@@ -11,7 +11,7 @@ token names aloud and made details up ("Boston Tech Week").
 
 The route now **builds the variables server-side from the DB by id**
 (`lib/voice/buildCallVariables.ts`). A caller that sends only
-`subscriberId` / `clientId` / `invoiceId` / `toNumber` gets a grounded agent.
+`clientId` / `invoiceId` / `toNumber` gets a grounded agent (the subscriber is the session user).
 
 - `body.variables`, when sent, is merged **over** the built set. An explicit
   caller value wins, so tests and manual calls can still force values.

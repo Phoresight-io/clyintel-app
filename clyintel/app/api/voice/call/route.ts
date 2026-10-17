@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
+import { createSupabaseServer } from "@/lib/supabase-server";
 import { serverEnv } from "@/lib/config/env.server";
 import type { Database } from "@/types/supabase";
 import { buildCallVariables } from "@/lib/voice/buildCallVariables";
@@ -19,6 +20,14 @@ import { markOutreachStarted } from "@/lib/outreach/markOutreachStarted";
 // (explicit caller override wins). A build failure never blocks the call: it's
 // logged and the call goes out with body.variables alone.
 //
+// Auth and tenancy: the caller is the logged-in subscriber (session user via
+// createSupabaseServer, same as app/api/clients/[id]/score; 401 if none). The
+// subscriber is ALWAYS the session user: a subscriberId in the body is ignored,
+// so one tenant can never place a call as another. The client and invoice must
+// both belong to that subscriber (service-role ownership SELECT, 404 on any miss
+// so a foreign id is indistinguishable from a missing one) before any row is
+// written, any variables are built, or Vapi is called.
+//
 // Requires the Node.js runtime (service-role key never reaches the edge). POST,
 // never cached.
 
@@ -28,7 +37,7 @@ export const dynamic = "force-dynamic";
 type VoiceCallUpdate = Database["public"]["Tables"]["voice_calls"]["Update"];
 
 interface CallRequestBody {
-  subscriberId?: unknown;
+  // Not read: the subscriber comes from the session (see the header comment).
   clientId?: unknown;
   invoiceId?: unknown;
   toNumber?: unknown;
@@ -53,6 +62,17 @@ function vapiErrorReason(body: VapiCallResponse | null, status: number): string 
 }
 
 export async function POST(req: NextRequest) {
+  // Session first: no cookie, no work. The subscriber id is the auth user id.
+  const authClient = await createSupabaseServer();
+  const {
+    data: { user },
+    error: authError,
+  } = await authClient.auth.getUser();
+  if (authError || !user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+  const subscriberId = user.id;
+
   // Provider config is required — never place (or record) a call we can't
   // actually dial. Missing config is a deploy error, surfaced as 500. The
   // assistant id is resolved per-request below (production vs test).
@@ -70,7 +90,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const subscriberId = typeof body.subscriberId === "string" ? body.subscriberId : null;
   const clientId = typeof body.clientId === "string" ? body.clientId : null;
   const toNumber = typeof body.toNumber === "string" ? body.toNumber : null;
   const invoiceId = typeof body.invoiceId === "string" ? body.invoiceId : null;
@@ -79,9 +98,9 @@ export async function POST(req: NextRequest) {
       ? (body.variables as Record<string, unknown>)
       : {};
 
-  if (!subscriberId || !clientId || !toNumber) {
+  if (!clientId || !toNumber) {
     return NextResponse.json(
-      { error: "subscriberId, clientId and toNumber are required" },
+      { error: "clientId and toNumber are required" },
       { status: 400 },
     );
   }
@@ -112,6 +131,30 @@ export async function POST(req: NextRequest) {
   }
 
   const service = getSupabase();
+
+  // 0. Ownership: the client and the invoice must both be this subscriber's, and
+  //    the invoice must belong to that client. Any miss (or a read error) is a
+  //    404 with the same body, and nothing below runs: no row, no variables, no
+  //    call. The ids come from the request, so they are never trusted on their own.
+  const { data: ownedClient, error: clientError } = await service
+    .from("clients")
+    .select("id")
+    .eq("id", clientId)
+    .eq("subscriber_id", subscriberId)
+    .maybeSingle();
+  const { data: ownedInvoice, error: invoiceError } = await service
+    .from("invoices")
+    .select("id")
+    .eq("id", invoiceId)
+    .eq("client_id", clientId)
+    .eq("subscriber_id", subscriberId)
+    .maybeSingle();
+  if (clientError || invoiceError) {
+    console.error("voice/call: ownership lookup failed", clientError ?? invoiceError);
+  }
+  if (!ownedClient || !ownedInvoice) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
 
   // 1. Persist the queued row FIRST — this is the record of intent.
   const { data: inserted, error: insertError } = await service
