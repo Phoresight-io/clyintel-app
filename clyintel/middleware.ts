@@ -13,8 +13,10 @@ const PUBLIC_PATHS = ['/login', '/auth/callback', '/pay'];
 // session-auth redirect entirely — otherwise the app's /login page swallows the
 // request (returning 200) and the handler never runs.
 //
-// Deliberately NOT included: /api/voice/call — it has no self-authentication and
-// triggers outbound calls, so it stays behind session auth (app-internal only).
+// Deliberately NOT included: /api/voice/call — it triggers outbound calls and has
+// no webhook secret. It authenticates the SESSION itself (401 without one) and
+// scopes the call to that subscriber's own client and invoice, but it must still
+// stay behind the session redirect here (app-internal only). Do not exempt it.
 //
 // /api/voice/tools is Vapi's in-call tool endpoint: same x-vapi-secret check as
 // /api/voice/webhook, inside the route.
@@ -37,8 +39,9 @@ const WEBHOOK_PATHS = [
 // without the correct Authorization header). Same rationale as WEBHOOK_PATHS; kept
 // as a separate list because these are crons, not inbound webhooks.
 //
-// NOT included: /api/voice/call — it has no self-authentication, so it stays behind
-// the session redirect (app-internal only), same as its exclusion from WEBHOOK_PATHS.
+// NOT included: /api/voice/call — it checks the session itself but is not a cron or
+// webhook (no bearer or signature secret), so it stays behind the session redirect
+// (app-internal only), same as its exclusion from WEBHOOK_PATHS.
 //
 // /api/outreach/run (machine clients: Postman/curl/pg_net) self-authenticates via
 // OUTREACH_RUN_SECRET (Bearer, fail-closed: 500 unset / 401 wrong, before any parsing

@@ -121,4 +121,4 @@ There is no `env-matrix.md` in the repo, so the rows are recorded here:
 - 12 `voice_calls` rows from Sep 12 are stuck at `ringing`, with no way to reconcile them.
 - Vapi's call summary is empty on every call.
 - A handoff email and a same-day cadence email can both reach the same client (Agent 2 territory).
-- `/api/voice/call` requires a login but takes `subscriberId` from the request body, so any logged-in user could act for another subscriber. Same pre-Beta gap as the outreach run endpoint.
+- `/api/voice/call` requires a login and now uses the session user as the subscriber (a `subscriberId` in the body is ignored), and 404s unless the client and invoice belong to that subscriber. The outreach run endpoint still has the pre-Beta gap.
