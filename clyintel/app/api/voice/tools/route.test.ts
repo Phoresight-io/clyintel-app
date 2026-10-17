@@ -183,6 +183,30 @@ describe("voice/tools — batching, unknown tools, robustness", () => {
     expect(results[1].result).toBeDefined();
   });
 
+  it.each(["get_account_dev", "get_account_prod"])("%s runs get_account and echoes the registered name", async (name) => {
+    const res = await POST(req(toolCalls({ id: "t1", name })));
+    const { results } = await body(res);
+    expect(results[0].name).toBe(name);
+    expect(JSON.parse(results[0].result).client_name).toBe("Acme");
+  });
+
+  it.each(["send_payment_email_dev", "send_payment_email_prod"])("%s runs send_payment_email", async (name) => {
+    sendPaymentEmail.mockResolvedValue({ action: "off" });
+    const res = await POST(req(toolCalls({ id: "t1", name, arguments: { contact_id: "c-dun" } })));
+    expect(sendPaymentEmail).toHaveBeenCalledTimes(1);
+    expect(sendPaymentEmail.mock.calls[0][0]).toMatchObject({ voiceCallId: "vc-1", contactId: "c-dun" });
+    expect((await body(res)).results[0].name).toBe(name);
+  });
+
+  it.each(["get_account_staging", "get_account_dev_prod", "get_account_", "transfer_funds_dev", "send_payment_email_test"])(
+    "%s stays an unknown tool and runs nothing",
+    async (name) => {
+      const res = await POST(req(toolCalls({ id: "x", name })));
+      expect((await body(res)).results[0]).toEqual({ toolCallId: "x", name, error: `Unknown tool "${name}".` });
+      expect(sendPaymentEmail).not.toHaveBeenCalled();
+    },
+  );
+
   it("a throwing tool → per-item error, 200", async () => {
     sendPaymentEmail.mockRejectedValue(new Error("boom"));
     const res = await POST(req(toolCalls({ id: "t", name: "send_payment_email" })));

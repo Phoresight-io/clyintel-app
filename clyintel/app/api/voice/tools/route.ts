@@ -28,6 +28,9 @@ import {
 //                         contact_id → default. One email per call, DB-resolved
 //                         link, opt-outs honored (lib/voice/sendPaymentEmailForCall).
 //
+// Each tool also answers to a _dev / _prod suffixed name (get_account_dev, ...)
+// so the per-environment copies in Vapi are distinguishable. See canonicalToolName.
+//
 // Auth mirrors app/api/voice/webhook: x-vapi-secret must equal VAPI_WEBHOOK_SECRET
 // (set it as a header on each tool's server config in Vapi). 500 if unset, 401 on
 // mismatch. Past auth it ALWAYS returns 200 with a per-item result or error, and
@@ -119,6 +122,18 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ results }, { status: 200 });
 }
 
+// The Vapi tools are registered once per environment, so the Test and Prod
+// copies can be told apart in the Vapi dashboard: get_account_dev /
+// get_account_prod (and the same for send_payment_email). The bare name keeps
+// working. An explicit allowlist, not a regex: anything else stays unknown.
+const TOOL_BASE_NAMES = ["get_account", "send_payment_email"] as const;
+function canonicalToolName(name: string): string {
+  for (const base of TOOL_BASE_NAMES) {
+    if (name === base || name === `${base}_dev` || name === `${base}_prod`) return base;
+  }
+  return name;
+}
+
 async function runTool(
   service: ReturnType<typeof getSupabase>,
   name: string,
@@ -126,13 +141,15 @@ async function runTool(
   voiceCallId: string | null,
 ): Promise<{ result: string } | { error: string }> {
   try {
-    if (name === "get_account") {
+    const tool = canonicalToolName(name);
+
+    if (tool === "get_account") {
       if (!voiceCallId) return { error: NO_CALL };
       const view = await loadAccountForCall(service, voiceCallId);
       return view ? { result: JSON.stringify(view) } : { error: NO_CALL };
     }
 
-    if (name === "send_payment_email") {
+    if (tool === "send_payment_email") {
       if (!voiceCallId) return { error: NO_CALL };
       const args = parseArguments(rawArgs);
       const outcome = await sendPaymentEmailForCall(
