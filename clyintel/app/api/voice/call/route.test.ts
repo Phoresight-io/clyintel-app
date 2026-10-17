@@ -9,7 +9,7 @@ vi.mock("@/lib/supabase-server", () => ({
   createSupabaseServer: async () => ({ auth: { getUser } }),
 }));
 // Ownership lookups: which tables return a row, and the filters they were given.
-const owns = { clients: true, invoices: true };
+const owns = { clients: true, invoices: true, failClients: false, failInvoices: false };
 const lookups: Array<{ table: string; filters: Array<[string, unknown]> }> = [];
 vi.mock("@/lib/supabase", () => ({
   getSupabase: () => ({
@@ -29,6 +29,8 @@ vi.mock("@/lib/supabase", () => ({
       b.maybeSingle = async () => {
         lookups.push({ table, filters });
         const ok = table === "clients" ? owns.clients : table === "invoices" ? owns.invoices : false;
+        const fail = table === "clients" ? owns.failClients : table === "invoices" ? owns.failInvoices : false;
+        if (fail) return { data: null, error: { message: "db down" } };
         return { data: ok ? { id: "row" } : null, error: null };
       };
       b.then = (resolve: (v: unknown) => void) => resolve({ data: null, error: null });
@@ -64,6 +66,8 @@ beforeEach(() => {
   lookups.length = 0;
   owns.clients = true;
   owns.invoices = true;
+  owns.failClients = false;
+  owns.failInvoices = false;
   getUser.mockReset();
   getUser.mockResolvedValue({ data: { user: { id: "sub" } }, error: null });
   fetchMock.mockReset();
@@ -185,6 +189,17 @@ describe("voice/call — session auth and tenant ownership", () => {
     expect(await res.json()).toEqual({ error: "Not found" });
     nothingHappened();
   });
+
+  it.each([["client", "failClients"], ["invoice", "failInvoices"]] as const)(
+    "a failed %s lookup → 500, not 404; no row, variables or call",
+    async (_name, flag) => {
+      owns[flag] = true;
+      const res = await POST(req(baseBody));
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({ error: "Failed to verify ownership" });
+      nothingHappened();
+    },
+  );
 
   it("test mode is gated the same way (test: true cannot skip ownership)", async () => {
     vi.stubEnv("VAPI_ASSISTANT_ID_TEST", "t");
