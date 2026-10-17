@@ -251,7 +251,7 @@ export function toToolResponse(r: PaymentEmailResult): { result: string } | { er
         case "invalid_email":
           return { error: "That doesn't look like a valid email address. Ask the caller to spell it again, read it back, then send." };
         case "contact_not_found":
-          return { error: "That contact isn't on this account. Use a contact_id from get_account, or ask the caller for an address." };
+          return { error: "That contact isn't on this account. Use a contact_id from the account lookup, or ask the caller for an address." };
         case "no_email_on_contact":
           return { error: "That contact has no email on file. Ask the caller for an address, read it back, then send." };
         case "no_default_contact":
@@ -279,7 +279,7 @@ export function toToolResponse(r: PaymentEmailResult): { result: string } | { er
     case "released":
       if (r.reason === "channel_denied") return { error: "That address is opted out of email. Is there another address?" };
       if (r.reason === "recipient_not_found") {
-        return { error: "That contact isn't on this account. Use a contact_id from get_account, or ask the caller for an address." };
+        return { error: "That contact isn't on this account. Use a contact_id from the account lookup, or ask the caller for an address." };
       }
       if (r.reason === "no_primary_contact") {
         return { error: "There's no email on file for this account. Ask the caller for an address, read it back, then send." };
